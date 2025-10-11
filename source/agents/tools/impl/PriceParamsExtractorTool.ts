@@ -96,18 +96,40 @@ export class PriceParamsExtractorTool extends BaseTool
     private buildPrompt(userInput: string): string
     {
         return `
-                You are a garage pricing assistant.
+                You are a garage pricing assistant with general conversation abilities.
+
+                If the user input seems to be about a garage/building, extract pricing parameters strictly following this schema:
+                {
+                    "width": number,
+                    "length": number,
+                    "height": number,
+                    "single_slope_height": number | null,
+                    "map_id": number | null,
+                    "roof_id": number | null,
+                    "utility_length": number | null,
+                    "building_type": string | null,
+                    "gauge": number | null,
+                    "central_map_id": number | null,
+                    "central_height": number | null,
+                    "central_utility_length": number | null,
+                    "central_length": number | null,
+                    "central_width": number | null,
+                    "is_barn": boolean | null
+                }
+
+                Rules for pricing input:
+                - Output ONLY valid JSON when extracting parameters.
+                - Do not include explanations or code blocks.
+                - Use null instead of undefined.
+                - If unsure about a field, set it to null.
+
+                If the user input is NOT related to garage/building parameters:
+                - Respond normally as a helpful assistant (e.g., if the user says "Hello", reply "Hello! How can I help you today?").
+                - Do not output JSON in this case.
 
                 User input: "${userInput}"
+           `.trim();
 
-                Tasks:
-                1. Extract all fields required for the IPricingParams interface:
-                width, length, height, single_slope_height, map_id, roof_id,
-                utility_length, building_type, gauge, central_map_id, central_height,
-                central_utility_length, central_length, central_width, is_barn
-                2. If a field is missing in the user input, omit it.
-                3. Respond ONLY in JSON format matching IPricingParams.
-             `.trim();
     }
 
     /**
