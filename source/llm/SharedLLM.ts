@@ -1,20 +1,23 @@
-import { Ollama } from "ollama";
+import { ChatOllama } from "@langchain/ollama";
+import {HumanMessage} from "@langchain/core/messages";
 
-export const sharedLLM = new Ollama({
-    host: process.env.OLLAMA_API_HOST || "http://ollama:11434",
+export const sharedLLM = new ChatOllama({
+    model: "phi3:mini",
+    temperature: 0.2,
+    streaming: true,
+    baseUrl: "http://ollama:11434",
 });
 
-async function preloadOllamaModel()
+(async () =>
 {
     try
     {
-        await sharedLLM.generate({ model: "llama3.2:latest", prompt: "Hello" });
-        console.log("Ollama model preloaded!");
+        await sharedLLM.invoke([new HumanMessage("I want a garage 10x10x10, single slope roof, utility 5.")]);
+        console.log("✅ Model preloaded");
     }
     catch (err)
     {
-        console.error("Failed to preload Ollama model:", err);
+        console.warn("⚠️ Ollama preload failed (maybe not running yet). The model will load on first request.");
     }
-}
+})();
 
-preloadOllamaModel();
