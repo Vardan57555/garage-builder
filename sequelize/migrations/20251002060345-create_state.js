@@ -1,0 +1,31 @@
+"use strict";
+
+/** @type {import("sequelize-cli").Migration} */
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable("states", {
+      id: {
+        type: Sequelize.INTEGER.UNSIGNED,
+        allowNull: false,
+        primaryKey: true,
+      },
+      name: {
+        type: Sequelize.STRING(30),
+        allowNull: false,
+      },
+      code: {
+        type: Sequelize.CHAR(2),
+        allowNull: false,
+      },
+      region_id: {
+        type: Sequelize.TINYINT,
+        allowNull: false,
+        defaultValue: 0,
+      },
+    });
+  },
+
+  async down(queryInterface, Sequelize) {
+    await queryInterface.dropTable("states");
+  },
+};

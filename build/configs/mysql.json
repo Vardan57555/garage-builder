@@ -1,0 +1,21 @@
+{
+    "host": "mysql",
+    "port": 3306,
+    "username": "root",
+    "password": "password",
+    "database": "garage",
+    "dialect": "mysql",
+    "logging": "false",
+    "pool": {
+        "max": 50,
+        "min": 0,
+        "acquire": 30000,
+        "idle": 10000
+    },
+    "retry": {
+        "max_retry": 5,
+        "match_options": [
+            "ConnectionError"
+        ]
+    }
+}
