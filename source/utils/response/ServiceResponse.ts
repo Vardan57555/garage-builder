@@ -1,7 +1,7 @@
-import { IResponsePages } from "@utils/pagination/app/io/IPagination";
 import { Response } from "express";
 import pino from "pino";
 import { createLogger } from "../logger/Log";
+import {IResponsePages} from "@utils/response/io/IPagination";
 
 const logger: pino.Logger = createLogger(module);
 

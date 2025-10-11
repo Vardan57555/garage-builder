@@ -1,44 +1,62 @@
+version: "3.9"
+
 services:
-  reviro-backend:
+  garage-backend:
     build: .
-    container_name: reviro-backend
+    container_name: garage-backend
     ports:
-      - "5003:5000"
+      - "5003:3000"
     environment:
-      - APP_PORT=5000
-      - APP_HOST=http://localhost:5000
-      - RABBIT_HOST=amqp://guest:guest@rabbitmq:5672/
-      - NODE_ENV=development
-      - TEST_MODE=true
-      - CORS_ENABLED=true
-      - CORS_DOMAINS=http://localhost:5200
-      - ADVERSUS_API_KEY=tes_api_key
-      - FRONTEND_HOST=http://localhost:5200
-      - SELF_ONBOARDING_HOST=http://localhost:5200/self-onboarding/start
-      - REVIRO_HOST=reviro.co
-      - DISABLE_CRON=true
-      - IS_FIRST_RUN=true
-      - REQUEST_BODY_LIMIT=5mb
-      - SESSION_SECRET=secret
-      - JWT_SECRET=jwt_secret
-      - SOCKET_PATH=/socket
-      - POSTGRES_DB_HOST=postgres
-      - POSTGRES_DB_PORT=5432
-      - POSTGRES_DB=reviro
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
-      - GOOGLE_CLIENT_ID=651012654912-pi9kp0a6sbvv5j50bkg81r8hg270ffkh.apps.googleusercontent.com
-      - GOOGLE_CLIENT_SECRET=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
-      - GOOGLE_PLACES_API_KEY=AIzaSyA2YwIRR4VA8M-unzAZhnSFvl8v3ZyTUmQ
-      - GOOGLE_REVIEWS_URL=https://search.google.com/local/writereview
-      - GOOGLE_CALLBACK_URL=http://localhost:5003/api/v1/auth/oauth/callback
+      APP_PORT: 3000
+      APP_HOST: http://localhost:5000
+      NODE_ENV: development
+      OLLAMA_API_HOST: http://ollama:11434
+      TEST_MODE: "true"
+      CORS_ENABLED: "true"
+      CORS_DOMAINS: http://localhost:5200
+      FRONTEND_HOST: http://localhost:5200
+      REQUEST_BODY_LIMIT: 5mb
+      SESSION_SECRET: secret
+      JWT_SECRET: jwt_secret
+      MYSQL_DB_HOST: mysql
+      MYSQL_DB_PORT: 3306
+      MYSQL_DB: garage
+      MYSQL_USER: pricing_engine
+      MYSQL_PASSWORD: secret
     networks:
-      - reviro-network
+      - garage-network
     restart: always
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    networks:
+      - garage-network
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+
+  streamlit-client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: streamlit-client
+    ports:
+      - "8501:8501"
+    environment:
+      BACKEND_URL: http://garage-backend:3000/api/v1/price/get-ai-prices
+    depends_on:
+      - garage-backend
+    networks:
+      - garage-network
+      
+volumes:
+  ollama-data:
 
 networks:
-  reviro-network:
+  garage-network:
     driver: bridge

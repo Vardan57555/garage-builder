@@ -1,62 +1,38 @@
-services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: reviro
-      POSTGRES_DB_HOST: postgres
-      POSTGRES_DB_PORT: 5432
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d reviro"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    networks:
-      - reviro-network
+  services:
+    mysql:
+      image: mysql:8.0
+      container_name: mysql
+      environment:
+        MYSQL_ROOT_PASSWORD: password
+        MYSQL_DATABASE: garage
+        MYSQL_USER: pricing_engine
+        MYSQL_PASSWORD: secret
+      volumes:
+        - mysql-data:/var/lib/mysql
+        - ./pricing_engine_pre.sql:/docker-entrypoint-initdb.d/pricing_engine_pre.sql:ro
+        - ./my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      ports:
+        - "3306:3306"
+      restart: unless-stopped
+      command: >
+        --max_allowed_packet=1G
+        --innodb-buffer-pool-size=2G
+        --innodb-log-file-size=512M
+        --innodb-write-io-threads=8
+        --innodb-read-io-threads=8
+        --innodb-flush-log-at-trx-commit=2
+        --disable-log-bin
+      healthcheck:
+        test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -ppassword"]
+        interval: 10s
+        timeout: 5s
+        retries: 10
+      networks:
+        - garage-network
 
-  rabbitmq:
-    container_name: rabbitmq
-    build:
-      context: "./rabbitmq"
-      dockerfile: "Dockerfile"
-    stop_grace_period: 1s
-    volumes:
-      - rabbit-data:/var/lib/rabbitmq/mnesia/rabbit@my-rabbit
-    networks:
-      - reviro-network
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    healthcheck:
-      test: rabbitmq-diagnostics -q ping
-      interval: 2s
-      retries: 999
-      start_period: 0s
-      timeout: 0s
+  volumes:
+    mysql-data:
 
-  redis:
-    image: redis:latest
-    container_name: redis
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis-data:/data
-    networks:
-      - reviro-network
-    restart: always
-
-volumes:
-  rabbit-data:
-  postgres-data:
-  redis-data:
-
-networks:
-  reviro-network:
-    driver: bridge
+  networks:
+    garage-network:
+      driver: bridge

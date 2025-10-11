@@ -12,8 +12,6 @@ export class Constants
      * It is used in the database as a foreign key reference.
      * WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING:
      */
-    public static readonly INTERNAL_PARTNER_ID: string = "internal-admin-partner-id";
-    public static readonly GOOGLE_URL: string = "www.google.com";
     public static readonly SIGINT: string = "SIGINT";
     public static readonly SIGTERM: string = "SIGTERM";
     public static readonly UUIDV4: GuidVersions | GuidVersions[] = "uuidv4";
@@ -38,9 +36,26 @@ export class Constants
         STAGING: "staging",
         DEVELOPMENT: "development"
     };
-    public static readonly DEFAULTS: Record<string, any> = {
-        COMPANY_NAME: "DEFAULT_COMPANY_NAME",
-        SOCIAL_CONTRIBUTION_FEE: "1.00"
+    public static readonly ESCAPE_KEYS: string[] = [
+        'map_id',
+        'length',
+        'width',
+        'id',
+        'peak_braces',
+        'jtrim',
+        'end_cross_bracing'
+    ];
+
+    public static readonly LABEL_NAMES: Record<string, string> = {
+        fourth_center_cost: "4ft on Center",
+        risk_cost: "Risk Category II",
+        cert_pac_cost: "Certification Package",
+        ground_certificate: "Ground Certification",
+        overhang: "1' Overhang on Sides",
+        jtrim: "J-Trims",
+        interior_anchor: "Interior Anchor",
+        peak_braces: "Peak Braces",
+        end_cross_bracing: "End Cross Bracing"
     };
     public static readonly AGENT_TYPES = {
         STRUCTURED_CHAT: "structured-chat-zero-shot-react-description"

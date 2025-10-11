@@ -1,11 +1,10 @@
 import { InstantiationError} from "@errors/InstantiationError";
 import { ServiceResponse } from "@utils/response/ServiceResponse";
-import {  Response } from "express";
+import {NextFunction, Request, Response} from "express";
 import { constants as HttpStatuses } from "node:http2";
-import {StateServiceImpl} from "@modules/states-service/services/impl/StateServiceImpl";
 import {PriceController} from "@modules/price-service/controllers/PriceController";
 import {PriceService} from "@modules/price-service/services/PriceService";
-
+import {PriceServiceImpl} from "@modules/price-service/services/impl/PriceServiceImpl";
 
 export class PriceControllerImpl implements PriceController
 {
@@ -17,7 +16,7 @@ export class PriceControllerImpl implements PriceController
     private static instance: PriceController;
 
     /**
-     * The StateService instance.
+     * The PriceService instance.
      * @PriceService
      */
     private service: PriceService;
@@ -25,7 +24,7 @@ export class PriceControllerImpl implements PriceController
     /**
      * Constructs a new PriceController instance.
      *
-     * @param service - The StateService instance to use for prices operations.
+     * @param service - The PriceService instance to use for prices operations.
      * @param enforce - A function to enforce the Singleton pattern.
      * @throws Error if instantiated directly.
      */
@@ -44,14 +43,91 @@ export class PriceControllerImpl implements PriceController
      *
      * @returns The singleton instance of PriceController.
      */
+
     public static getInstance(): PriceController
     {
-        if(PriceControllerImpl.instance)
+        if(!PriceControllerImpl.instance)
         {
-            PriceControllerImpl.instance = new PriceControllerImpl(StateServiceImpl.getInstance(), Enforce);
+            PriceControllerImpl.instance = new PriceControllerImpl(PriceServiceImpl.getInstance(), Enforce);
         }
 
         return PriceControllerImpl.instance;
+    }
+
+    /**
+     * Handles retrieving all pricing.
+     *
+     * @param req - The request object.
+     * @param res - The response object.
+     * @param next - The next middleware function.
+     */
+
+    public fetchBuildingPricingWithUtilityHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
+    {
+        let pricesWithUtility;
+
+        try
+        {
+            pricesWithUtility = await this.service.generateAssistantResponse(req.body);
+        }
+        catch (error)
+        {
+            next(error);
+            return;
+        }
+
+        this.handleSuccessResponse(res, pricesWithUtility);
+    }
+
+    /**
+     * Handles retrieving all pricing.
+     *
+     * @param req - The request object.
+     * @param res - The response object.
+     * @param next - The next middleware function.
+     */
+
+    public fetchAllPricesHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
+    {
+        let prices;
+
+        try
+        {
+            prices = this.service.fetchAllPrices(req.body);
+        }
+        catch (error)
+        {
+            next(error);
+            return;
+        }
+
+        this.handleSuccessResponse(res, prices);
+    }
+
+    /**
+     * Handles predicting price.
+     *
+     * @param req - The request object.
+     * @param res - The response object.
+     * @param next - The next middleware function.
+     */
+
+
+    public predictPriceHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
+    {
+        let price;
+
+        try
+        {
+            price = this.service.predict(req.body);
+        }
+        catch (error)
+        {
+            next(error);
+            return;
+        }
+
+        this.handleSuccessResponse(res, price);
     }
 
     /**
@@ -74,5 +150,4 @@ export class PriceControllerImpl implements PriceController
  * Function to enforce the Singleton pattern.
  */
 function Enforce(): void
-{
-}
+{}

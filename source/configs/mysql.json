@@ -1,6 +1,6 @@
 {
   "host": "mysql",
-  "port": 5432,
+  "port": 3306,
   "username": "root",
   "password": "password",
   "database": "garage",

@@ -1,7 +1,7 @@
 /**
- * Interface for the Postgres configuration.
+ * Interface for the MySQL configuration.
  */
-export interface IPostgresConfig
+export interface IMySqlConfig
 {
     host: string;
     port: number;

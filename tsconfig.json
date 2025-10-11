@@ -1,12 +1,46 @@
 {
   "compilerOptions": {
-    "target": "es2016",
-    "module": "commonjs",
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM"],
+    "baseUrl": ".",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
     "esModuleInterop": true,
+    "outDir": "build",
+    "preserveConstEnums": false,
+    "resolveJsonModule": true,
+    "noImplicitAny": false,
+    "removeComments": true,
+    "sourceMap": true,
+    "noLib": false,
+    "noEmitOnError": true,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": false,
+    "strictNullChecks": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
     "forceConsistentCasingInFileNames": true,
-    "strict": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "skipLibCheck": true,
-    "outDir": "dist"
+    "paths": {
+      "@modules/*": ["source/modules/*"],
+      "@config/*": ["source/config/*"],
+      "@configs/*": ["source/configs/*"],
+      "@common/*": ["source/common/*"],
+      "@utils/*": ["source/utils/*"],
+      "@errors/*": ["source/errors/*"],
+      "@llm/*": ["source/llm/*"],
+      "@agents/*": ["source/agents/*"],
+      "@tests/*": ["source/tests/*"]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "**/*.ts",
+    "**/*.mjs",
+    "source/**/*.json",
+    "sequelize/**/*.js",
+    "source/**/*.js"
+  ],
+  "exclude": ["node_modules", "build", "source/tests"]
 }

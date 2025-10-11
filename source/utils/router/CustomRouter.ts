@@ -1,13 +1,13 @@
 import express, { IRoute } from "express";
 
 /**
- * Abstract class representing a custom router.
+ * Abstract class representing a custom routes.
  * This class provides methods to manage routes and middleware.
  */
 export abstract class CustomRouter
 {
     /**
-     * The Express router instance.
+     * The Express routes instance.
      */
     public router: express.Router;
 
@@ -20,9 +20,9 @@ export abstract class CustomRouter
     }
 
     /**
-     * Returns the Express router instance.
+     * Returns the Express routes instance.
      *
-     * @returns {express.Router} The Express router instance.
+     * @returns {express.Router} The Express routes instance.
      */
     public getRouter(): express.Router
     {
@@ -30,10 +30,10 @@ export abstract class CustomRouter
     }
 
     /**
-     * Uses the specified router for the given path.
+     * Uses the specified routes for the given path.
      *
      * @param {string} path - The path for the route.
-     * @param {CustomRouter} router - The router instance to use.
+     * @param {CustomRouter} router - The routes instance to use.
      */
     public use(path: string, router: CustomRouter): void
     {

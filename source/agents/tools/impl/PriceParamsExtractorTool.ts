@@ -1,15 +1,41 @@
 import { InstantiationError } from "@errors/InstantiationError";
 import { sharedLLM } from "@llm/SharedLLM";
 import { BaseTool } from "@agents/tools/BaseTool";
-import { BaseMessage, MessageContentComplex } from "@langchain/core/messages";
+import { IPricingParams } from "@modules/price-service/services/io/IPrice";
+import { PriceServiceImpl } from "@modules/price-service/services/impl/PriceServiceImpl";
+import { GenerateResponse } from "ollama";
+import pino from "pino";
+import {createLogger} from "@utils/logger/Log";
+const logger: pino.Logger = createLogger(module);
 
 export class PriceParamsExtractorTool extends BaseTool
 {
+    /**
+     * The singleton instance of `PriceParamsExtractorTool`.
+     * @private
+     */
+
     private static instance: PriceParamsExtractorTool;
 
-    readonly name: string = "priceParamsExtractor";
-    readonly description: string =
-        "Extracts building pricing parameters from natural language and outputs JSON for pricing calculation.";
+    /**
+     * The unique name identifier for the `PriceParamsExtractorTool`.
+     * Used internally to distinguish this tool within the agent system.
+     */
+
+    readonly name = "priceParamsExtractor";
+
+    /**
+     * Describes the purpose of the `PriceParamsExtractorTool`.
+     */
+
+    readonly description = "Extracts building pricing parameters from natural language, calculates building price, and returns structured pricing data.";
+
+    /**
+     * Private constructor to enforce a Singleton pattern.
+     *
+     * @param enforce - Function to enforce a Singleton pattern.
+     * @throws Error if instantiation is attempted directly.
+     */
 
     constructor(enforce: () => void)
     {
@@ -17,12 +43,15 @@ export class PriceParamsExtractorTool extends BaseTool
 
         if (enforce !== Enforce)
         {
-            throw new InstantiationError(
-                InstantiationError.NOT_INSTANTIABLE,
-                "Error: Instantiation failed: Use PriceParamsExtractorTool.getInstance() instead of new."
-            );
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceParamsExtractorTool.getInstance() instead of new.");
         }
     }
+
+    /**
+     * Gets the singleton instance of PriceParamsExtractorTool.
+     *
+     * @returns The singleton instance of PriceParamsExtractorTool.
+     */
 
     public static getInstance(): PriceParamsExtractorTool
     {
@@ -34,34 +63,142 @@ export class PriceParamsExtractorTool extends BaseTool
         return PriceParamsExtractorTool.instance;
     }
 
-    async _call(question: string): Promise<string>
+    /**
+     * Main method: receives user input, generates IPricingParams, calculates pricing, returns result
+     */
+
+    async _call(userInput: string)
     {
-        const prompt = `
-            You are a garage pricing assistant. 
+        const prompt: string = this.buildPrompt(userInput);
 
-            User description: "${question}"
-
-            Tasks:
-            1. Extract all necessary parameters for pricing (width, length, height, utility length, roof type, building type, etc.).
-            2. Decide which DB tables to query to fetch base structures, components, and manufacturer info.
-            3. Calculate pricing based on the fetched data (components, utilities, central structure, connection fees, addons, etc.).
-            4. Summarize the full pricing in a customer-friendly message.
-
-            Output:
-            - JSON object with all pricing details
-            - Customer-friendly summary text
-          `;
-
-        const response: BaseMessage = await sharedLLM.invoke([{ role: "user", content: prompt }]);
-
-        const message: string | MessageContentComplex[] = response.content;
-
-        if (typeof message === "string")
+        try
         {
-            return message.trim();
+            const { response: rawOutput = "" }: GenerateResponse = await sharedLLM.generate({
+                model: "llama3.2:latest",
+                prompt,
+            });
+
+            const pricingParams: Partial<IPricingParams> = this.extractParams(rawOutput);
+
+            return await PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(pricingParams as IPricingParams);
+        }
+        catch (error)
+        {
+            logger.error(`[PriceParamsExtractorTool] _call failed:, ${error.message}`);
+            throw new Error(`Failed to extract pricing and calculate price ${error.message}`);
+        }
+    }
+
+    /**
+     * Builds the structured LLM prompt
+     */
+
+    private buildPrompt(userInput: string): string
+    {
+        return `
+                You are a garage pricing assistant.
+
+                User input: "${userInput}"
+
+                Tasks:
+                1. Extract all fields required for the IPricingParams interface:
+                width, length, height, single_slope_height, map_id, roof_id,
+                utility_length, building_type, gauge, central_map_id, central_height,
+                central_utility_length, central_length, central_width, is_barn
+                2. If a field is missing in the user input, omit it.
+                3. Respond ONLY in JSON format matching IPricingParams.
+             `.trim();
+    }
+
+    /**
+     * Extracts and validates pricing params from raw LLM output
+     */
+
+    private extractParams(rawOutput: string): Partial<IPricingParams>
+    {
+        const jsonMatch: RegExpMatchArray = rawOutput.match(/\{[\s\S]*\}/);
+
+        if (!jsonMatch)
+        {
+            throw new Error(`No JSON found in LLM output: ${rawOutput}`);
         }
 
-        return JSON.stringify(message);
+        let params: Partial<IPricingParams>;
+
+        try
+        {
+            params = JSON.parse(jsonMatch[0]);
+        }
+        catch
+        {
+            throw new Error(`Invalid JSON in LLM output: ${rawOutput}`);
+        }
+
+        this.validateRequiredFields(params);
+        params.roof_id = this.normalizeRoofId(params.roof_id);
+        params.map_id = this.normalizeMapId(params.map_id);
+
+        return params;
+    }
+
+    /**
+     * Ensures required fields exist
+     */
+
+    private validateRequiredFields(params: Partial<IPricingParams>): void
+    {
+        const requiredFields: (keyof IPricingParams)[] = ["width", "length", "height", "map_id", "roof_id"];
+        const missing: (keyof IPricingParams)[] = requiredFields.filter((f) => !(f in params));
+
+        if (missing.length)
+        {
+            throw new Error(`Missing required fields: ${missing.join(", ")}`);
+        }
+    }
+
+    /**
+     * Normalize roof_id: accepts string or number, defaults to "single slope roof" (2).
+     */
+
+    private normalizeRoofId(roof: unknown): number
+    {
+        const roofMap: Record<string, number> = {
+            "gable roof": 1,
+            "single slope roof": 2,
+            "double slope roof": 3,
+            "flat roof": 4,
+        };
+
+        if (typeof roof === "string")
+        {
+            return roofMap[roof.toLowerCase().trim()] ?? 2;
+        }
+
+        if (typeof roof === "number")
+        {
+            return roof;
+        }
+
+        return 2;
+    }
+
+    /**
+     * Normalize map_id: accepts string or number, defaults to 1.
+     */
+
+    private normalizeMapId(map: unknown): number
+    {
+        if (typeof map === "string")
+        {
+            return 1
+        }
+
+        if (typeof map === "number")
+        {
+            return map
+        }
+
+        return 1;
     }
 }
 
