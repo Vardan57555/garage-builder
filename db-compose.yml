@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: reviro
+      POSTGRES_DB_HOST: postgres
+      POSTGRES_DB_PORT: 5432
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d reviro"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - reviro-network
+
+  rabbitmq:
+    container_name: rabbitmq
+    build:
+      context: "./rabbitmq"
+      dockerfile: "Dockerfile"
+    stop_grace_period: 1s
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq/mnesia/rabbit@my-rabbit
+    networks:
+      - reviro-network
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 2s
+      retries: 999
+      start_period: 0s
+      timeout: 0s
+
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    networks:
+      - reviro-network
+    restart: always
+
+volumes:
+  rabbit-data:
+  postgres-data:
+  redis-data:
+
+networks:
+  reviro-network:
+    driver: bridge
