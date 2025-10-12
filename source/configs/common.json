@@ -1,4 +1,0 @@
-{
-  "self_onboarding_host": "http://localhost:5200/self-onboarding",
-  "request_body_limit": "5mb"
-}
