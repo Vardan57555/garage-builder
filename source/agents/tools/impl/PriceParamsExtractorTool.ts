@@ -153,14 +153,15 @@ export class PriceParamsExtractorTool extends BaseTool
 
     public extractParams(rawOutput: string): Partial<IPricingParams> | null
     {
-        const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
+        const jsonMatch: RegExpMatchArray = rawOutput.match(/\{[\s\S]*\}/);
+
         if (!jsonMatch)
         {
             return null;
         }
 
         try {
-            let jsonText = jsonMatch[0]
+            let jsonText: string = jsonMatch[0]
                 .replace(/undefined/g, "null")
                 .replace(/NaN/g, "null")
                 .replace(/\bNone\b/g, "null")
@@ -171,7 +172,9 @@ export class PriceParamsExtractorTool extends BaseTool
             params.roof_id = this.normalizeRoofId(params.roof_id);
             params.map_id = this.normalizeMapId(params.map_id);
             return params;
-        } catch (err) {
+        }
+        catch (err)
+        {
             throw new Error(`Invalid JSON in LLM output: ${rawOutput}`);
         }
     }
@@ -236,9 +239,15 @@ export class PriceParamsExtractorTool extends BaseTool
         return 1;
     }
 
-    public canHandle(input: string): boolean {
+    /**
+     * Determines if the input string contains keywords related to garages/buildings.
+     * Returns true if any relevant keyword is found, false otherwise.
+     */
+
+    public canHandle(input: string): boolean
+    {
         const garageKeywords = /garage|building|width|length|height/i;
-        return garageKeywords.test(input); // Handle garage/building related
+        return garageKeywords.test(input);
     }
 }
 
