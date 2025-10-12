@@ -22,9 +22,9 @@ import {Constants} from "@common/io/Constants";
 import {MySQLManager} from "@config/db/MySqlManager";
 import {PredictionManager} from "@config/AiModel/PredictionManager";
 import {IAiAnswer} from "@common/io/IAiAgent";
-import {PriceParamsExtractorTool} from "@agents/tools/impl/PriceParamsExtractorTool";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
+import {LeadAgent} from "@agents/LeadAgent";
 const logger: pino.Logger = createLogger(module);
 
 export class PriceServiceImpl implements PriceService
@@ -334,7 +334,8 @@ export class PriceServiceImpl implements PriceService
 
         try
         {
-             pricingData = await PriceParamsExtractorTool.getInstance()._call(question);
+            const agent = await LeadAgent.getInstance();
+            pricingData = await agent.run(question);
         }
         catch (error)
         {

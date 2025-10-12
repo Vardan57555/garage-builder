@@ -1,18 +1,21 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sharedLLM = void 0;
-const ollama_1 = require("ollama");
-exports.sharedLLM = new ollama_1.Ollama({
-    host: process.env.OLLAMA_API_HOST || "http://ollama:11434",
+const ollama_1 = require("@langchain/ollama");
+const messages_1 = require("@langchain/core/messages");
+exports.sharedLLM = new ollama_1.ChatOllama({
+    model: "llama3.2:latest",
+    temperature: 0.2,
+    streaming: true,
+    baseUrl: "http://localhost:11434"
 });
-async function preloadOllamaModel() {
+(async () => {
     try {
-        await exports.sharedLLM.generate({ model: "llama3.2:latest", prompt: "Hello" });
-        console.log("Ollama model preloaded!");
+        await exports.sharedLLM.invoke([new messages_1.HumanMessage("ping")]);
+        console.log("✅ Model preloaded");
     }
     catch (err) {
-        console.error("Failed to preload Ollama model:", err);
+        console.warn("⚠️ Ollama preload failed (maybe not running yet). The model will load on first request.");
     }
-}
-preloadOllamaModel();
+})();
 //# sourceMappingURL=SharedLLM.js.map

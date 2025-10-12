@@ -10,8 +10,8 @@ const ServerError_1 = require("../../../../errors/ServerError");
 const Constants_1 = require("../../../../common/io/Constants");
 const MySqlManager_1 = require("../../../../config/db/MySqlManager");
 const PredictionManager_1 = require("../../../../config/AiModel/PredictionManager");
-const PriceParamsExtractorTool_1 = require("../../../../agents/tools/impl/PriceParamsExtractorTool");
 const Log_1 = require("../../../../utils/logger/Log");
+const LeadAgent_1 = require("../../../../agents/LeadAgent");
 const logger = (0, Log_1.createLogger)(module);
 class PriceServiceImpl {
     static instance;
@@ -194,7 +194,8 @@ class PriceServiceImpl {
         const { question } = body;
         let pricingData;
         try {
-            pricingData = await PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance()._call(question);
+            const agent = await LeadAgent_1.LeadAgent.getInstance();
+            pricingData = await agent.run(question);
         }
         catch (error) {
             throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `Failed to generate explanation for question: "${question}". Reason: ${error.message || error}`);

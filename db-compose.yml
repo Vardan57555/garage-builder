@@ -1,38 +1,38 @@
-  services:
-    mysql:
-      image: mysql:8.0
-      container_name: mysql
-      environment:
-        MYSQL_ROOT_PASSWORD: password
-        MYSQL_DATABASE: garage
-        MYSQL_USER: pricing_engine
-        MYSQL_PASSWORD: secret
-      volumes:
-        - mysql-data:/var/lib/mysql
-        - ./pricing_engine_pre.sql:/docker-entrypoint-initdb.d/pricing_engine_pre.sql:ro
-        - ./my.cnf:/etc/mysql/conf.d/my.cnf:ro
-      ports:
-        - "3306:3306"
-      restart: unless-stopped
-      command: >
-        --max_allowed_packet=1G
-        --innodb-buffer-pool-size=2G
-        --innodb-log-file-size=512M
-        --innodb-write-io-threads=8
-        --innodb-read-io-threads=8
-        --innodb-flush-log-at-trx-commit=2
-        --disable-log-bin
-      healthcheck:
-        test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -ppassword"]
-        interval: 10s
-        timeout: 5s
-        retries: 10
-      networks:
-        - garage-network
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: garage
+      MYSQL_USER: pricing_engine
+      MYSQL_PASSWORD: secret
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./pricing_engine_pre.sql:/docker-entrypoint-initdb.d/pricing_engine_pre.sql:ro
+      - ./my.cnf:/etc/mysql/conf.d/my.cnf:ro
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    command: >
+      --max_allowed_packet=1G
+      --innodb-buffer-pool-size=2G
+      --innodb-log-file-size=512M
+      --innodb-write-io-threads=8
+      --innodb-read-io-threads=8
+      --innodb-flush-log-at-trx-commit=2
+      --disable-log-bin
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h127.0.0.1 -uroot -ppassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - garage-network
 
-  volumes:
-    mysql-data:
+volumes:
+  mysql-data:
 
-  networks:
-    garage-network:
-      driver: bridge
+networks:
+  garage-network:
+    driver: bridge

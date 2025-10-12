@@ -3,10 +3,11 @@ import { sharedLLM } from "@llm/SharedLLM";
 import { BaseTool } from "@agents/tools/BaseTool";
 import { IPricingParams } from "@modules/price-service/services/io/IPrice";
 import { PriceServiceImpl } from "@modules/price-service/services/impl/PriceServiceImpl";
-import { GenerateResponse } from "ollama";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 const logger: pino.Logger = createLogger(module);
+import { HumanMessage } from "@langchain/core/messages";
+import {BufferMemory} from "langchain/memory";
 
 export class PriceParamsExtractorTool extends BaseTool
 {
@@ -67,27 +68,40 @@ export class PriceParamsExtractorTool extends BaseTool
      * Main method: receives user input, generates IPricingParams, calculates pricing, returns result
      */
 
-    async _call(userInput: string)
+    async _call(userInput: string, memory?: BufferMemory): Promise<string>
     {
         const prompt: string = this.buildPrompt(userInput);
 
         try
         {
-            const { response: rawOutput = "" }: GenerateResponse = await sharedLLM.generate({
-                model: "llama3.2:latest",
-                prompt,
-            });
+            const aiMessage = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const rawOutput = aiMessage.content as string;
 
             const pricingParams: Partial<IPricingParams> = this.extractParams(rawOutput);
 
-            return await PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(pricingParams as IPricingParams);
+            if (!pricingParams)
+            {
+                return "";
+            }
+
+            const result = await PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(pricingParams as IPricingParams);
+
+            if (memory)
+            {
+                memory.chatHistory.addUserMessage(userInput);
+                memory.chatHistory.addAIChatMessage(result);
+            }
+
+            return result;
         }
         catch (error)
         {
-            logger.error(`[PriceParamsExtractorTool] _call failed:, ${error.message}`);
-            throw new Error(`Failed to extract pricing and calculate price ${error.message}`);
+            logger.error(`[PriceParamsExtractorTool] _call failed: ${error.message}`);
+            throw new Error(`Failed to extract pricing and calculate price: ${error.message}`);
         }
     }
+
+
 
     /**
      * Builds the structured LLM prompt
@@ -132,35 +146,34 @@ export class PriceParamsExtractorTool extends BaseTool
 
     }
 
+
     /**
      * Extracts and validates pricing params from raw LLM output
      */
 
-    private extractParams(rawOutput: string): Partial<IPricingParams>
+    public extractParams(rawOutput: string): Partial<IPricingParams> | null
     {
-        const jsonMatch: RegExpMatchArray = rawOutput.match(/\{[\s\S]*\}/);
-
+        const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
         if (!jsonMatch)
         {
-            throw new Error(`No JSON found in LLM output: ${rawOutput}`);
+            return null;
         }
 
-        let params: Partial<IPricingParams>;
+        try {
+            let jsonText = jsonMatch[0]
+                .replace(/undefined/g, "null")
+                .replace(/NaN/g, "null")
+                .replace(/\bNone\b/g, "null")
+                .replace(/(\r\n|\n|\r)/gm, "");
 
-        try
-        {
-            params = JSON.parse(jsonMatch[0]);
-        }
-        catch
-        {
+            const params: Partial<IPricingParams> = JSON.parse(jsonText);
+            this.validateRequiredFields(params);
+            params.roof_id = this.normalizeRoofId(params.roof_id);
+            params.map_id = this.normalizeMapId(params.map_id);
+            return params;
+        } catch (err) {
             throw new Error(`Invalid JSON in LLM output: ${rawOutput}`);
         }
-
-        this.validateRequiredFields(params);
-        params.roof_id = this.normalizeRoofId(params.roof_id);
-        params.map_id = this.normalizeMapId(params.map_id);
-
-        return params;
     }
 
     /**
@@ -221,6 +234,11 @@ export class PriceParamsExtractorTool extends BaseTool
         }
 
         return 1;
+    }
+
+    public canHandle(input: string): boolean {
+        const garageKeywords = /garage|building|width|length|height/i;
+        return garageKeywords.test(input); // Handle garage/building related
     }
 }
 

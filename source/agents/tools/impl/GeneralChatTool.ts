@@ -1,6 +1,7 @@
 import { BaseTool } from "@agents/tools/BaseTool";
 import { InstantiationError } from "@errors/InstantiationError";
 import { sharedLLM } from "@llm/SharedLLM";
+import {BufferMemory} from "langchain/memory";
 
 export class GeneralChatTool extends BaseTool {
     private static instance: GeneralChatTool;
@@ -24,18 +25,38 @@ export class GeneralChatTool extends BaseTool {
         return GeneralChatTool.instance;
     }
 
-    async _call(input: string): Promise<string> {
+    public canHandle(input: string): boolean {
+        const garageKeywords = /garage|building|width|length|height/i;
+        return !garageKeywords.test(input); // Handle everything that is NOT garage/building
+    }
+
+    async _call(input: string, memory?: BufferMemory): Promise<string> {
         const isGarageInput = /garage|building|width|length|height/i.test(input);
 
         if (isGarageInput) {
-            // let PriceParamsExtractorTool handle
-            return null;
+            return null; // let PriceParamsExtractorTool handle
         }
 
-        const prompt = `You are a helpful AI assistant. Respond naturally:\n${input}`;
-        const response = await sharedLLM.invoke([{ role: "user", content: prompt }]);
+        // ✅ Get previous conversation messages
+        const historyMessages = memory ? await memory.chatHistory.getMessages() : [];
+
+        // ✅ Add new user message to the context
+        const messages = [
+            ...historyMessages,
+            { role: "user", content: input }
+        ];
+
+        const response = await sharedLLM.invoke(messages);
+
+        // ✅ Store this turn for next time
+        if (memory) {
+            memory.chatHistory.addUserMessage(input);
+            memory.chatHistory.addAIChatMessage(response.content as string);
+        }
+
         return response.content as string;
     }
+
 }
 
 function Enforce(): void {}

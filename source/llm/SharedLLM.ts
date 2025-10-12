@@ -2,17 +2,17 @@ import { ChatOllama } from "@langchain/ollama";
 import {HumanMessage} from "@langchain/core/messages";
 
 export const sharedLLM = new ChatOllama({
-    model: "phi3:mini",
+    model: "llama3.2:latest",
     temperature: 0.2,
     streaming: true,
-    baseUrl: "http://ollama:11434",
+    baseUrl: "http://ollama:11434"
 });
 
 (async () =>
 {
     try
     {
-        await sharedLLM.invoke([new HumanMessage("I want a garage 10x10x10, single slope roof, utility 5.")]);
+        await sharedLLM.invoke([new HumanMessage("ping")]);
         console.log("✅ Model preloaded");
     }
     catch (err)

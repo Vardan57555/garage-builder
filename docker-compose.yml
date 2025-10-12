@@ -39,6 +39,11 @@ services:
     restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          cpus: 4.0
+          memory: 4g
 
   streamlit-client:
     build:
@@ -53,7 +58,7 @@ services:
       - garage-backend
     networks:
       - garage-network
-      
+
 volumes:
   ollama-data:
 
