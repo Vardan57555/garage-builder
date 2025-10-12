@@ -2,61 +2,104 @@ import { BaseTool } from "@agents/tools/BaseTool";
 import { InstantiationError } from "@errors/InstantiationError";
 import { sharedLLM } from "@llm/SharedLLM";
 import {BufferMemory} from "langchain/memory";
+import {AIMessageChunk, BaseMessage} from "@langchain/core/messages";
 
-export class GeneralChatTool extends BaseTool {
+export class GeneralChatTool extends BaseTool
+{
+    /**
+     * The singleton instance of `GeneralChatTool`.
+     * @private
+     */
+
     private static instance: GeneralChatTool;
+
+    /**
+     * The unique name identifier for the `GeneralChatTool`.
+     * Used internally to distinguish this tool within the agent system.
+     */
+
     readonly name = "generalChat";
+
+    /**
+     * Describes the purpose of the `GeneralChatTool`.
+     */
+
     readonly description = "Handles general conversation and casual questions.";
 
-    constructor(enforce: () => void) {
+    /**
+     * Private constructor to enforce a Singleton pattern.
+     *
+     * @param enforce - Function to enforce a Singleton pattern.
+     * @throws Error if instantiation is attempted directly.
+     */
+
+    constructor(enforce: () => void)
+    {
         super();
+
         if (enforce !== Enforce) {
-            throw new InstantiationError(
-                InstantiationError.NOT_INSTANTIABLE,
-                "Use GeneralChatTool.getInstance() instead of new."
-            );
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Use GeneralChatTool.getInstance() instead of new.");
         }
     }
 
-    public static getInstance(): GeneralChatTool {
-        if (!GeneralChatTool.instance) {
+    /**
+     * Gets the singleton instance of GeneralChatTool.
+     *
+     * @returns The singleton instance of GeneralChatTool.
+     */
+
+    public static getInstance(): GeneralChatTool
+    {
+        if (!GeneralChatTool.instance)
+        {
             GeneralChatTool.instance = new GeneralChatTool(Enforce);
         }
         return GeneralChatTool.instance;
     }
 
-    public canHandle(input: string): boolean {
+    /**
+     * Determines if the input string contains keywords related to garages/buildings.
+     * Returns true if any relevant keyword is found, false otherwise.
+     */
+
+    public canHandle(input: string): boolean
+    {
         const garageKeywords = /garage|building|width|length|height/i;
-        return !garageKeywords.test(input); // Handle everything that is NOT garage/building
+        return !garageKeywords.test(input);
     }
 
-    async _call(input: string, memory?: BufferMemory): Promise<string> {
-        const isGarageInput = /garage|building|width|length|height/i.test(input);
+    /**
+     * Handles user input: checks for garage-related keywords, retrieves chat history,
+     * invokes the AI model to generate a response, updates memory if provided, and returns
+     * the AI-generated string.
+     */
 
-        if (isGarageInput) {
-            return null; // let PriceParamsExtractorTool handle
+    async _call(input: string, memory?: BufferMemory): Promise<string>
+    {
+        const isGarageInput: boolean = /garage|building|width|length|height/i.test(input);
+
+        if (isGarageInput)
+        {
+            return null;
         }
 
-        // ✅ Get previous conversation messages
-        const historyMessages = memory ? await memory.chatHistory.getMessages() : [];
+        const historyMessages: BaseMessage[] = memory ? await memory.chatHistory.getMessages() : [];
 
-        // ✅ Add new user message to the context
         const messages = [
             ...historyMessages,
             { role: "user", content: input }
         ];
 
-        const response = await sharedLLM.invoke(messages);
+        const response: AIMessageChunk = await sharedLLM.invoke(messages);
 
-        // ✅ Store this turn for next time
-        if (memory) {
+        if (memory)
+        {
             memory.chatHistory.addUserMessage(input);
             memory.chatHistory.addAIChatMessage(response.content as string);
         }
 
         return response.content as string;
     }
-
 }
 
 function Enforce(): void {}
