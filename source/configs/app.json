@@ -1,0 +1,20 @@
+{
+  "port": 3000,
+  "debug": false,
+  "start_delay": 0,
+  "name": "garage-backend",
+  "origins": {
+    "enabled": true,
+    "domains": []
+  },
+  "k8s": {
+    "readiness": {
+      "period": 2,
+      "threshold": 2
+    },
+    "liveness": {
+      "period": 3,
+      "threshold": 3
+    }
+  }
+}
