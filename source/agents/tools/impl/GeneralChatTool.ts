@@ -66,6 +66,7 @@ export class GeneralChatTool extends BaseTool
     public canHandle(input: string): boolean
     {
         const garageKeywords = /garage|building|width|length|height/i;
+        console.log(!garageKeywords.test(input))
         return !garageKeywords.test(input);
     }
 

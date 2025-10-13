@@ -14,14 +14,12 @@ start:
 
 	sh ./scripts/initialize_services/wait-for-db.sh
 
-	# 🧠 Start Ollama before running initialize.sh
 	echo "Starting Ollama service..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d ollama
 
 	echo "Installing dependencies..."
 	sh ./scripts/initialize_services/initialize.sh
 
-	# 🧠 Now start the rest of the services
 	echo "Starting main services..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d garage-backend streamlit-client
 
