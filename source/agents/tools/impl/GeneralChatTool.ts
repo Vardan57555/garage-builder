@@ -37,7 +37,8 @@ export class GeneralChatTool extends BaseTool
     {
         super();
 
-        if (enforce !== Enforce) {
+        if (enforce !== Enforce)
+        {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Use GeneralChatTool.getInstance() instead of new.");
         }
     }
