@@ -143,7 +143,6 @@ export class PriceParamsExtractorTool extends BaseTool
 
                 User input: "${userInput}"
            `.trim();
-
     }
 
 
@@ -160,7 +159,8 @@ export class PriceParamsExtractorTool extends BaseTool
             return null;
         }
 
-        try {
+        try
+        {
             let jsonText: string = jsonMatch[0]
                 .replace(/undefined/g, "null")
                 .replace(/NaN/g, "null")
