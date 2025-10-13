@@ -1,10 +1,7 @@
-import { AgentExecutor, initializeAgentExecutorWithOptions } from "langchain/agents";
 import {BufferMemory, ChatMessageHistory} from "langchain/memory";
-import { InstantiationError } from "@errors/InstantiationError";
-import { sharedLLM } from "@llm/SharedLLM";
+import {InstantiationError} from "@errors/InstantiationError";
 import {GeneralChatTool} from "@agents/tools/impl/GeneralChatTool";
-import { PriceParamsExtractorTool } from "./tools/impl/PriceParamsExtractorTool";
-import {Constants} from "@common/io/Constants";
+import {PriceParamsExtractorTool} from "./tools/impl/PriceParamsExtractorTool";
 
 export class LeadAgent
 {
@@ -34,7 +31,7 @@ export class LeadAgent
      * Executes pricing-related agent actions.
      */
 
-    private priceExecutor: AgentExecutor;
+    // private priceExecutor: AgentExecutor;
 
     constructor(enforce: () => void)
     {
@@ -61,9 +58,7 @@ export class LeadAgent
     {
         if (!LeadAgent.instance)
         {
-            const agent = new LeadAgent(Enforce);
-            await agent.init();
-            LeadAgent.instance = agent;
+            LeadAgent.instance = new LeadAgent(Enforce);
         }
         return LeadAgent.instance;
     }
@@ -73,48 +68,51 @@ export class LeadAgent
      */
 
 
-    public async run(input: string): Promise<string>
-    {
-        try
-        {
-            const tool: PriceParamsExtractorTool | GeneralChatTool = this.tools.find(t => t.canHandle(input));
+    public async run(input: string): Promise<string> {
+        console.log("Running LeadAgent for input:", input);
+
+        try {
+            const isGarageInput = /garage|building|width|length|height/i.test(input);
+
+            if (isGarageInput)
+            {
+                console.log("Garage input")
+                return await PriceParamsExtractorTool.getInstance()._call(input, this.memory);
+            }
+
+            const tool = this.tools.find(t => t.name !== "priceParamsExtractor" && t.canHandle(input));
 
             if (!tool)
             {
+                console.log("General input")
                 return await GeneralChatTool.getInstance()._call(input, this.memory);
-            }
-
-            if (tool.name === "priceParamsExtractor")
-            {
-                const result = await this.priceExecutor.call({ input });
-                return result?.output ?? await GeneralChatTool.getInstance()._call(input, this.memory);
             }
 
             return await (tool as GeneralChatTool)._call(input, this.memory);
 
-        }
-        catch (error)
-        {
+        } catch (error) {
             throw new Error(`LeadAgent execution failed: ${(error as Error).message}`);
         }
     }
+
 
     /**
      * Initializes the price executor with the necessary tools, LLM, and memory.
      */
 
-    private async init()
-    {
-        this.priceExecutor = await initializeAgentExecutorWithOptions(
-            [PriceParamsExtractorTool.getInstance()],
-            sharedLLM,
-            {
-                agentType: Constants.AGENT_TYPES.STRUCTURED_CHAT,
-                verbose: false,
-                memory: this.memory as unknown as never,
-            }
-        );
-    }
+    // private async init()
+    // {
+    //     this.priceExecutor = await initializeAgentExecutorWithOptions(
+    //         [PriceParamsExtractorTool.getInstance()],
+    //         sharedLLM,
+    //         {
+    //             agentType: Constants.AGENT_TYPES.STRUCTURED_CHAT,
+    //             verbose: false,
+    //             maxIterations: 1,
+    //             memory: this.memory as unknown as never,
+    //         }
+    //     );
+    // }
 }
 
 /**

@@ -4,7 +4,7 @@ import {HumanMessage} from "@langchain/core/messages";
 export const sharedLLM = new ChatOllama({
     model: "llama3.2:latest",
     temperature: 0.2,
-    streaming: true,
+    streaming: false,
     baseUrl: "http://ollama:11434"
 });
 

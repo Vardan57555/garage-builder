@@ -13,7 +13,7 @@
     "removeComments": true,
     "sourceMap": true,
     "noLib": false,
-    "noEmitOnError": true,
+    "noEmitOnError": false,
     "strictBindCallApply": true,
     "strictFunctionTypes": false,
     "strictNullChecks": false,

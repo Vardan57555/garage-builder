@@ -22,6 +22,7 @@ class GeneralChatTool extends BaseTool_1.BaseTool {
     }
     canHandle(input) {
         const garageKeywords = /garage|building|width|length|height/i;
+        console.log(!garageKeywords.test(input));
         return !garageKeywords.test(input);
     }
     async _call(input, memory) {

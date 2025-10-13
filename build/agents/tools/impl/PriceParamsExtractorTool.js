@@ -47,39 +47,39 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     }
     buildPrompt(userInput) {
         return `
-                You are a garage pricing assistant with general conversation abilities.
+        You are a garage pricing assistant with general conversation abilities.
 
-                If the user input seems to be about a garage/building, extract pricing parameters strictly following this schema:
-                {
-                    "width": number,
-                    "length": number,
-                    "height": number,
-                    "single_slope_height": number | null,
-                    "map_id": number | null,
-                    "roof_id": number | null,
-                    "utility_length": number | null,
-                    "building_type": string | null,
-                    "gauge": number | null,
-                    "central_map_id": number | null,
-                    "central_height": number | null,
-                    "central_utility_length": number | null,
-                    "central_length": number | null,
-                    "central_width": number | null,
-                    "is_barn": boolean | null
-                }
+        If the user input seems to be about a garage/building, extract pricing parameters strictly following this schema:
+        {
+            "width": number,
+            "length": number,
+            "height": number,
+            "single_slope_height": number | null,
+            "map_id": number | null,
+            "roof_id": number | null,
+            "utility_length": number | null,
+            "building_type": string | null,
+            "gauge": number | null,
+            "central_map_id": number | null,
+            "central_height": number | null,
+            "central_utility_length": number | null,
+            "central_length": number | null,
+            "central_width": number | null,
+            "is_barn": boolean | null
+        }
 
-                Rules for pricing input:
-                - Output ONLY valid JSON when extracting parameters.
-                - Do not include explanations or code blocks.
-                - Use null instead of undefined.
-                - If unsure about a field, set it to null.
+        Rules for pricing input:
+        - Output ONLY valid JSON when extracting parameters.
+        - Do not include explanations or code blocks.
+        - Use null instead of undefined.
+        - If unsure about a field, set it to null.
 
-                If the user input is NOT related to garage/building parameters:
-                - Respond normally as a helpful assistant (e.g., if the user says "Hello", reply "Hello! How can I help you today?").
-                - Do not output JSON in this case.
+        If the user input is NOT related to garage/building parameters:
+        - Respond normally as a helpful assistant (e.g., if the user says "Hello", reply "Hello! How can I help you today?").
+        - Do not output JSON in this case.
 
-                User input: "${userInput}"
-           `.trim();
+        User input: "${userInput}"
+   `.trim();
     }
     extractParams(rawOutput) {
         const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);

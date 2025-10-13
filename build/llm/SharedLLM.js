@@ -6,7 +6,7 @@ const messages_1 = require("@langchain/core/messages");
 exports.sharedLLM = new ollama_1.ChatOllama({
     model: "llama3.2:latest",
     temperature: 0.2,
-    streaming: true,
+    streaming: false,
     baseUrl: "http://ollama:11434"
 });
 (async () => {
