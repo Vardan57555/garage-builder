@@ -256,7 +256,7 @@ export class PriceServiceImpl implements PriceService
         }
         catch (error)
         {
-            logger.error("[Pricing] Error calculating pricing:", error);
+            logger.error(`[Pricing] Error calculating pricing: ${error}`);
             throw new ServerError(ServerError.INTERNAL, `Failed to calculate pricing: ${error.message}`);
         }
     }

@@ -1,0 +1,6 @@
+.DS_Store
+build/**/.DS_Store
+client/.DS_Store
+source/**/.DS_Store
+scripts/.DS_Store
+sequelize/.DS_Store

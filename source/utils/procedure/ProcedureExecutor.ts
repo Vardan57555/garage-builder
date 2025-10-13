@@ -37,7 +37,7 @@ export class ProcedureExecutor
         }
         catch (error)
         {
-            logger.error(`Error executing procedure ${procedure}:`, error);
+            logger.error(`Error executing procedure ${procedure}: ${error}`);
             throw error;
         }
     }
