@@ -61,7 +61,7 @@ export abstract class ServiceManager
         }
         catch (error)
         {
-            logger.error(`Failed to close ${this.constructor.name}:`, error.message);
+            logger.error(`Failed to close ${this.constructor.name}: ${error.message}`);
         }
     }
 }
