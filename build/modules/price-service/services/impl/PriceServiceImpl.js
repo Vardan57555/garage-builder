@@ -108,9 +108,9 @@ class PriceServiceImpl {
             [map_id, height, length, structureString],
             'getSidePrice(?, ?, ?, ?)'
         ],
-        trusses_slope: ({ map_id, width, single_slope_height, structureString }) => [
-            [map_id, width, single_slope_height, structureString],
-            'getTrussUpgrade(?, ?, ?, ?)'
+        trusses_slope: ({ map_id, width, single_slope_height, length, structureString }) => [
+            [map_id, width, single_slope_height, length, structureString],
+            'getTrussUpgrade(?, ?, ?, ?, ?)'
         ]
     };
     constructor(enforce) {
@@ -160,7 +160,7 @@ class PriceServiceImpl {
             return pricing;
         }
         catch (error) {
-            logger.error("[Pricing] Error calculating pricing:", error);
+            logger.error(`[Pricing] Error calculating pricing: ${error}`);
             throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `Failed to calculate pricing: ${error.message}`);
         }
     }

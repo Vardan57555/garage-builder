@@ -21,7 +21,7 @@ class ProcedureExecutor {
             return ProcedureExecutor.prepareQueryResult(key, rows);
         }
         catch (error) {
-            logger.error(`Error executing procedure ${procedure}:`, error);
+            logger.error(`Error executing procedure ${procedure}: ${error}`);
             throw error;
         }
     }

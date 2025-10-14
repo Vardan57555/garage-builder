@@ -1,43 +1,20 @@
-import {BufferMemory, ChatMessageHistory} from "langchain/memory";
-import {InstantiationError} from "@errors/InstantiationError";
-import {GeneralChatTool} from "@agents/tools/impl/GeneralChatTool";
-import {PriceParamsExtractorTool} from "./tools/impl/PriceParamsExtractorTool";
+// LeadAgent.ts
+import { BufferMemory, ChatMessageHistory } from "langchain/memory";
+import { InstantiationError } from "@errors/InstantiationError";
+import { GeneralChatTool } from "@agents/tools/impl/GeneralChatTool";
+import { PriceParamsExtractorTool } from "./tools/impl/PriceParamsExtractorTool";
+import { BaseMessage } from "@langchain/core/messages";
 
-export class LeadAgent
-{
-    /**
-     * Singleton instance of LeadAgent.
-     */
-
+export class LeadAgent {
     private static instance: LeadAgent;
-
-
-    /**
-     * Stores conversation memory for the agent.
-     */
-
     private memory: BufferMemory;
 
-    /**
-     * List of tools available to the agent.
-     */
-
-    private tools = [
-        PriceParamsExtractorTool.getInstance(),
-        GeneralChatTool.getInstance()
-    ];
-
-    /**
-     * Executes pricing-related agent actions.
-     */
-
-    // private priceExecutor: AgentExecutor;
-
-    constructor(enforce: () => void)
-    {
-        if (enforce !== Enforce)
-        {
-            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Use LeadAgent.getInstance() instead of new.");
+    private constructor(enforce: () => void) {
+        if (enforce !== Enforce) {
+            throw new InstantiationError(
+                InstantiationError.NOT_INSTANTIABLE,
+                "Use LeadAgent.getInstance() instead of new."
+            );
         }
 
         this.memory = new BufferMemory({
@@ -47,78 +24,59 @@ export class LeadAgent
         });
     }
 
-
-    /**
-     * Gets the singleton instance of NgoRouter.
-     *
-     * @returns The singleton instance of NgoRouter.
-     */
-
-    public static async getInstance(): Promise<LeadAgent>
-    {
-        if (!LeadAgent.instance)
-        {
+    public static async getInstance(): Promise<LeadAgent> {
+        if (!LeadAgent.instance) {
             LeadAgent.instance = new LeadAgent(Enforce);
         }
         return LeadAgent.instance;
     }
 
-    /**
-     * Executes the agent on a given input.
-     */
-
-
-    public async run(input: string): Promise<string> {
-        console.log("Running LeadAgent for input:", input);
-
-        try {
-            const isGarageInput = /garage|building|width|length|height/i.test(input);
-
-            if (isGarageInput)
-            {
-                console.log("Garage input")
-                return await PriceParamsExtractorTool.getInstance()._call(input, this.memory);
-            }
-
-            const tool = this.tools.find(t => t.name !== "priceParamsExtractor" && t.canHandle(input));
-
-            if (!tool)
-            {
-                console.log("General input")
-                return await GeneralChatTool.getInstance()._call(input, this.memory);
-            }
-
-            return await (tool as GeneralChatTool)._call(input, this.memory);
-
-        } catch (error) {
-            throw new Error(`LeadAgent execution failed: ${(error as Error).message}`);
+    private getMessageString(content: string | any[]): string {
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+            return content.map(c => ("text" in c ? c.text : JSON.stringify(c))).join(" ");
         }
+        return String(content);
     }
 
+    public async run(input: string): Promise<string> {
+        try {
+            // 1️⃣ Collect all previous garage-related messages
+            const history: BaseMessage[] = await this.memory.chatHistory.getMessages();
+            const garageMessages = history
+                .filter(msg => /garage|building|width|length|height/i.test(this.getMessageString(msg.content)))
+                .map(msg => this.getMessageString(msg.content));
 
-    /**
-     * Initializes the price executor with the necessary tools, LLM, and memory.
-     */
+            const fullGarageInput = garageMessages.concat([input]).join("\n");
 
-    // private async init()
-    // {
-    //     this.priceExecutor = await initializeAgentExecutorWithOptions(
-    //         [PriceParamsExtractorTool.getInstance()],
-    //         sharedLLM,
-    //         {
-    //             agentType: Constants.AGENT_TYPES.STRUCTURED_CHAT,
-    //             verbose: false,
-    //             maxIterations: 1,
-    //             memory: this.memory as unknown as never,
-    //         }
-    //     );
-    // }
+            const isGarageInput = /garage|building|width|length|height/i.test(fullGarageInput);
+
+            if (isGarageInput) {
+                // 2️⃣ Price calculation with safe handling
+                try {
+                    const result = await PriceParamsExtractorTool.getInstance()._call(fullGarageInput, this.memory);
+                    return result;
+                } catch (e) {
+                    console.error("PriceParamsExtractorTool failed:", e);
+                    return "⚠️ Failed to calculate price. Please provide complete garage details.";
+                }
+            }
+
+            // 3️⃣ Fallback to general conversation
+            try {
+                const result = await GeneralChatTool.getInstance()._call(input, this.memory);
+                return result || "⚠️ Sorry, I couldn’t understand your input.";
+            } catch (e) {
+                console.error("GeneralChatTool failed:", e);
+                return "⚠️ An error occurred while processing your request.";
+            }
+
+        } catch (error) {
+            console.error("LeadAgent execution failed:", error);
+            return "⚠️ An unexpected error occurred.";
+        }
+    }
 }
 
-/**
- * Function to enforce the Singleton pattern.
- */
+function Enforce(): void {}
 
-function Enforce(): void
-{
-}

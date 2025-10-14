@@ -5,18 +5,15 @@ const InstantiationError_1 = require("../../../errors/InstantiationError");
 const SharedLLM_1 = require("../../../llm/SharedLLM");
 const BaseTool_1 = require("../../tools/BaseTool");
 const PriceServiceImpl_1 = require("../../../modules/price-service/services/impl/PriceServiceImpl");
-const Log_1 = require("../../../utils/logger/Log");
-const logger = (0, Log_1.createLogger)(module);
 const messages_1 = require("@langchain/core/messages");
 class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     static instance;
     name = "priceParamsExtractor";
-    description = "Extracts building pricing parameters from natural language, calculates building price, and returns structured pricing data.";
+    description = "Extracts building pricing parameters from natural language.";
     constructor(enforce) {
         super();
-        if (enforce !== Enforce) {
-            throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceParamsExtractorTool.getInstance() instead of new.");
-        }
+        if (enforce !== Enforce)
+            throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Use PriceParamsExtractorTool.getInstance() instead of new.");
     }
     static getInstance() {
         if (!PriceParamsExtractorTool.instance) {
@@ -29,20 +26,20 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         try {
             const aiMessage = await SharedLLM_1.sharedLLM.invoke([new messages_1.HumanMessage(prompt)]);
             const rawOutput = aiMessage.content;
-            const pricingParams = this.extractParams(rawOutput);
-            if (!pricingParams) {
-                return "";
+            const pricingParams = this.safeExtractParams(rawOutput);
+            if (!pricingParams.width || !pricingParams.length) {
+                return "⚠️ Please provide full garage dimensions and details for accurate pricing.";
             }
             const result = await PriceServiceImpl_1.PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(pricingParams);
             if (memory) {
                 memory.chatHistory.addUserMessage(userInput);
                 memory.chatHistory.addAIChatMessage(result);
             }
-            return result;
+            return result || "⚠️ Pricing service returned empty result. Please provide more info.";
         }
         catch (error) {
-            logger.error(`[PriceParamsExtractorTool] _call failed: ${error.message}`);
-            throw new Error(`Failed to extract pricing and calculate price: ${error.message}`);
+            console.error(`[PriceParamsExtractorTool] _call failed:`, error);
+            return "⚠️ Failed to extract pricing and calculate price. Please try again.";
         }
     }
     buildPrompt(userInput) {
@@ -81,61 +78,36 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         User input: "${userInput}"
    `.trim();
     }
-    extractParams(rawOutput) {
-        const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-            return null;
-        }
+    safeExtractParams(rawOutput) {
         try {
-            let jsonText = jsonMatch[0]
-                .replace(/undefined/g, "null")
-                .replace(/NaN/g, "null")
-                .replace(/\bNone\b/g, "null")
+            const match = rawOutput.match(/\{[\s\S]*\}/);
+            if (!match)
+                return {};
+            const jsonText = match[0]
+                .replace(/undefined|NaN|\bNone\b/g, "null")
                 .replace(/(\r\n|\n|\r)/gm, "");
             const params = JSON.parse(jsonText);
-            this.validateRequiredFields(params);
+            params.width ??= 0;
+            params.length ??= 0;
+            params.height ??= 0;
             params.roof_id = this.normalizeRoofId(params.roof_id);
             params.map_id = this.normalizeMapId(params.map_id);
             return params;
         }
         catch (err) {
-            throw new Error(`Invalid JSON in LLM output: ${rawOutput}`);
-        }
-    }
-    validateRequiredFields(params) {
-        const requiredFields = ["width", "length", "height", "map_id", "roof_id"];
-        const missing = requiredFields.filter((f) => !(f in params));
-        if (missing.length) {
-            throw new Error(`Missing required fields: ${missing.join(", ")}`);
+            console.warn("Invalid JSON from LLM, returning empty params:", err);
+            return {};
         }
     }
     normalizeRoofId(roof) {
-        const roofMap = {
-            "gable roof": 1,
-            "single slope roof": 2,
-            "double slope roof": 3,
-            "flat roof": 4,
-        };
-        if (typeof roof === "string") {
-            return roofMap[roof.toLowerCase().trim()] ?? 2;
-        }
-        if (typeof roof === "number") {
+        if (typeof roof === "number")
             return roof;
-        }
         return 2;
     }
     normalizeMapId(map) {
-        if (typeof map === "string") {
-            return 1;
-        }
-        if (typeof map === "number") {
+        if (typeof map === "number")
             return map;
-        }
         return 1;
-    }
-    canHandle(input) {
-        const garageKeywords = /garage|building|width|length|height/i;
-        return garageKeywords.test(input);
     }
 }
 exports.PriceParamsExtractorTool = PriceParamsExtractorTool;

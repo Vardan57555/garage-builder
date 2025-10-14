@@ -20,7 +20,7 @@ class ServiceManager {
             logger.info(`${this.constructor.name} closed successfully`);
         }
         catch (error) {
-            logger.error(`Failed to close ${this.constructor.name}:`, error.message);
+            logger.error(`Failed to close ${this.constructor.name}: ${error.message}`);
         }
     }
 }

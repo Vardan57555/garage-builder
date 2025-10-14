@@ -158,10 +158,9 @@ export class PriceServiceImpl implements PriceService
                 [map_id, height, length, structureString],
                 'getSidePrice(?, ?, ?, ?)'
             ],
-
-            trusses_slope: ({ map_id, width, single_slope_height, structureString }) => [
-                [map_id, width, single_slope_height, structureString],
-                'getTrussUpgrade(?, ?, ?, ?)'
+            trusses_slope: ({ map_id, width, single_slope_height, length, structureString }) => [
+                [map_id, width, single_slope_height, length, structureString],
+                'getTrussUpgrade(?, ?, ?, ?, ?)'
             ]
         };
 
