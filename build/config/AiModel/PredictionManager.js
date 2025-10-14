@@ -73,7 +73,7 @@ class PredictionManager extends ServiceManager_1.ServiceManager {
             this.isConnected = true;
         }
         catch (error) {
-            logger.error("PredictionManager failed to connect:", error);
+            logger.error(`PredictionManager failed to connect: ${error}`);
             throw error;
         }
     }
@@ -85,7 +85,7 @@ class PredictionManager extends ServiceManager_1.ServiceManager {
             }
         }
         catch (error) {
-            logger.error("PredictionManager failed to shut down:", error);
+            logger.error(`PredictionManager failed to shut down: ${error}`);
             throw error;
         }
     }

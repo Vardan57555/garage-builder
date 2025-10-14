@@ -1,111 +1,58 @@
+// PriceParamsExtractorTool.ts
 import { InstantiationError } from "@errors/InstantiationError";
 import { sharedLLM } from "@llm/SharedLLM";
 import { BaseTool } from "@agents/tools/BaseTool";
 import { IPricingParams } from "@modules/price-service/services/io/IPrice";
 import { PriceServiceImpl } from "@modules/price-service/services/impl/PriceServiceImpl";
-import pino from "pino";
-import {createLogger} from "@utils/logger/Log";
-const logger: pino.Logger = createLogger(module);
 import { HumanMessage } from "@langchain/core/messages";
-import {BufferMemory} from "langchain/memory";
+import { BufferMemory } from "langchain/memory";
 
-export class PriceParamsExtractorTool extends BaseTool
-{
-    /**
-     * The singleton instance of `PriceParamsExtractorTool`.
-     * @private
-     */
-
+export class PriceParamsExtractorTool extends BaseTool {
     private static instance: PriceParamsExtractorTool;
-
-    /**
-     * The unique name identifier for the `PriceParamsExtractorTool`.
-     * Used internally to distinguish this tool within the agent system.
-     */
-
     readonly name = "priceParamsExtractor";
+    readonly description = "Extracts building pricing parameters from natural language.";
 
-    /**
-     * Describes the purpose of the `PriceParamsExtractorTool`.
-     */
-
-    readonly description = "Extracts building pricing parameters from natural language, calculates building price, and returns structured pricing data.";
-
-    /**
-     * Private constructor to enforce a Singleton pattern.
-     *
-     * @param enforce - Function to enforce a Singleton pattern.
-     * @throws Error if instantiation is attempted directly.
-     */
-
-    constructor(enforce: () => void)
-    {
+    constructor(enforce: () => void) {
         super();
-
-        if (enforce !== Enforce)
-        {
-            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceParamsExtractorTool.getInstance() instead of new.");
-        }
+        if (enforce !== Enforce) throw new InstantiationError(
+            InstantiationError.NOT_INSTANTIABLE,
+            "Use PriceParamsExtractorTool.getInstance() instead of new."
+        );
     }
 
-    /**
-     * Gets the singleton instance of PriceParamsExtractorTool.
-     *
-     * @returns The singleton instance of PriceParamsExtractorTool.
-     */
-
-    public static getInstance(): PriceParamsExtractorTool
-    {
-        if (!PriceParamsExtractorTool.instance)
-        {
+    public static getInstance(): PriceParamsExtractorTool {
+        if (!PriceParamsExtractorTool.instance) {
             PriceParamsExtractorTool.instance = new PriceParamsExtractorTool(Enforce);
         }
-
         return PriceParamsExtractorTool.instance;
     }
 
-    /**
-     * Main method: receives user input, generates IPricingParams, calculates pricing, returns result
-     */
-
-    async _call(userInput: string, memory?: BufferMemory): Promise<string>
-    {
-        const prompt: string = this.buildPrompt(userInput);
-
-        try
-        {
+    public async _call(userInput: string, memory?: BufferMemory): Promise<string> {
+        const prompt = this.buildPrompt(userInput);
+        try {
             const aiMessage = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const rawOutput = aiMessage.content as string;
 
-            const pricingParams: Partial<IPricingParams> = this.extractParams(rawOutput);
+            // ✅ Safe parse & defaults
+            const pricingParams = this.safeExtractParams(rawOutput);
 
-            if (!pricingParams)
-            {
-                return "";
+            if (!pricingParams.width || !pricingParams.length) {
+                return "⚠️ Please provide full garage dimensions and details for accurate pricing.";
             }
 
             const result = await PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(pricingParams as IPricingParams);
 
-            if (memory)
-            {
+            if (memory) {
                 memory.chatHistory.addUserMessage(userInput);
                 memory.chatHistory.addAIChatMessage(result);
             }
 
-            return result;
-        }
-        catch (error)
-        {
-            logger.error(`[PriceParamsExtractorTool] _call failed: ${error.message}`);
-            throw new Error(`Failed to extract pricing and calculate price: ${error.message}`);
+            return result || "⚠️ Pricing service returned empty result. Please provide more info.";
+        } catch (error) {
+            console.error(`[PriceParamsExtractorTool] _call failed:`, error);
+            return "⚠️ Failed to extract pricing and calculate price. Please try again.";
         }
     }
-
-
-
-    /**
-     * Builds the structured LLM prompt
-     */
 
     private buildPrompt(userInput: string): string
     {
@@ -145,109 +92,42 @@ export class PriceParamsExtractorTool extends BaseTool
    `.trim();
     }
 
-
     /**
-     * Extracts and validates pricing params from raw LLM output
+     * Safely parse LLM output and assign defaults
      */
+    private safeExtractParams(rawOutput: string): Partial<IPricingParams> {
+        try {
+            const match = rawOutput.match(/\{[\s\S]*\}/);
+            if (!match) return {};
 
-    public extractParams(rawOutput: string): Partial<IPricingParams> | null
-    {
-        const jsonMatch: RegExpMatchArray = rawOutput.match(/\{[\s\S]*\}/);
-
-        if (!jsonMatch)
-        {
-            return null;
-        }
-
-        try
-        {
-            let jsonText: string = jsonMatch[0]
-                .replace(/undefined/g, "null")
-                .replace(/NaN/g, "null")
-                .replace(/\bNone\b/g, "null")
+            const jsonText = match[0]
+                .replace(/undefined|NaN|\bNone\b/g, "null")
                 .replace(/(\r\n|\n|\r)/gm, "");
 
             const params: Partial<IPricingParams> = JSON.parse(jsonText);
-            this.validateRequiredFields(params);
+
+            // Defaults for critical fields
+            params.width ??= 0;
+            params.length ??= 0;
+            params.height ??= 0;
             params.roof_id = this.normalizeRoofId(params.roof_id);
             params.map_id = this.normalizeMapId(params.map_id);
+
             return params;
-        }
-        catch (err)
-        {
-            throw new Error(`Invalid JSON in LLM output: ${rawOutput}`);
-        }
-    }
-
-    /**
-     * Ensures required fields exist
-     */
-
-    private validateRequiredFields(params: Partial<IPricingParams>): void
-    {
-        const requiredFields: (keyof IPricingParams)[] = ["width", "length", "height", "map_id", "roof_id"];
-        const missing: (keyof IPricingParams)[] = requiredFields.filter((f) => !(f in params));
-
-        if (missing.length)
-        {
-            throw new Error(`Missing required fields: ${missing.join(", ")}`);
+        } catch (err) {
+            console.warn("Invalid JSON from LLM, returning empty params:", err);
+            return {};
         }
     }
 
-    /**
-     * Normalize roof_id: accepts string or number, defaults to "single slope roof" (2).
-     */
-
-    private normalizeRoofId(roof: unknown): number
-    {
-        const roofMap: Record<string, number> = {
-            "gable roof": 1,
-            "single slope roof": 2,
-            "double slope roof": 3,
-            "flat roof": 4,
-        };
-
-        if (typeof roof === "string")
-        {
-            return roofMap[roof.toLowerCase().trim()] ?? 2;
-        }
-
-        if (typeof roof === "number")
-        {
-            return roof;
-        }
-
-        return 2;
+    private normalizeRoofId(roof: unknown): number {
+        if (typeof roof === "number") return roof;
+        return 2; // default single slope roof
     }
 
-    /**
-     * Normalize map_id: accepts string or number, defaults to 1.
-     */
-
-    private normalizeMapId(map: unknown): number
-    {
-        if (typeof map === "string")
-        {
-            return 1
-        }
-
-        if (typeof map === "number")
-        {
-            return map
-        }
-
-        return 1;
-    }
-
-    /**
-     * Determines if the input string contains keywords related to garages/buildings.
-     * Returns true if any relevant keyword is found, false otherwise.
-     */
-
-    public canHandle(input: string): boolean
-    {
-        const garageKeywords = /garage|building|width|length|height/i;
-        return garageKeywords.test(input);
+    private normalizeMapId(map: unknown): number {
+        if (typeof map === "number") return map;
+        return 1; // default map
     }
 }
 

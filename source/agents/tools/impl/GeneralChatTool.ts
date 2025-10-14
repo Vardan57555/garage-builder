@@ -76,13 +76,11 @@ export class GeneralChatTool extends BaseTool
      * the AI-generated string.
      */
 
-    async _call(input: string, memory?: BufferMemory): Promise<string>
-    {
-        const isGarageInput: boolean = /garage|building|width|length|height/i.test(input);
+    async _call(input: string, memory?: BufferMemory): Promise<string> {
+        const isGarageInput = /garage|building|width|length|height/i.test(input);
 
-        if (isGarageInput)
-        {
-            return null;
+        if (isGarageInput) {
+            return null; // let LeadAgent handle garage inputs
         }
 
         const historyMessages: BaseMessage[] = memory ? await memory.chatHistory.getMessages() : [];
@@ -92,15 +90,19 @@ export class GeneralChatTool extends BaseTool
             { role: "user", content: input }
         ];
 
-        const response: AIMessageChunk = await sharedLLM.invoke(messages);
+        try {
+            const response: AIMessageChunk = await sharedLLM.invoke(messages);
 
-        if (memory)
-        {
-            memory.chatHistory.addUserMessage(input);
-            memory.chatHistory.addAIChatMessage(response.content as string);
+            if (memory) {
+                memory.chatHistory.addUserMessage(input);
+                memory.chatHistory.addAIChatMessage(response.content as string);
+            }
+
+            return response.content as string;
+        } catch (e) {
+            console.error("GeneralChatTool invoke failed:", e);
+            return "⚠️ AI service failed. Please try again.";
         }
-
-        return response.content as string;
     }
 }
 

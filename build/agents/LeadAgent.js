@@ -8,10 +8,6 @@ const PriceParamsExtractorTool_1 = require("./tools/impl/PriceParamsExtractorToo
 class LeadAgent {
     static instance;
     memory;
-    tools = [
-        PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance(),
-        GeneralChatTool_1.GeneralChatTool.getInstance()
-    ];
     constructor(enforce) {
         if (enforce !== Enforce) {
             throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Use LeadAgent.getInstance() instead of new.");
@@ -28,27 +24,47 @@ class LeadAgent {
         }
         return LeadAgent.instance;
     }
+    getMessageString(content) {
+        if (typeof content === "string")
+            return content;
+        if (Array.isArray(content)) {
+            return content.map(c => ("text" in c ? c.text : JSON.stringify(c))).join(" ");
+        }
+        return String(content);
+    }
     async run(input) {
-        console.log("Running LeadAgent for input:", input);
         try {
-            const isGarageInput = /garage|building|width|length|height/i.test(input);
+            const history = await this.memory.chatHistory.getMessages();
+            const garageMessages = history
+                .filter(msg => /garage|building|width|length|height/i.test(this.getMessageString(msg.content)))
+                .map(msg => this.getMessageString(msg.content));
+            const fullGarageInput = garageMessages.concat([input]).join("\n");
+            const isGarageInput = /garage|building|width|length|height/i.test(fullGarageInput);
             if (isGarageInput) {
-                console.log("Garage input");
-                return await PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance()._call(input, this.memory);
+                try {
+                    const result = await PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance()._call(fullGarageInput, this.memory);
+                    return result;
+                }
+                catch (e) {
+                    console.error("PriceParamsExtractorTool failed:", e);
+                    return "⚠️ Failed to calculate price. Please provide complete garage details.";
+                }
             }
-            const tool = this.tools.find(t => t.name !== "priceParamsExtractor" && t.canHandle(input));
-            if (!tool) {
-                console.log("General input");
-                return await GeneralChatTool_1.GeneralChatTool.getInstance()._call(input, this.memory);
+            try {
+                const result = await GeneralChatTool_1.GeneralChatTool.getInstance()._call(input, this.memory);
+                return result || "⚠️ Sorry, I couldn’t understand your input.";
             }
-            return await tool._call(input, this.memory);
+            catch (e) {
+                console.error("GeneralChatTool failed:", e);
+                return "⚠️ An error occurred while processing your request.";
+            }
         }
         catch (error) {
-            throw new Error(`LeadAgent execution failed: ${error.message}`);
+            console.error("LeadAgent execution failed:", error);
+            return "⚠️ An unexpected error occurred.";
         }
     }
 }
 exports.LeadAgent = LeadAgent;
-function Enforce() {
-}
+function Enforce() { }
 //# sourceMappingURL=LeadAgent.js.map

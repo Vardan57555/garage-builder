@@ -35,12 +35,18 @@ class GeneralChatTool extends BaseTool_1.BaseTool {
             ...historyMessages,
             { role: "user", content: input }
         ];
-        const response = await SharedLLM_1.sharedLLM.invoke(messages);
-        if (memory) {
-            memory.chatHistory.addUserMessage(input);
-            memory.chatHistory.addAIChatMessage(response.content);
+        try {
+            const response = await SharedLLM_1.sharedLLM.invoke(messages);
+            if (memory) {
+                memory.chatHistory.addUserMessage(input);
+                memory.chatHistory.addAIChatMessage(response.content);
+            }
+            return response.content;
         }
-        return response.content;
+        catch (e) {
+            console.error("GeneralChatTool invoke failed:", e);
+            return "⚠️ AI service failed. Please try again.";
+        }
     }
 }
 exports.GeneralChatTool = GeneralChatTool;
