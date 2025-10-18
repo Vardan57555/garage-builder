@@ -17,17 +17,23 @@ class PriceServiceImpl {
     static instance;
     session = null;
     static BASE_KEYS = [
-        'truss_name',
+        'anchors_cost', 'truss_name', 'garage_door', 'garage_door_frameout', 'walkin_door_frameout',
+        'window_frameout', 'end', 'end_cross_bracing', 'insulation', 'certificate',
+        'full_length_panel', 'side_cross_bracing', 'braces', 'bows', 'addons',
+        'addons_width', 'roof_pitch', 'additional_features', 'connection_fees', 'trusses', 'full_length_side'
     ];
     static PROCEDURE_MAP = {
         end: ({ map_id, width, height }) => [
-            [map_id, width, height],
+            [map_id, height, width],
             'getEachEndClose(?, ?, ?)'
         ],
-        gable_end: ({ map_id, width }) => [
-            [map_id, width],
-            'getGableEnd(?, ?)'
-        ],
+        gable_end: ({ map_id, width, side_end_name }) => {
+            const safeSideEndName = this.safeStringParam(side_end_name);
+            return [
+                [map_id, width, safeSideEndName],
+                'getGableEnd(?, ?, ?)'
+            ];
+        },
         truss_name: ({ map_id }) => [
             [map_id],
             'getTrussName(?)'
@@ -40,7 +46,7 @@ class PriceServiceImpl {
             [map_id],
             'getWalkinDoor(?)'
         ],
-        getAnchor: ({ map_id }) => [
+        anchors_cost: ({ map_id }) => [
             [map_id],
             'getAnchor(?)'
         ],
@@ -56,29 +62,37 @@ class PriceServiceImpl {
             [map_id, width, height],
             'getEndCrossBracing(?, ?, ?)'
         ],
-        insulation: ({ map_id, width, length, height, roof_id, manufacturer }) => [
-            [map_id, width, length, height, roof_id, manufacturer[0]?.manufacturer_id],
-            'getInsulation(?, ?, ?, ?, ?, ?)'
+        insulation: ({ map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side }) => [
+            [map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side],
+            'getInsulation(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ],
         certificate: ({ map_id, width, height, length, structureString }) => [
             [map_id, width, height, length, structureString],
             'getCertificate(?, ?, ?, ?, ?)'
         ],
-        full_length_panel: ({ map_id, length, structureString }) => [
-            [map_id, length, structureString],
-            'getExtraPanel(?, ?, ?)'
+        full_length_panel: ({ map_id, length, structureString, side_end_name }) => [
+            [map_id, length, structureString, side_end_name],
+            'getExtraPanel(?, ?, ?, ?)'
         ],
         side_cross_bracing: ({ map_id, height, length, structureString }) => [
             [map_id, height, length, structureString],
             'getCrossBracing(?, ?, ?, ?)'
         ],
-        delux_two_tone: ({ map_id, width, length, structureString }) => [
-            [map_id, width, length, structureString],
-            'getDeluxTwoTone(?, ?, ?, ?)'
-        ],
+        delux_two_tone: ({ map_id, width, length, structureString, side_end_name }) => {
+            const safeSideEndName = this.safeStringParam(side_end_name);
+            const safeStructureString = this.safeStringParam(structureString);
+            return [
+                [map_id, width, length, safeStructureString, safeSideEndName],
+                'getDeluxTwoTone(?, ?, ?, ?, ?)'
+            ];
+        },
         braces: ({ map_id, length, structureString }) => [
             [map_id, length, structureString],
             'getbraces(?, ?, ?)'
+        ],
+        additional_features: ({ map_id }) => [
+            [map_id],
+            'getAdditionalFeatures(?)'
         ],
         bows: ({ map_id, width, height }) => [
             [map_id, width, height],
@@ -92,13 +106,13 @@ class PriceServiceImpl {
             [map_id, width],
             'getAddonWidth(?, ?)'
         ],
-        roof_pitch: ({ map_id, length, structureString }) => [
-            [map_id, length, structureString],
-            'getRoofPitch(?, ?, ?)'
-        ],
-        connection_fees: ({ map_id, width, length, structureString }) => [
+        roof_pitch: ({ map_id, width, length, structureString }) => [
             [map_id, width, length, structureString],
-            'getConnectionFees(?, ?, ?, ?)'
+            'getRoofPitch(?, ?, ?, ?)'
+        ],
+        connection_fees: ({ map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string }) => [
+            [map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string],
+            'getConnectionFees(?, ?, ?, ?, ?, ?, ?)'
         ],
         trusses: ({ map_id, width, height, length, structureString }) => [
             [map_id, width, height, length, structureString],
@@ -111,7 +125,15 @@ class PriceServiceImpl {
         trusses_slope: ({ map_id, width, single_slope_height, length, structureString }) => [
             [map_id, width, single_slope_height, length, structureString],
             'getTrussUpgrade(?, ?, ?, ?, ?)'
-        ]
+        ],
+        getMapIdByStateName: (({ state_name }) => [
+            [state_name],
+            'getMapIdByStateName(?)'
+        ]),
+        window_frameout: ({ map_id }) => [
+            [map_id],
+            'getWindow(?)'
+        ],
     };
     constructor(enforce) {
         if (enforce !== Enforce) {
@@ -126,11 +148,48 @@ class PriceServiceImpl {
     }
     async fetchBuildingPricingWithUtility(params) {
         try {
+            console.log(`[Pricing] START fetchBuildingPricingWithUtility at ${new Date().toISOString()}`, JSON.stringify(params, null, 2));
+            if (!params.map_id) {
+                if (!params.state_name) {
+                    throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `Cannot resolve map_id — no state_name provided`);
+                }
+                const [args, query] = PriceServiceImpl.PROCEDURE_MAP.getMapIdByStateName({
+                    state_name: params.state_name,
+                    map_id: 0,
+                    width: 0,
+                    height: 0,
+                    length: 0,
+                    roof_id: 0,
+                    buildingStructureFull: [],
+                    manufacturer: [],
+                    componentKeys: [],
+                    structureString: ""
+                });
+                console.log(`[Pricing] STEP 1 — calling ProcedureExecutor.getProcedureData at ${new Date().toISOString()}`);
+                const mapResultsWrapper = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData(args, query, 'getMapIdByStateName');
+                console.log(`[Pricing] STEP 1 — got ProcedureExecutor results`, mapResultsWrapper);
+                const mapResults = mapResultsWrapper[0];
+                if (!mapResults?.length) {
+                    throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `No mapping found for state ${params.state_name}`);
+                }
+                const randomMapping = mapResults[Math.floor(Math.random() * mapResults.length)];
+                params.map_id = randomMapping.map_id;
+                params.manufacturer_id = randomMapping.manufacturer_id;
+                console.log(`[Pricing] STEP 1 — map_id resolved`, {
+                    map_id: params.map_id,
+                    manufacturer_id: params.manufacturer_id
+                });
+            }
             const { finalWidth, finalLength, finalHeight } = await this.calculateFinalDimensions(params);
+            console.log(`[Pricing] STEP 2 — final dimensions`, { finalWidth, finalLength, finalHeight });
+            console.time("fetchBaseData");
             const { manufacturer, buildingStructureFull } = await this.fetchBaseData(params.map_id, params.roof_id, finalWidth, finalHeight, finalLength);
+            console.timeEnd("fetchBaseData");
             if (!buildingStructureFull.length) {
+                console.warn(`[Pricing] STEP 3 — no building structure returned`);
                 return { status: false, message: 'The given dimension is not available for the building' };
             }
+            console.log(`[Pricing] STEP 3 — building structure fetched`, buildingStructureFull);
             let pricing = {
                 building_to_maxlength: finalLength,
                 manufacturer,
@@ -148,19 +207,33 @@ class PriceServiceImpl {
                 single_slope_height: params.single_slope_height,
                 componentKeys
             });
-            Object.assign(pricing, components);
-            if (params.utility_length > 0) {
-                Object.assign(pricing, await this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull));
+            for (const key in components) {
+                const value = components[key];
+                if (Array.isArray(value) && !['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses'].includes(key)) {
+                    components[key] = value[0] ?? null;
+                }
             }
+            Object.assign(pricing, components);
+            console.log(`[Pricing] STEP 4 — component pricing`, components);
+            console.log(`[Pricing] STEP 5 — utility check`, { utility_length: params.utility_length });
+            if (params.utility_length && params.utility_length > 0) {
+                const utilityPricing = await this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull);
+                console.log(`[Pricing] STEP 5 — utility pricing result`, utilityPricing);
+                Object.assign(pricing, utilityPricing);
+            }
+            console.log(`[Pricing] STEP 6 — central structure check`, { central_map_id: params.central_map_id });
             if (params.central_map_id) {
-                Object.assign(pricing, await this.fetchCentralPricing(params));
+                const centralPricing = await this.fetchCentralPricing(params);
+                console.log(`[Pricing] STEP 6 — central pricing result`, centralPricing);
+                Object.assign(pricing, centralPricing);
             }
             this.applyAddons(pricing);
             this.adjustConnectionFees(pricing, params.is_barn);
+            console.log(`[Pricing] STEP 7 — FINAL pricing`, pricing);
             return pricing;
         }
         catch (error) {
-            logger.error(`[Pricing] Error calculating pricing: ${error}`);
+            console.error(`[Pricing] Error calculating pricing`, error);
             throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `Failed to calculate pricing: ${error.message}`);
         }
     }
@@ -206,7 +279,7 @@ class PriceServiceImpl {
         try {
             const widthArray = [];
             const lengthArray = [];
-            const basePrices = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([map_id, gauge], 'getBasePrices(?, ?)', 'base_prices');
+            const basePrices = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([map_id, gauge], 'getBasicPrice(?, ?)', 'base_prices');
             basePrices.forEach((record) => {
                 if (record.structure) {
                     const [w, l] = record.structure.split('x').map(Number);
@@ -231,7 +304,7 @@ class PriceServiceImpl {
                 });
             }
             if ((building_type === 'garage' || building_type === 'commercial') && height > 0) {
-                const endCosts = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([map_id, widthArray, height], 'getEachEndClose(?, ?, ?)', 'end_close');
+                const endCosts = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([map_id, height, widthArray], 'getEachEndClose(?, ?, ?)', 'end_close');
                 basePrices.forEach((record) => {
                     if (record.structure) {
                         const width = Number(record.structure.split('x')[0]);
@@ -374,15 +447,16 @@ class PriceServiceImpl {
         pricing.checkbox_quantity_dropdown = checkboxQuantityDropdown;
     }
     adjustConnectionFees(pricing, is_barn) {
-        if (is_barn !== 'yes') {
+        if (!is_barn) {
             pricing.connection_fees?.forEach(fee => fee.cost = 0);
         }
     }
     async getCentralStructurePricing({ central_map_id, roof_id, central_height, central_length, central_width, central_utility_length, map_id }) {
         const pricing = {};
         try {
-            const centralStructure = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id ?? 0, roof_id ?? 0, null, null, null], 'getBuildingStructure(?, ?, ?, ?, ?)', 'building_structure');
+            const centralStructure = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id ?? 0, roof_id ?? 0, central_width, central_height, central_length], 'getBuildingStructure(?, ?, ?, ?, ?)', 'building_structure');
             if (!centralStructure?.length) {
+                console.warn('No central structure found.');
                 return pricing;
             }
             const { end_length, distance_on_center } = centralStructure[0];
@@ -498,6 +572,148 @@ class PriceServiceImpl {
             throw new ValidationError_1.ValidationError(ValidationError_1.ValidationError.OUTPUT, outputValidation.error.message);
         }
         return outputValidation.value;
+    }
+    async mapStateToIds(stateName) {
+        try {
+            const statesData = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([], 'getStatesAndManufacturer()', 'states_manufacturers');
+            if (statesData && statesData.length > 0) {
+                const normalizedInput = stateName.toLowerCase().trim();
+                const matchedState = statesData.find((state) => {
+                    const stateName = (state.state_name || '').toLowerCase().trim();
+                    const stateAbbr = (state.state_abbr || state.abbreviation || '').toLowerCase().trim();
+                    return stateName === normalizedInput || stateAbbr === normalizedInput;
+                });
+                if (matchedState) {
+                    return {
+                        map_id: matchedState.map_id,
+                        manufacturer_id: matchedState.manufacturer_id || matchedState.default_manufacturer_id || 1
+                    };
+                }
+            }
+            logger.warn(`[PriceService] State "${stateName}" not found in database`);
+            return null;
+        }
+        catch (error) {
+            logger.error(`[PriceService] Failed to map state "${stateName}":`, error);
+            return null;
+        }
+    }
+    async mapRoofTypeToId(roofTypeName, manufacturer_id) {
+        try {
+            const normalizedRoofType = roofTypeName.toLowerCase().trim();
+            if (normalizedRoofType.includes('vertical')) {
+                return 3;
+            }
+            if (normalizedRoofType.includes('a-frame') ||
+                normalizedRoofType.includes('a frame') ||
+                normalizedRoofType.includes('aframe') ||
+                normalizedRoofType.includes('boxed') ||
+                normalizedRoofType.includes('box') ||
+                normalizedRoofType.includes('economy') ||
+                normalizedRoofType.includes('eave') ||
+                normalizedRoofType.includes('eve') ||
+                normalizedRoofType.includes('horizontal')) {
+                return 2;
+            }
+            if (normalizedRoofType.includes('regular') ||
+                normalizedRoofType.includes('standard') ||
+                normalizedRoofType.includes('classic') ||
+                normalizedRoofType.includes('traditional') ||
+                normalizedRoofType.includes('round') ||
+                normalizedRoofType.includes('premium') ||
+                normalizedRoofType.includes('b-frame')) {
+                return 1;
+            }
+            logger.warn(`[PriceService] Roof type "${roofTypeName}" not recognized, defaulting to Regular (1)`);
+            return 1;
+        }
+        catch (error) {
+            logger.error(`[PriceService] Failed to map roof type "${roofTypeName}":`, error);
+            return 1;
+        }
+    }
+    async mapManufacturerToId(manufacturerName, mapId) {
+        try {
+            const manufacturers = await this.getManufacturer(mapId);
+            if (manufacturers && manufacturers.length > 0) {
+                const normalizedInput = manufacturerName.toLowerCase().trim();
+                const matchedManufacturer = manufacturers.find((mfg) => {
+                    const mfgName = (mfg.manufacturer_name || mfg.name || '').toLowerCase().trim();
+                    return mfgName.includes(normalizedInput) || normalizedInput.includes(mfgName);
+                });
+                if (matchedManufacturer) {
+                    return matchedManufacturer.manufacturer_id || matchedManufacturer.manufacturer_id;
+                }
+            }
+            logger.warn(`[PriceService] Manufacturer "${manufacturerName}" not found for map_id ${mapId}`);
+            return null;
+        }
+        catch (error) {
+            logger.error(`[PriceService] Failed to map manufacturer "${manufacturerName}":`, error);
+            return null;
+        }
+    }
+    async convertUserParamsToTechnical(userParams) {
+        try {
+            let map_id = 1;
+            let manufacturer_id = 1;
+            if (userParams.state_name) {
+                const stateMapping = await this.mapStateToIds(userParams.state_name);
+                if (stateMapping) {
+                    map_id = stateMapping.map_id;
+                    manufacturer_id = stateMapping.manufacturer_id;
+                }
+                else {
+                    throw new Error(`❌ State "${userParams.state_name}" is not available in our service area. ` +
+                        `Please provide a valid US state name.`);
+                }
+            }
+            let roof_id = 2;
+            if (userParams.roof_type) {
+                roof_id = await this.mapRoofTypeToId(userParams.roof_type, map_id);
+            }
+            if (userParams.manufacturer_name) {
+                const manufacturerIdResult = await this.mapManufacturerToId(userParams.manufacturer_name, map_id);
+                if (manufacturerIdResult) {
+                    manufacturer_id = manufacturerIdResult;
+                }
+            }
+            const technicalParams = {
+                width: userParams.width || 0,
+                length: userParams.length || 0,
+                height: userParams.height || 0,
+                map_id,
+                roof_id,
+                manufacturer_id,
+                utility_length: userParams.utility_length || 0,
+                building_type: userParams.building_type,
+                gauge: userParams.gauge,
+                is_barn: userParams.is_barn || false,
+                single_slope_height: userParams.single_slope_height,
+                central_map_id: userParams.central_map_id,
+                central_height: userParams.central_height,
+                central_utility_length: userParams.central_utility_length,
+                central_length: userParams.central_length,
+                central_width: userParams.central_width,
+            };
+            logger.info('[PriceService] Converted user params to technical:', {
+                state: userParams.state_name,
+                roof: userParams.roof_type,
+                map_id,
+                roof_id,
+                manufacturer_id
+            });
+            return technicalParams;
+        }
+        catch (error) {
+            logger.error('[PriceService] Failed to convert user params to technical:', error);
+            throw error;
+        }
+    }
+    static safeStringParam(value, collation = 'utf8mb4_general_ci') {
+        if (!value || value.trim() === '')
+            return `'' COLLATE ${collation}`;
+        return `'${value}' COLLATE ${collation}`;
     }
 }
 exports.PriceServiceImpl = PriceServiceImpl;

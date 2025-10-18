@@ -1,4 +1,4 @@
 export interface IManufacturer
 {
-    manufacturer_id: string
+    manufacturer_id: number
 }

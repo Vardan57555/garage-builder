@@ -17,13 +17,15 @@ export interface IPricingParams {
     roof_id: number;
     utility_length?: number;
     building_type?: string;
-    gauge?: string
+    gauge?: number
     central_map_id?: number;
     central_height?: number;
     central_utility_length?: number;
     central_length?: number;
+    state_name?: string;
     central_width?: number;
-    is_barn?: string;
+    is_barn?: boolean;
+    manufacturer_id?: number;
 }
 
 
@@ -69,6 +71,22 @@ export interface FetchComponentsParams
     buildingStructureFull: { end_length: number; distance_on_center: number }[];
     manufacturer: IManufacturer[];
     single_slope_height?: number;
+    manufacturer_id?: number;
+    side_end_name?: string;
+    both_side?: number;
+    both_ends?: number;
+    roof_only?: number;
+    utility_end?:number;
+    utility_side?:number;
+    utility_roof?:number;
+    utility_opposite_side?:number;
+    pitch_side?:number;
+    slope_side?:number;
+    utility_slope_side?:number;
+    length_without_wrap?: number;
+    length_without_wrap_string?: string
+    pitch_type?:string;
+    state_name?: string;
     componentKeys: string[];
 }
 
@@ -149,4 +167,10 @@ export interface IUtilityPricingResult {
     panel: ISidePriceResult[];
     utility_side: ISidePriceResult[];
     utility_slope_height: ISidePriceResult[];
+}
+
+export interface IMapResult {
+    map_id: number;
+    manufacturer_id?: number;
+    building_id?: number;
 }
