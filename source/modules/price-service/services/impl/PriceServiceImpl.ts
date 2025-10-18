@@ -13,7 +13,7 @@ import {
     FetchComponentsParams, GetUtilityPricingParams, IAddon, IAnchor,
     IBasePrice,
     IBaseStructureParams,
-    IEndCost, IFetchPricesParams, IFullStructureParams,
+    IEndCost, IFetchPricesParams, IFullStructureParams, IMapResult,
     IPrice, IPricing,
     IPricingParams,
     ISideHeight, ISidePriceResult, IUtilityPricingResult, ProcedureConfig
@@ -38,33 +38,35 @@ export class PriceServiceImpl implements PriceService
 
     private session: ort.InferenceSession | null = null;
 
-    // private static readonly BASE_KEYS: string[] = [
-    //     'truss_name','anchors_cost','garage_door','garage_door_frameout','walkin_door_frameout',
-    //     'window_frameout','end','gable_end','end_cross_bracing','insulation','certificate',
-    //     'full_length_panel','side_cross_bracing','delux_two_tone','braces','bows','addons',
-    //     'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
-    // ];
-
     private static readonly BASE_KEYS: string[] = [
-        'truss_name',
-        // 'anchors_cost',
-        // 'garage_door','garage_door_frameout','walkin_door_frameout',
-        // 'window_frameout','end','gable_end','end_cross_bracing','insulation','certificate',
-        // 'full_length_panel','side_cross_bracing','delux_two_tone','braces','bows','addons',
-        // 'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
+        'anchors_cost', 'truss_name','garage_door','garage_door_frameout','walkin_door_frameout',
+        'window_frameout','end','end_cross_bracing','insulation','certificate',
+        'full_length_panel','side_cross_bracing','braces','bows','addons',
+        'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
     ];
+
+    // private static readonly BASE_KEYS: string[] = [
+    //     'truss_name',
+    //     // 'anchors_cost',
+    //     // 'garage_door','garage_door_frameout','walkin_door_frameout',
+    //     // 'window_frameout','end','gable_end','end_cross_bracing','insulation','certificate',
+    //     // 'full_length_panel','side_cross_bracing','delux_two_tone','braces','bows','addons',
+    //     // 'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
+    // ];
 
         private static readonly PROCEDURE_MAP: Record<string, ProcedureConfig> =
             {
             end: ({ map_id, width, height }) => [
-                [map_id, width, height],
+                [map_id, height, width],
                 'getEachEndClose(?, ?, ?)'
             ],
-
-            gable_end: ({ map_id, width }) => [
-                [map_id, width],
-                'getGableEnd(?, ?)'
-            ],
+                gable_end: ({ map_id, width, side_end_name }) => {
+                    const safeSideEndName = this.safeStringParam(side_end_name); // defaults to utf8mb4_general_ci
+                    return [
+                        [map_id, width, safeSideEndName],
+                        'getGableEnd(?, ?, ?)'
+                    ];
+                },
             truss_name: ({ map_id }) => [
                 [map_id],
                 'getTrussName(?)'
@@ -77,7 +79,7 @@ export class PriceServiceImpl implements PriceService
                 [map_id],
                 'getWalkinDoor(?)'
             ],
-            getAnchor: ({ map_id }) => [
+            anchors_cost: ({ map_id }) => [
                 [map_id],
                 'getAnchor(?)'
             ],
@@ -94,9 +96,9 @@ export class PriceServiceImpl implements PriceService
                 'getEndCrossBracing(?, ?, ?)'
             ],
 
-            insulation: ({ map_id, width, length, height, roof_id, manufacturer }) => [
-                [map_id, width, length, height, roof_id, manufacturer[0]?.manufacturer_id],
-                'getInsulation(?, ?, ?, ?, ?, ?)'
+            insulation: ({map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side }) => [
+                [map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side],
+                'getInsulation(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             ],
 
             certificate: ({ map_id, width, height, length, structureString }) => [
@@ -104,9 +106,9 @@ export class PriceServiceImpl implements PriceService
                 'getCertificate(?, ?, ?, ?, ?)'
             ],
 
-            full_length_panel: ({ map_id, length, structureString }) => [
-                [map_id, length, structureString],
-                'getExtraPanel(?, ?, ?)'
+            full_length_panel: ({ map_id, length, structureString, side_end_name }) => [
+                [map_id, length, structureString, side_end_name],
+                'getExtraPanel(?, ?, ?, ?)'
             ],
 
             side_cross_bracing: ({ map_id, height, length, structureString }) => [
@@ -114,16 +116,25 @@ export class PriceServiceImpl implements PriceService
                 'getCrossBracing(?, ?, ?, ?)'
             ],
 
-            delux_two_tone: ({ map_id, width, length, structureString }) => [
-                [map_id, width, length, structureString],
-                'getDeluxTwoTone(?, ?, ?, ?)'
-            ],
+                delux_two_tone: ({ map_id, width, length, structureString, side_end_name }) => {
+                    const safeSideEndName = this.safeStringParam(side_end_name);
+                    const safeStructureString = this.safeStringParam(structureString);
+
+                    return [
+                        [map_id, width, length, safeStructureString, safeSideEndName],
+                        'getDeluxTwoTone(?, ?, ?, ?, ?)'
+                    ];
+                },
 
             braces: ({ map_id, length, structureString }) => [
                 [map_id, length, structureString],
                 'getbraces(?, ?, ?)'
             ],
 
+            additional_features: ({ map_id }) => [
+                [map_id],
+                'getAdditionalFeatures(?)'
+            ],
             bows: ({ map_id, width, height }) => [
                 [map_id, width, height],
                 'getBow(?, ?, ?)'
@@ -139,14 +150,14 @@ export class PriceServiceImpl implements PriceService
                 'getAddonWidth(?, ?)'
             ],
 
-            roof_pitch: ({ map_id, length, structureString }) => [
-                [map_id, length, structureString],
-                'getRoofPitch(?, ?, ?)'
+            roof_pitch: ({ map_id, width, length, structureString }) => [
+                [map_id, width, length, structureString],
+                'getRoofPitch(?, ?, ?, ?)'
             ],
 
-            connection_fees: ({ map_id, width, length, structureString }) => [
-                [map_id, width, length, structureString],
-                'getConnectionFees(?, ?, ?, ?)'
+            connection_fees: ({ map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string }) => [
+                [map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string],
+                'getConnectionFees(?, ?, ?, ?, ?, ?, ?)'
             ],
 
             trusses: ({ map_id, width, height, length, structureString }) => [
@@ -161,7 +172,15 @@ export class PriceServiceImpl implements PriceService
             trusses_slope: ({ map_id, width, single_slope_height, length, structureString }) => [
                 [map_id, width, single_slope_height, length, structureString],
                 'getTrussUpgrade(?, ?, ?, ?, ?)'
-            ]
+            ],
+            getMapIdByStateName: (({ state_name }: any) => [
+                [state_name],
+                'getMapIdByStateName(?)'
+            ]) as ProcedureConfig,
+            window_frameout: ({ map_id }) => [
+                [map_id],
+                'getWindow(?)'
+            ],
         };
 
 
@@ -204,18 +223,73 @@ export class PriceServiceImpl implements PriceService
      * @throws {ServerError.INTERNAL} If any procedure call or calculation fails.
      */
 
-    public async fetchBuildingPricingWithUtility(params: IPricingParams)
-    {
-        try
-        {
+    public async fetchBuildingPricingWithUtility(params: IPricingParams) {
+        try {
+            // 🧭 STEP 0 — Log incoming params
+            console.log(`[Pricing] START fetchBuildingPricingWithUtility at ${new Date().toISOString()}`, JSON.stringify(params, null, 2));
+
+            // 🧭 STEP 1 — Resolve map_id if not provided
+            if (!params.map_id) {
+                if (!params.state_name) {
+                    throw new ServerError(ServerError.INTERNAL, `Cannot resolve map_id — no state_name provided`);
+                }
+
+                const [args, query] = PriceServiceImpl.PROCEDURE_MAP.getMapIdByStateName({
+                    state_name: params.state_name,
+                    map_id: 0,
+                    width: 0,
+                    height: 0,
+                    length: 0,
+                    roof_id: 0,
+                    buildingStructureFull: [],
+                    manufacturer: [],
+                    componentKeys: [],
+                    structureString: ""
+                });
+
+                console.log(`[Pricing] STEP 1 — calling ProcedureExecutor.getProcedureData at ${new Date().toISOString()}`);
+                const mapResultsWrapper = await ProcedureExecutor.getProcedureData<IMapResult[]>(
+                    args,
+                    query,
+                    'getMapIdByStateName'
+                );
+                console.log(`[Pricing] STEP 1 — got ProcedureExecutor results`, mapResultsWrapper);
+
+                const mapResults: IMapResult[] = mapResultsWrapper[0];
+                if (!mapResults?.length) {
+                    throw new ServerError(ServerError.INTERNAL, `No mapping found for state ${params.state_name}`);
+                }
+
+                const randomMapping = mapResults[Math.floor(Math.random() * mapResults.length)];
+                params.map_id = randomMapping.map_id;
+                params.manufacturer_id = randomMapping.manufacturer_id;
+
+                console.log(`[Pricing] STEP 1 — map_id resolved`, {
+                    map_id: params.map_id,
+                    manufacturer_id: params.manufacturer_id
+                });
+            }
+
+            // 🧮 STEP 2 — Calculate final dimensions
             const { finalWidth, finalLength, finalHeight } = await this.calculateFinalDimensions(params);
+            console.log(`[Pricing] STEP 2 — final dimensions`, { finalWidth, finalLength, finalHeight });
 
-            const { manufacturer, buildingStructureFull } = await this.fetchBaseData(params.map_id, params.roof_id, finalWidth, finalHeight, finalLength);
+            // 🧮 STEP 3 — Fetch building structure
+            console.time("fetchBaseData");
+            const { manufacturer, buildingStructureFull } = await this.fetchBaseData(
+                params.map_id,
+                params.roof_id,
+                finalWidth,
+                finalHeight,
+                finalLength
+            );
+            console.timeEnd("fetchBaseData");
 
-            if (!buildingStructureFull.length)
-            {
+            if (!buildingStructureFull.length) {
+                console.warn(`[Pricing] STEP 3 — no building structure returned`);
                 return { status: false, message: 'The given dimension is not available for the building' };
             }
+            console.log(`[Pricing] STEP 3 — building structure fetched`, buildingStructureFull);
 
             let pricing: Record<string, any> = {
                 building_to_maxlength: finalLength,
@@ -223,8 +297,9 @@ export class PriceServiceImpl implements PriceService
                 building_structure: buildingStructureFull
             };
 
+            // 🧩 STEP 4 — Fetch component pricing
             const componentKeys: string[] = this.getComponentKeys(params.single_slope_height);
-            const components: { [p: string]: unknown[] } = await this.fetchComponentsPricing({
+            const components: Record<string, unknown | unknown[]> = await this.fetchComponentsPricing({
                 map_id: params.map_id,
                 roof_id: params.roof_id,
                 width: finalWidth,
@@ -235,31 +310,44 @@ export class PriceServiceImpl implements PriceService
                 single_slope_height: params.single_slope_height,
                 componentKeys
             });
+
+            for (const key in components) {
+                const value = components[key];
+                if (Array.isArray(value) && !['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses'].includes(key)) {
+                    components[key] = value[0] ?? null;
+                }
+            }
+
             Object.assign(pricing, components);
+            console.log(`[Pricing] STEP 4 — component pricing`, components);
 
-            if (params.utility_length > 0)
-            {
-                Object.assign(pricing, await this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull));
+            // 🧰 STEP 5 — Fetch utility pricing if applicable
+            console.log(`[Pricing] STEP 5 — utility check`, { utility_length: params.utility_length });
+            if (params.utility_length && params.utility_length > 0) {
+                const utilityPricing = await this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull);
+                console.log(`[Pricing] STEP 5 — utility pricing result`, utilityPricing);
+                Object.assign(pricing, utilityPricing);
             }
 
-            if (params.central_map_id)
-            {
-                Object.assign(pricing, await this.fetchCentralPricing(params));
+            // 🏗 STEP 6 — Fetch central pricing if applicable
+            console.log(`[Pricing] STEP 6 — central structure check`, { central_map_id: params.central_map_id });
+            if (params.central_map_id) {
+                const centralPricing = await this.fetchCentralPricing(params);
+                console.log(`[Pricing] STEP 6 — central pricing result`, centralPricing);
+                Object.assign(pricing, centralPricing);
             }
 
+            // 🛠 STEP 7 — Apply addons & adjust connection fees
             this.applyAddons(pricing);
-
             this.adjustConnectionFees(pricing, params.is_barn);
+            console.log(`[Pricing] STEP 7 — FINAL pricing`, pricing);
 
             return pricing;
-        }
-        catch (error)
-        {
-            logger.error(`[Pricing] Error calculating pricing: ${error}`);
+        } catch (error) {
+            console.error(`[Pricing] Error calculating pricing`, error);
             throw new ServerError(ServerError.INTERNAL, `Failed to calculate pricing: ${error.message}`);
         }
     }
-
 
     /**
      * Predicts the price for a building configuration using a preloaded ONNX model.
@@ -363,7 +451,7 @@ export class PriceServiceImpl implements PriceService
 
             const basePrices: IBasePrice[] = await ProcedureExecutor.getProcedureData<IBasePrice>(
                 [map_id, gauge],
-                'getBasePrices(?, ?)',
+                'getBasicPrice(?, ?)',
                 'base_prices'
             );
 
@@ -407,7 +495,7 @@ export class PriceServiceImpl implements PriceService
             if ((building_type === 'garage' || building_type === 'commercial') && height > 0)
             {
                 const endCosts: IEndCost[] = await ProcedureExecutor.getProcedureData<IEndCost>(
-                    [map_id, widthArray, height],
+                    [map_id, height, widthArray],
                     'getEachEndClose(?, ?, ?)',
                     'end_close'
                 );
@@ -739,9 +827,9 @@ export class PriceServiceImpl implements PriceService
      * @param is_barn - Optional flag indicating if the building is a barn ('yes' to retain fees).
      */
 
-    private adjustConnectionFees(pricing: Record<string, any>, is_barn?: string)
+    private adjustConnectionFees(pricing: Record<string, any>, is_barn?: boolean)
     {
-        if (is_barn !== 'yes')
+        if (!is_barn)
         {
             pricing.connection_fees?.forEach(fee => fee.cost = 0);
         }
@@ -769,13 +857,14 @@ export class PriceServiceImpl implements PriceService
         try
         {
             const centralStructure = await ProcedureExecutor.getProcedureData<any>(
-                [central_map_id ?? 0, roof_id ?? 0, null, null, null],
+                [central_map_id ?? 0, roof_id ?? 0, central_width, central_height, central_length],
                 'getBuildingStructure(?, ?, ?, ?, ?)',
                 'building_structure'
             );
 
             if (!centralStructure?.length)
             {
+                console.warn('No central structure found.');
                 return pricing;
             }
 
@@ -999,6 +1088,233 @@ export class PriceServiceImpl implements PriceService
         }
 
         return outputValidation.value;
+    }
+
+    /**
+     * Add these methods to your PriceServiceImpl class
+     * These use your EXISTING stored procedures
+     */
+
+    /**
+     * 🗺️ Maps a state name to its corresponding map_id and default manufacturer_id
+     * Uses your existing getStatesAndManufacturer procedure
+     * @param stateName - The state name (e.g., "Arizona", "Texas")
+     * @returns Object containing map_id and manufacturer_id, or null if not found
+     */
+    public async mapStateToIds(stateName: string): Promise<{ map_id: number; manufacturer_id: number } | null> {
+        try {
+            const statesData = await ProcedureExecutor.getProcedureData<any>(
+                [],
+                'getStatesAndManufacturer()',
+                'states_manufacturers'
+            );
+
+            if (statesData && statesData.length > 0) {
+                const normalizedInput = stateName.toLowerCase().trim();
+
+                const matchedState = statesData.find((state: any) => {
+                    const stateName = (state.state_name || '').toLowerCase().trim();
+                    const stateAbbr = (state.state_abbr || state.abbreviation || '').toLowerCase().trim();
+
+                    return stateName === normalizedInput || stateAbbr === normalizedInput;
+                });
+
+                if (matchedState) {
+                    return {
+                        map_id: matchedState.map_id,
+                        manufacturer_id: matchedState.manufacturer_id || matchedState.default_manufacturer_id || 1
+                    };
+                }
+            }
+
+            logger.warn(`[PriceService] State "${stateName}" not found in database`);
+            return null;
+        } catch (error) {
+            logger.error(`[PriceService] Failed to map state "${stateName}":`, error);
+            return null;
+        }
+    }
+
+    /**
+     * 🏠 Maps a roof type name to its corresponding roof_id
+     * Based on your manufacturer_roofs table:
+     * - roof_id 1 = Regular/Standard/Round/Classical/Traditional/Premium
+     * - roof_id 2 = A-Frame/Boxed Eave/Box/Economy (horizontal)
+     * - roof_id 3 = Vertical
+     *
+     * @param roofTypeName - The roof type name (e.g., "vertical", "regular", "box", "a-frame")
+     * @param manufacturer_id - Optional manufacturer_id to get specific roof name
+     * @returns The roof_id (1, 2, or 3)
+     */
+    public async mapRoofTypeToId(roofTypeName: string, manufacturer_id?: number): Promise<number> {
+        try {
+            const normalizedRoofType = roofTypeName.toLowerCase().trim();
+
+            if (normalizedRoofType.includes('vertical')) {
+                return 3;
+            }
+
+            if (
+                normalizedRoofType.includes('a-frame') ||
+                normalizedRoofType.includes('a frame') ||
+                normalizedRoofType.includes('aframe') ||
+                normalizedRoofType.includes('boxed') ||
+                normalizedRoofType.includes('box') ||
+                normalizedRoofType.includes('economy') ||
+                normalizedRoofType.includes('eave') ||
+                normalizedRoofType.includes('eve') ||
+                normalizedRoofType.includes('horizontal')
+            ) {
+                return 2;
+            }
+
+            if (
+                normalizedRoofType.includes('regular') ||
+                normalizedRoofType.includes('standard') ||
+                normalizedRoofType.includes('classic') ||
+                normalizedRoofType.includes('traditional') ||
+                normalizedRoofType.includes('round') ||
+                normalizedRoofType.includes('premium') ||
+                normalizedRoofType.includes('b-frame')
+            ) {
+                return 1;
+            }
+
+            logger.warn(`[PriceService] Roof type "${roofTypeName}" not recognized, defaulting to Regular (1)`);
+            return 1;
+        } catch (error) {
+            logger.error(`[PriceService] Failed to map roof type "${roofTypeName}":`, error);
+            return 1; // Default to Regular
+        }
+    }
+
+    /**
+     * 🏭 Maps a manufacturer name to its corresponding manufacturer_id
+     * Uses your existing getManufacture procedure
+     * @param manufacturerName - The manufacturer name
+     * @param mapId - The map_id to get manufacturer for that region
+     * @returns The manufacturer_id, or null if not found
+     */
+    public async mapManufacturerToId(manufacturerName: string, mapId: number): Promise<number | null> {
+        try {
+            const manufacturers = await this.getManufacturer(mapId);
+
+            if (manufacturers && manufacturers.length > 0) {
+                const normalizedInput = manufacturerName.toLowerCase().trim();
+
+                const matchedManufacturer = manufacturers.find((mfg: any) => {
+                    const mfgName = (mfg.manufacturer_name || mfg.name || '').toLowerCase().trim();
+                    return mfgName.includes(normalizedInput) || normalizedInput.includes(mfgName);
+                });
+
+                if (matchedManufacturer) {
+                    return matchedManufacturer.manufacturer_id || matchedManufacturer.manufacturer_id;
+                }
+            }
+
+            logger.warn(`[PriceService] Manufacturer "${manufacturerName}" not found for map_id ${mapId}`);
+            return null;
+        } catch (error) {
+            logger.error(`[PriceService] Failed to map manufacturer "${manufacturerName}":`, error);
+            return null;
+        }
+    }
+
+    /**
+     * 🔄 Converts user-friendly parameters to technical IPricingParams
+     * This is the main orchestration method
+     * @param userParams - User-friendly parameters with names instead of IDs
+     * @returns Technical IPricingParams with all IDs resolved
+     * @throws Error if required mappings fail
+     */
+    public async convertUserParamsToTechnical(userParams: {
+        width?: number;
+        length?: number;
+        height?: number;
+        state_name?: string;
+        roof_type?: string;
+        manufacturer_name?: string;
+        utility_length?: number;
+        building_type?: string;
+        gauge?: number;
+        is_barn?: boolean;
+        single_slope_height?: number;
+        central_map_id?: number;
+        central_height?: number;
+        central_utility_length?: number;
+        central_length?: number;
+        central_width?: number;
+    }): Promise<IPricingParams> {
+        try {
+            let map_id = 1;
+            let manufacturer_id = 1;
+
+            if (userParams.state_name) {
+                const stateMapping = await this.mapStateToIds(userParams.state_name);
+                if (stateMapping) {
+                    map_id = stateMapping.map_id;
+                    manufacturer_id = stateMapping.manufacturer_id;
+                } else {
+                    throw new Error(
+                        `❌ State "${userParams.state_name}" is not available in our service area. ` +
+                        `Please provide a valid US state name.`
+                    );
+                }
+            }
+
+            let roof_id = 2;
+            if (userParams.roof_type) {
+                roof_id = await this.mapRoofTypeToId(userParams.roof_type, map_id);
+            }
+
+            if (userParams.manufacturer_name) {
+                const manufacturerIdResult = await this.mapManufacturerToId(
+                    userParams.manufacturer_name,
+                    map_id
+                );
+                if (manufacturerIdResult) {
+                    manufacturer_id = manufacturerIdResult;
+                }
+            }
+
+            // Step 4: Build final technical params
+            const technicalParams: IPricingParams = {
+                width: userParams.width || 0,
+                length: userParams.length || 0,
+                height: userParams.height || 0,
+                map_id,
+                roof_id,
+                manufacturer_id,
+                utility_length: userParams.utility_length || 0,
+                building_type: userParams.building_type,
+                gauge: userParams.gauge,
+                is_barn: userParams.is_barn || false,
+                single_slope_height: userParams.single_slope_height,
+                central_map_id: userParams.central_map_id,
+                central_height: userParams.central_height,
+                central_utility_length: userParams.central_utility_length,
+                central_length: userParams.central_length,
+                central_width: userParams.central_width,
+            };
+
+            logger.info('[PriceService] Converted user params to technical:', {
+                state: userParams.state_name,
+                roof: userParams.roof_type,
+                map_id,
+                roof_id,
+                manufacturer_id
+            });
+
+            return technicalParams;
+        } catch (error) {
+            logger.error('[PriceService] Failed to convert user params to technical:', error);
+            throw error;
+        }
+    }
+
+    private static safeStringParam(value?: string, collation: string = 'utf8mb4_general_ci'): string {
+        if (!value || value.trim() === '') return `'' COLLATE ${collation}`;
+        return `'${value}' COLLATE ${collation}`;
     }
 }
 
