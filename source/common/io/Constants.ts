@@ -1,4 +1,5 @@
 import { GuidVersions } from "joi";
+import {PricingComponent} from "@agents/tools/io/IChat";
 
 /**
  * Global constants for the application.
@@ -60,4 +61,9 @@ export class Constants
     public static readonly AGENT_TYPES = {
         STRUCTURED_CHAT: "structured-chat-zero-shot-react-description"
     } as const;
+
+    public static readonly PRICING_COMPONENTS: PricingComponent[] = [
+        { name: "End Panels", key: "end", extractor: (p) => p.end?.end_close_cost ?? 0 },
+        { name: "Garage Door", key: "garage_door", extractor: (p) => p.garage_door?.cost ?? 0 },
+    ];
 }
