@@ -4,26 +4,11 @@ import { BaseTool } from "@agents/tools/BaseTool";
 import { IPricingParams } from "@modules/price-service/services/io/IPrice";
 import { PriceServiceImpl } from "@modules/price-service/services/impl/PriceServiceImpl";
 import { AIMessageChunk, HumanMessage } from "@langchain/core/messages";
-
-interface UserFriendlyParams {
-    garage_type?: string;
-    width?: number;
-    length?: number;
-    height?: number;
-    state_name?: string;
-    roof_type?: string;
-    manufacturer_name?: string;
-    utility_length?: number;
-    building_type?: string;
-    gauge?: number;
-    is_barn?: boolean;
-}
-
-interface PricingComponent {
-    name: string;
-    key: keyof any;
-    extractor: (pricing: any) => number;
-}
+import pino from "pino";
+import {createLogger} from "@utils/logger/Log";
+import { UserFriendlyParams} from "@agents/tools/io/IChat";
+import {Constants} from "@common/io/Constants";
+const logger: pino.Logger = createLogger(module);
 
 export class PriceParamsExtractorTool extends BaseTool
 {
@@ -43,13 +28,15 @@ export class PriceParamsExtractorTool extends BaseTool
     private readonly NUMERIC_FIELDS: (keyof UserFriendlyParams)[] =
         ["width", "length", "height", "utility_length", "gauge"];
 
-    private readonly PRICING_COMPONENTS: PricingComponent[] = [
-        { name: "End Panels", key: "end", extractor: (p) => p.end?.end_close_cost ?? 0 },
-        { name: "Garage Door", key: "garage_door", extractor: (p) => p.garage_door?.cost ?? 0 },
-    ];
-
     readonly name = "priceParamsExtractor";
     readonly description = "Extracts building pricing parameters from natural language.";
+
+    /**
+     * Private constructor to enforce a Singleton pattern.
+     *
+     * @param enforce - Function to enforce a Singleton pattern.
+     * @throws Error if instantiation is attempted directly.
+     */
 
     constructor(enforce: () => void)
     {
@@ -60,6 +47,12 @@ export class PriceParamsExtractorTool extends BaseTool
         }
     }
 
+    /**
+     * Gets the singleton instance of PriceParamsExtractorTool.
+     *
+     * @returns The singleton instance of PriceParamsExtractorTool.
+     */
+
     public static getInstance(): PriceParamsExtractorTool
     {
         if (!PriceParamsExtractorTool.instance)
@@ -68,6 +61,14 @@ export class PriceParamsExtractorTool extends BaseTool
         }
         return PriceParamsExtractorTool.instance;
     }
+
+    /**
+     * Sends a user input prompt to the shared LLM and retrieves its response.
+     * @param userInput - The raw user input string to be processed and passed to the model.
+     * @returns A promise resolving to the model’s textual response.
+     * Returns an empty JSON string (`"{}"`) if the LLM call fails.
+     * @throws Logs an error to the console if the invocation of the LLM fails.
+     */
 
     public async _call(userInput: string): Promise<string>
     {
@@ -78,17 +79,23 @@ export class PriceParamsExtractorTool extends BaseTool
         }
         catch (error)
         {
-            console.error(`[PriceParamsExtractorTool] _call failed:`, error);
+            logger.error(`[PriceParamsExtractorTool] _call failed:`, error);
             return "{}";
         }
     }
+
+    /**
+     * Calculates the building price based on the provided pricing parameters.
+     * @param params - The pricing parameters (`IPricingParams`) used to request a price calculation.
+     * @returns A promise resolving to a formatted pricing result string.
+     * Returns a warning message if the pricing service fails or returns no data.
+     * @throws Logs an error to the console if the pricing calculation process encounters an exception.
+     */
 
     public async calculatePriceWithParams(params: IPricingParams): Promise<string>
     {
         try
         {
-            console.log("[PriceParamsExtractorTool] Calculating with params:", params);
-
             const result = await PriceServiceImpl.getInstance()
                 .fetchBuildingPricingWithUtility(params);
 
@@ -106,10 +113,17 @@ export class PriceParamsExtractorTool extends BaseTool
         }
         catch (error)
         {
-            console.error("[PriceParamsExtractorTool] calculatePriceWithParams failed:", error);
+            logger.error("[PriceParamsExtractorTool] calculatePriceWithParams failed:", error);
             return "⚠️ Failed to calculate price with the given parameters.";
         }
     }
+
+    /**
+     * Formats the pricing result into a structured, user-friendly quote message.
+     * @param pricing - The raw pricing data returned from the pricing service.
+     * @param params - The original pricing parameters (`IPricingParams`) used to generate the quote.
+     * @returns A formatted string containing the total price, specifications, and a detailed price breakdown.
+     */
 
     private formatPricingResult(pricing: any, params: IPricingParams): string
     {
@@ -126,6 +140,14 @@ export class PriceParamsExtractorTool extends BaseTool
             "\n\n💡 This is your base quote. Add-ons and customizations can be added for additional cost."
         ].join('\n');
     }
+
+    /**
+     * Builds a formatted, human-readable specification section for the price quote.
+     * @param pricing - The raw pricing data returned from the pricing service.
+     * @param params - The original pricing parameters (`IPricingParams`) used to generate the quote.
+     * @param roofName - The resolved name of the roof style (e.g., "Regular", "Vertical", "Custom").
+     * @returns A formatted string containing the key building specifications such as dimensions, roof style, and manufacturer.
+     */
 
     private formatSpecifications(pricing: any, params: IPricingParams, roofName: string): string
     {
@@ -149,12 +171,20 @@ export class PriceParamsExtractorTool extends BaseTool
         return specs.join('\n');
     }
 
+    /**
+     * Builds a detailed list of price breakdown lines for the quote output.
+     * @param pricing - The raw pricing data returned from the pricing service.
+     * @param params - The original pricing parameters (`IPricingParams`) used to generate the quote.
+     * @param roofPrice - The calculated price of the roof portion of the building.
+     * @returns An array of formatted strings, each representing a single line item in the pricing breakdown.
+     */
+
     private buildBreakdownLines(pricing: any, params: IPricingParams, roofPrice: number): string[]
     {
         const roofName: string = this.ROOF_NAMES[params.roof_id] || 'Custom';
         const lines: string[] = [`   • Base Building with ${roofName} Roof: $${this.formatCurrency(roofPrice)}`];
 
-        for (const component of this.PRICING_COMPONENTS)
+        for (const component of Constants.PRICING_COMPONENTS)
         {
             const cost: number = component.extractor(pricing);
             if (cost > 0)
@@ -178,6 +208,13 @@ export class PriceParamsExtractorTool extends BaseTool
         return lines;
     }
 
+    /**
+     * Appends pricing line items for array-based components (e.g., anchors, bows, add-ons) to the breakdown list.
+     * @param pricing - The raw pricing data returned from the pricing service.
+     * @param lines - The array of existing pricing breakdown lines to which new items will be added.
+     * @returns void
+     */
+
     private addArrayComponentLines(pricing: any, lines: string[]): void
     {
         const arrayComponents = [
@@ -192,6 +229,13 @@ export class PriceParamsExtractorTool extends BaseTool
         }
     }
 
+    /**
+     * Selects the appropriate roof price based on the provided `roofId` and structure pricing data.
+     * @param structure - The structure pricing object containing roof and total cost values.
+     * @param roofId - The ID of the selected roof style.
+     * @returns The resolved roof price. Falls back to `regular_cost` or `total_price` if a specific roof price is unavailable.
+     */
+
     private selectRoofPrice(structure: any, roofId: number): number
     {
         const priceKey: string = this.ROOF_PRICE_KEYS[roofId];
@@ -204,6 +248,13 @@ export class PriceParamsExtractorTool extends BaseTool
         return structure.regular_cost > 0 ? structure.regular_cost : (structure.total_price ?? 0);
     }
 
+    /**
+     * Calculates the total price of a building including roof, components, add-ons, and utilities.
+     * @param pricing - The raw pricing data returned from the pricing service.
+     * @param params - The original pricing parameters (`IPricingParams`) used to calculate the price.
+     * @returns An object containing:
+     */
+
     private calculateTotalPrice(pricing: any, params: IPricingParams): { total: number; roofPrice: number }
     {
         let selectedRoofPrice: number = 0;
@@ -215,7 +266,7 @@ export class PriceParamsExtractorTool extends BaseTool
 
         let totalPrice: number = selectedRoofPrice;
 
-        for (const component of this.PRICING_COMPONENTS)
+        for (const component of Constants.PRICING_COMPONENTS)
         {
             totalPrice += component.extractor(pricing);
         }
@@ -233,10 +284,22 @@ export class PriceParamsExtractorTool extends BaseTool
         return { total: totalPrice, roofPrice: selectedRoofPrice };
     }
 
+    /**
+     * Formats a numeric value as a currency string with two decimal places and comma separators.
+     * @param value - The numeric value to format.
+     * @returns A string representing the formatted currency (e.g., `12345.67` → `"12,345.67"`).
+     */
+
     private formatCurrency(value: number): string
     {
         return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     }
+
+    /**
+     * Constructs a detailed prompt for the AI to extract structured JSON data from flexible user input.
+     * @param userInput - The raw user input describing a garage or building, which may include dimensions, roof type, state, gauge, and other details.
+     * @returns A formatted string prompt instructing the AI to extract relevant information and return it as JSON.
+     */
 
     private buildPrompt(userInput: string): string
     {
@@ -287,6 +350,12 @@ export class PriceParamsExtractorTool extends BaseTool
                 JSON output:`.trim();
     }
 
+    /**
+     * Safely extracts and normalizes user-friendly parameters from raw AI output.
+     * @param rawOutput - The raw string output from the AI, which may contain JSON embedded in text.
+     * @returns A `Partial<UserFriendlyParams>` object containing cleaned and normalized parameters.
+     */
+
     public safeExtractUserFriendlyParams(rawOutput: string): Partial<UserFriendlyParams>
     {
         try
@@ -294,7 +363,7 @@ export class PriceParamsExtractorTool extends BaseTool
             const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
             if (!jsonMatch)
             {
-                console.warn("No JSON found in AI output");
+                logger.warn("No JSON found in AI output");
                 return {};
             }
 
@@ -311,10 +380,16 @@ export class PriceParamsExtractorTool extends BaseTool
         }
         catch (err)
         {
-            console.warn("Invalid JSON from LLM:", err);
+            logger.warn("Invalid JSON from LLM:", err);
             return {};
         }
     }
+
+    /**
+     * Removes all keys with `null` values from a `Partial<UserFriendlyParams>` object in-place.
+     * @param params - The object containing user-friendly parameters to clean.
+     * @returns void
+     */
 
     private removeNullValues(params: Partial<UserFriendlyParams>): void
     {
@@ -326,6 +401,12 @@ export class PriceParamsExtractorTool extends BaseTool
             }
         });
     }
+
+    /**
+     * Normalizes string numeric fields in a `Partial<UserFriendlyParams>` object to actual numbers.
+     * @param params - The object containing user-friendly parameters to normalize.
+     * @returns void
+     */
 
     private normalizeNumericFields(params: Partial<UserFriendlyParams>): void
     {
