@@ -2,119 +2,63 @@
 """Streamlit chat UI that summarizes price-service responses."""
 
 import os
-from typing import Any, Dict, List
+import time
+import re
+from typing import Any
 
 import httpx
 import streamlit as st
 
+# Backend URLs
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/price/get-ai-prices")
-REQUEST_TIMEOUT_SECONDS = int(os.getenv("STREAMLIT_REQUEST_TIMEOUT", "180"))
+BACKEND_STATUS_URL = os.getenv("BACKEND_STATUS_URL", "http://localhost:5003/api/v1/price/job-status")
 
 st.set_page_config(page_title="Garage Builder Assistant", page_icon="🤖")
 
 
 def format_pricing_response(payload: Any) -> str:
-    """Safely format the pricing response for Streamlit, handling multiple data types."""
+    """Format backend pricing string into a cleaner frontend display."""
     if not payload:
         return "⚠️ Empty response received from pricing service."
 
-    # If payload is a string, return it directly
-    if isinstance(payload, str):
-        return payload
-
-    # Must be a dict
     if not isinstance(payload, dict):
         return f"⚠️ Unexpected response type: {type(payload).__name__}"
 
-    # Handle error from backend
     if not payload.get("success"):
         message = payload.get("message") or payload.get("error")
         return f"⚠️ Pricing service returned an error: {message or 'Unknown error.'}"
 
     data = payload.get("data")
-    if data is None:
-        return "⚠️ Pricing service did not include pricing data."
+    if not data or not isinstance(data, str):
+        return "⚠️ No pricing data returned."
 
-    # If data is a string, just return it
-    if isinstance(data, str):
-        return data
+    # Extract important info
+    # 1. Quote header
+    quote_match = re.search(r"(✅.*Price Quote Generated!)", data)
+    quote_text = quote_match.group(1) if quote_match else "✅ Price Quote"
 
-    # If data is a dictionary, handle as detailed pricing info
-    if isinstance(data, dict):
-        manufacturer_ids: List[str] = [
-            str(item.get("manufacturer_id"))
-            for item in data.get("manufacturer", [])
-            if isinstance(item, dict) and item.get("manufacturer_id") is not None
-        ]
-        base_structure = data.get("building_structure", [])
-        structure = base_structure[0] if base_structure else {}
+    # 2. Dimensions
+    dim_match = re.search(r"• Dimensions:\s*(.*)", data)
+    dimensions = dim_match.group(1).strip() if dim_match else "N/A"
 
-        lines: List[str] = []
-        lines.append("### 🏗️ Pricing Summary")
-        lines.append(f"- **Manufacturers**: {', '.join(manufacturer_ids) if manufacturer_ids else 'Not provided'}")
-        lines.append(f"- **Max Build Length**: {data.get('building_to_maxlength', 'N/A')} ft")
-        if structure:
-            lines.append(
-                "- **Structure Range**: "
-                f"width {structure.get('min_width', 'N/A')}–{structure.get('max_width', 'N/A')} ft, "
-                f"height {structure.get('min_height', 'N/A')}–{structure.get('max_height', 'N/A')} ft"
-            )
+    # 3. Roof Style
+    roof_match = re.search(r"• Roof Style:\s*(.*)", data)
+    roof_style = roof_match.group(1).strip() if roof_match else "N/A"
 
-        # Function to sum cost fields safely
-        def sum_cost_fields(collection: List[Dict[str, Any]], cost_fields: List[str]) -> float:
-            total = 0.0
-            for item in collection:
-                if not isinstance(item, dict):
-                    continue
-                for field in cost_fields:
-                    try:
-                        total += float(item.get(field, 0))
-                    except (ValueError, TypeError):
-                        continue
-            return total
+    # 4. Estimated Total Price
+    price_match = re.search(r"💰 \*\*ESTIMATED TOTAL PRICE: (.*)\*\*", data)
+    total_price = price_match.group(1).strip() if price_match else "N/A"
 
-        side_fields = [
-            "side_close_cost",
-            "vertical_side_cost",
-            "double_leg_baserail_cost",
-            "half_side_close_cost",
-            "half_vertical_side_cost",
-            "one_fourth_side_close_cost",
-            "one_fourth_vertical_side_cost",
-            "three_fourth_side_close_cost",
-            "three_fourth_vertical_side_cost"
-        ]
-        utility_fields = side_fields.copy()
-        panel_fields = ["cost"]
-        checkbox_fields = ["cost"]
-        checkbox_qty_fields = ["cost"]
-        checkbox_dropdown_fields = ["cost"]
+    # Build clean markdown for frontend
+    lines = [
+        f"### {quote_text}",
+        f"📐 **Building Specifications:**",
+        f"   - Dimensions: {dimensions}",
+        f"   - Roof Style: {roof_style}",
+        f"💰 **Estimated Total Price: {total_price}**"
+    ]
 
-        # Calculate totals
-        side_cost = sum_cost_fields(data.get("side", []), side_fields)
-        utility_cost = sum_cost_fields(data.get("utility_side", []), utility_fields)
-        panel_cost = sum_cost_fields(data.get("panel", []), panel_fields)
-        checkbox_cost = sum_cost_fields(data.get("checkbox", []), checkbox_fields)
-        checkbox_qty_cost = sum_cost_fields(data.get("checkbox_quantity", []), checkbox_qty_fields)
-        checkbox_dropdown_cost = sum_cost_fields(data.get("checkbox_quantity_dropdown", []), checkbox_dropdown_fields)
-
-        total_price = side_cost + utility_cost + panel_cost + checkbox_cost + checkbox_qty_cost + checkbox_dropdown_cost
-
-        lines.append(f"- **Side Total**: ${side_cost:,.2f}")
-        lines.append(f"- **Utility Side Total**: ${utility_cost:,.2f}")
-        if panel_cost:
-            lines.append(f"- **Panel Total**: ${panel_cost:,.2f}")
-        if checkbox_cost or checkbox_qty_cost or checkbox_dropdown_cost:
-            lines.append(f"- **Add-ons Total**: ${checkbox_cost + checkbox_qty_cost + checkbox_dropdown_cost:,.2f}")
-
-        lines.append(f"\n### 💰 **Total Price: ${total_price:,.2f}**")
-        if total_price == 0:
-            lines.append("_No detailed cost items were returned. Try refining the request parameters._")
-
-        return "\n".join(lines)
-
-    # If data is some other type (like a list), return string version
-    return str(data)
+    return "\n".join(lines)
 
 
 # Streamlit UI
@@ -136,21 +80,41 @@ if prompt := st.chat_input("Type your question…"):
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
-        with st.spinner("Calculating pricing… this may take a minute or two"):
-            try:
-                timeout = httpx.Timeout(REQUEST_TIMEOUT_SECONDS)
-                with httpx.Client(timeout=timeout) as client:
-                    resp = client.post(BACKEND_URL, json={"question": prompt})
-                    resp.raise_for_status()
-                    # Try parsing JSON, fallback to text
-                    try:
-                        response_json = resp.json()
-                    except Exception:
-                        response_json = resp.text
-                    reply = format_pricing_response(response_json)
-            except Exception as exc:
-                reply = f"⚠️ Request failed: {exc}"
+        placeholder.markdown("⏳ Sending request to backend…")
+
+        try:
+            # Step 1: Send request to backend and get job_id
+            timeout = httpx.Timeout(60.0)
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(
+                    BACKEND_URL,
+                    json={"question": prompt, "conversation": "\n".join([msg["content"] for msg in st.session_state.messages])}
+                )
+                response.raise_for_status()
+                job_data = response.json()
+                job_id = job_data.get("job_id")
+                if not job_id:
+                    raise ValueError("Backend did not return a job_id.")
+
+            # Step 2: Poll backend until result is ready
+            with st.spinner("Calculating pricing… this may take a while"):
+                result = None
+                while True:
+                    status_resp = httpx.get(f"{BACKEND_STATUS_URL}/{job_id}", timeout=10.0)
+                    status_resp.raise_for_status()
+                    status_data = status_resp.json()
+                    if status_data.get("status") == "completed":
+                        result = status_data.get("result")
+                        break
+                    elif status_data.get("status") == "failed":
+                        result = {"success": False, "message": "Backend job failed."}
+                        break
+                    time.sleep(2)
+
+            # Step 3: Format and display result
+            reply = format_pricing_response(result)
+        except Exception as exc:
+            reply = f"⚠️ Request failed: {exc}"
 
         placeholder.markdown(reply)
-
-    st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.session_state.messages.append({"role": "assistant", "content": reply})
