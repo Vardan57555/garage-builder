@@ -58,17 +58,7 @@ export class GeneralChatTool extends BaseTool
         return GeneralChatTool.instance;
     }
 
-    /**
-     * Determines if the input string contains keywords related to garages/buildings.
-     * Returns true if any relevant keyword is found, false otherwise.
-     */
 
-    public canHandle(input: string): boolean
-    {
-        const garageKeywords = /garage|building|width|length|height/i;
-        console.log(!garageKeywords.test(input))
-        return !garageKeywords.test(input);
-    }
 
     /**
      * Handles user input: checks for garage-related keywords, retrieves chat history,
