@@ -12,23 +12,15 @@ const logger: pino.Logger = createLogger(module);
 
 export class PriceParamsExtractorTool extends BaseTool
 {
+    /**
+     * The singleton instance of `PriceService`.
+     * @private
+     */
+
     private static instance: PriceParamsExtractorTool;
 
-    private readonly ROOF_NAMES: Record<number, string> = {
-        1: "Vertical",
-        2: "Regular",
-        3: "Boxed-Eave"
-    };
-
-    private readonly ROOF_PRICE_KEYS: Record<number, string> = {
-        1: 'vertical_roof_cost',
-        3: 'box_style_cost'
-    };
-
-    private readonly NUMERIC_FIELDS: (keyof UserFriendlyParams)[] =
-        ["width", "length", "height", "utility_length", "gauge"];
-
     readonly name = "priceParamsExtractor";
+
     readonly description = "Extracts building pricing parameters from natural language.";
 
     /**
@@ -127,7 +119,7 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private formatPricingResult(pricing: any, params: IPricingParams): string
     {
-        const roofName: string = this.ROOF_NAMES[params.roof_id] || 'Custom';
+        const roofName: string = Constants.ROOF_NAMES[params.roof_id] || 'Custom';
         const { total: totalPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
         const breakdownLines: string[] = this.buildBreakdownLines(pricing, params, roofPrice);
 
@@ -181,7 +173,7 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private buildBreakdownLines(pricing: any, params: IPricingParams, roofPrice: number): string[]
     {
-        const roofName: string = this.ROOF_NAMES[params.roof_id] || 'Custom';
+        const roofName: string = Constants.ROOF_NAMES[params.roof_id] || 'Custom';
         const lines: string[] = [`   • Base Building with ${roofName} Roof: $${this.formatCurrency(roofPrice)}`];
 
         for (const component of Constants.PRICING_COMPONENTS)
@@ -238,7 +230,7 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private selectRoofPrice(structure: any, roofId: number): number
     {
-        const priceKey: string = this.ROOF_PRICE_KEYS[roofId];
+        const priceKey: string = Constants.ROOF_PRICE_KEYS[roofId];
 
         if (priceKey && structure[priceKey] > 0)
         {
@@ -410,7 +402,7 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private normalizeNumericFields(params: Partial<UserFriendlyParams>): void
     {
-        for (const field of this.NUMERIC_FIELDS)
+        for (const field of Constants.NUMERIC_FIELDS)
         {
             const value: string | number | boolean = params[field];
 
