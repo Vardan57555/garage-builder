@@ -1,5 +1,5 @@
 import { GuidVersions } from "joi";
-import {PricingComponent} from "@agents/tools/io/IChat";
+import {PricingComponent, UserFriendlyParams} from "@agents/tools/io/IChat";
 
 /**
  * Global constants for the application.
@@ -66,4 +66,60 @@ export class Constants
         { name: "End Panels", key: "end", extractor: (p) => p.end?.end_close_cost ?? 0 },
         { name: "Garage Door", key: "garage_door", extractor: (p) => p.garage_door?.cost ?? 0 },
     ];
+
+    public static readonly ROOF_NAMES: Record<number, string> = {
+        1: "Vertical",
+        2: "Regular",
+        3: "Boxed-Eave"
+    };
+
+    public static readonly ROOF_PRICE_KEYS: Record<number, string> = {
+        1: 'vertical_roof_cost',
+        3: 'box_style_cost'
+    };
+
+    public static readonly NUMERIC_FIELDS: (keyof UserFriendlyParams)[] =
+        ["width", "length", "height", "utility_length", "gauge"];
+
+    public static readonly ROOF_TYPE_MAPPING: Record<string, number> = {
+        vertical: 1,
+        regular: 2,
+        standard: 2,
+        box: 3,
+        boxed: 3,
+        economy: 3,
+    };
+
+    public static readonly REQUIRED_FIELDS: (keyof UserFriendlyParams)[] = [
+        "width",
+        "length",
+        "height",
+        "state_name",
+        "roof_type",
+        "gauge",
+    ]
+
+    public static readonly FIELD_PROMPTS: Record<keyof UserFriendlyParams, string> = {
+        garage_type: "What type of garage do you need?",
+        width: "What width do you need for your garage (in feet)?",
+        length: "What length do you need (in feet)?",
+        height: "What height do you need (in feet)?",
+        state_name: "Which state are you located in?",
+        roof_type:
+            "Which roof style would you prefer?\n  • Vertical (best weather protection)\n  • Regular (standard horizontal panels)\n  • Box (economy option)",
+        manufacturer_name:
+            "Do you have a preferred manufacturer? (optional, press Enter to use default)",
+        utility_length: "Utility/lean-to length? (optional)",
+        building_type: "Building type? (garage/carport/barn)",
+        gauge: "Metal gauge preference? (12/14 or blank for standard)",
+        is_barn: "Is this a barn style? (yes/no)",
+    };
+
+    public static readonly INTENT_PROMPT = `You are an intent classifier for a garage/building pricing service.
+         Analyze if the user wants pricing for a garage, carport, barn, metal building, or any similar structure.
+         Return ONLY "YES" if they want building pricing, or "NO" if it's just general chat.
+         User input: "{input}"
+         Answer (YES or NO):`.trim();
+
+    public static readonly INTENT_KEYWORDS = new Set(["garage", "carport", "barn", "building", "price", "quote", "cost"]);
 }
