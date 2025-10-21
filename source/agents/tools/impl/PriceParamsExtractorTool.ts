@@ -370,9 +370,9 @@ export class PriceParamsExtractorTool extends BaseTool
 
             return params;
         }
-        catch (err)
+        catch (error)
         {
-            logger.warn("Invalid JSON from LLM:", err);
+            logger.warn("Invalid JSON from error: ", error);
             return {};
         }
     }
