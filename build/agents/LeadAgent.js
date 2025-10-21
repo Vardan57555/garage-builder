@@ -12,29 +12,63 @@ const Log_1 = require("../utils/logger/Log");
 const logger = (0, Log_1.createLogger)(module);
 class LeadAgent {
     static instance;
-    memory;
-    state;
-    stateMapCache = new Map();
-    roofMapCache = new Map();
+    sessions = new Map();
+    SESSION_TIMEOUT = 30 * 60 * 1000;
+    cleanupInterval = null;
     constructor(enforce) {
         if (enforce !== Enforce) {
             throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Use LeadAgent.getInstance() instead of new.");
         }
-        this.memory = new memory_1.BufferMemory({
-            memoryKey: "chat_history",
-            returnMessages: true,
-            chatHistory: new memory_1.ChatMessageHistory(),
-        });
-        this.state = {
-            userFriendlyParams: {},
-            hasGarageIntent: false,
-        };
+        this.startSessionCleanup();
     }
     static async getInstance() {
         if (!LeadAgent.instance) {
             LeadAgent.instance = new LeadAgent(Enforce);
         }
         return LeadAgent.instance;
+    }
+    getOrCreateSession(sessionId) {
+        if (this.sessions.has(sessionId)) {
+            const session = this.sessions.get(sessionId);
+            session.lastActivity = Date.now();
+            return session;
+        }
+        const newSession = {
+            memory: new memory_1.BufferMemory({
+                memoryKey: "chat_history",
+                returnMessages: true,
+                chatHistory: new memory_1.ChatMessageHistory(),
+            }),
+            state: {
+                userFriendlyParams: {},
+                hasGarageIntent: false,
+            },
+            stateMapCache: new Map(),
+            roofMapCache: new Map(),
+            lastActivity: Date.now(),
+        };
+        this.sessions.set(sessionId, newSession);
+        logger.info(`[LeadAgent] New session created: ${sessionId}`);
+        return newSession;
+    }
+    startSessionCleanup() {
+        if (this.cleanupInterval) {
+            return;
+        }
+        this.cleanupInterval = setInterval(() => {
+            const now = Date.now();
+            let cleanedCount = 0;
+            for (const [sessionId, session] of this.sessions.entries()) {
+                if (now - session.lastActivity > this.SESSION_TIMEOUT) {
+                    this.sessions.delete(sessionId);
+                    cleanedCount++;
+                    logger.info(`[LeadAgent] Session expired and cleaned: ${sessionId}`);
+                }
+            }
+            if (cleanedCount > 0) {
+                logger.info(`[LeadAgent] Cleaned up ${cleanedCount} expired sessions. Active sessions: ${this.sessions.size}`);
+            }
+        }, 5 * 60 * 1000);
     }
     getMessageString(content) {
         if (typeof content === "string") {
@@ -65,10 +99,10 @@ class LeadAgent {
         const lowerInput = input.toLowerCase();
         return Array.from(Constants_1.Constants.INTENT_KEYWORDS).some((kw) => lowerInput.includes(kw));
     }
-    async mapStateToDB(stateName, preferredBuildingId = 1) {
+    async mapStateToDB(stateName, session, preferredBuildingId = 1) {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
-        if (this.stateMapCache.has(cacheKey)) {
-            return this.stateMapCache.get(cacheKey) ?? null;
+        if (session.stateMapCache.has(cacheKey)) {
+            return session.stateMapCache.get(cacheKey) ?? null;
         }
         try {
             const result = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([stateName], "getMapIdByStateName(?)", "getMapIdByStateName");
@@ -76,28 +110,28 @@ class LeadAgent {
                 const preferredMapping = result.find((item) => item.building_id === preferredBuildingId);
                 const mapping = preferredMapping || result[0];
                 const output = { map_id: mapping.map_id, manufacturer_id: mapping.manufacturer_id };
-                this.stateMapCache.set(cacheKey, output);
+                session.stateMapCache.set(cacheKey, output);
                 return output;
             }
-            this.stateMapCache.set(cacheKey, null);
+            session.stateMapCache.set(cacheKey, null);
             return null;
         }
         catch (error) {
             logger.error("[LeadAgent] State mapping failed:", error);
-            this.stateMapCache.set(cacheKey, null);
+            session.stateMapCache.set(cacheKey, null);
             return null;
         }
     }
-    async mapRoofTypeToDB(roofType, mapId) {
+    async mapRoofTypeToDB(roofType, mapId, session) {
         const normalizedRoofType = roofType.toLowerCase();
         const cacheKey = `${normalizedRoofType}:${mapId}`;
-        if (this.roofMapCache.has(cacheKey)) {
-            return this.roofMapCache.get(cacheKey);
+        if (session.roofMapCache.has(cacheKey)) {
+            return session.roofMapCache.get(cacheKey);
         }
         try {
             const result = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([mapId, roofType], "getRoofIdByType(?, ?)", "roof_mapping");
             if (result?.length > 0) {
-                this.roofMapCache.set(cacheKey, result[0].roof_id);
+                session.roofMapCache.set(cacheKey, result[0].roof_id);
                 return result[0].roof_id;
             }
         }
@@ -105,15 +139,15 @@ class LeadAgent {
             logger.error("[LeadAgent] Roof type mapping failed:", error);
         }
         const fallbackId = Constants_1.Constants.ROOF_TYPE_MAPPING[normalizedRoofType] ?? (normalizedRoofType.includes("vertical") ? 1 : normalizedRoofType.includes("box") ? 3 : 2);
-        this.roofMapCache.set(cacheKey, fallbackId);
+        session.roofMapCache.set(cacheKey, fallbackId);
         return fallbackId;
     }
-    async convertToTechnicalParams(userParams) {
+    async convertToTechnicalParams(userParams, session) {
         try {
             let map_id = 1;
             let manufacturer_id = 1;
             if (userParams.state_name) {
-                const mapping = await this.mapStateToDB(userParams.state_name);
+                const mapping = await this.mapStateToDB(userParams.state_name, session);
                 if (mapping) {
                     map_id = mapping.map_id;
                     manufacturer_id = mapping.manufacturer_id;
@@ -122,7 +156,7 @@ class LeadAgent {
                     logger.warn(`[LeadAgent] State "${userParams.state_name}" not found, using defaults.`);
                 }
             }
-            const roof_id = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id) : 2;
+            const roof_id = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id, session) : 2;
             return {
                 width: userParams.width ?? 0,
                 length: userParams.length ?? 0,
@@ -151,64 +185,73 @@ class LeadAgent {
             .join(" ");
         return dimensions ? `Got it! ${dimensions}\n\n` : "";
     }
-    async run(input) {
-        logger.info("[LeadAgent] User input:", input);
-        await this.memory.chatHistory.addUserMessage(input);
-        if (!this.state.hasGarageIntent) {
+    async run(sessionId, input) {
+        console.log(sessionId);
+        logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
+        const session = this.getOrCreateSession(sessionId);
+        await session.memory.chatHistory.addUserMessage(input);
+        if (!session.state.hasGarageIntent) {
             const hasIntent = await this.detectGarageIntentWithAI(input);
             if (!hasIntent) {
                 const response = "Hello! 👋 I can help you get a price quote for a garage or metal building.\n" +
                     "Please tell me what type of building or provide dimensions (width, length, height in feet).";
-                await this.memory.chatHistory.addAIChatMessage(response);
+                await session.memory.chatHistory.addAIChatMessage(response);
                 return response;
             }
-            this.state.hasGarageIntent = true;
+            session.state.hasGarageIntent = true;
         }
         const extractor = PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance();
-        const rawParams = await extractor._call(await this.getConversationContext());
-        logger.info("[LeadAgent] Raw params from extractor:", rawParams);
+        const rawParams = await extractor._call(await this.getConversationContext(session));
+        logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
         const extractedParams = extractor.safeExtractUserFriendlyParams(rawParams);
-        logger.info("[LeadAgent] Safe extracted user-friendly params:", extractedParams);
-        this.state.userFriendlyParams = {
-            ...this.state.userFriendlyParams,
+        logger.info(`[LeadAgent] Session ${sessionId} - Safe extracted user-friendly params:`, extractedParams);
+        session.state.userFriendlyParams = {
+            ...session.state.userFriendlyParams,
             ...extractedParams
         };
-        const missingFields = this.getMissingFields(this.state.userFriendlyParams);
+        const missingFields = this.getMissingFields(session.state.userFriendlyParams);
         if (missingFields.length > 0) {
             const nextField = missingFields[0];
-            this.state.currentField = nextField;
+            session.state.currentField = nextField;
             const response = this.formatDimensionsResponse(extractedParams) +
                 Constants_1.Constants.FIELD_PROMPTS[nextField];
-            await this.memory.chatHistory.addAIChatMessage(response);
+            await session.memory.chatHistory.addAIChatMessage(response);
             return response;
         }
-        const technicalParams = await this.convertToTechnicalParams(this.state.userFriendlyParams);
+        const technicalParams = await this.convertToTechnicalParams(session.state.userFriendlyParams, session);
         if (!technicalParams) {
             return "⚠️ Failed to convert user input to technical parameters.";
         }
         const result = await extractor.calculatePriceWithParams(technicalParams);
-        await this.memory.chatHistory.addAIChatMessage(result);
-        this.resetState();
+        await session.memory.chatHistory.addAIChatMessage(result);
+        this.resetSessionState(session);
         return result + "\n\n💬 Need another quote? Just describe what you're looking for!";
     }
-    async getConversationContext() {
-        const history = await this.memory.chatHistory.getMessages();
+    async getConversationContext(session) {
+        const history = await session.memory.chatHistory.getMessages();
         return history.map(msg => this.getMessageString(msg.content)).join("\n");
     }
-    resetState() {
-        this.state.userFriendlyParams = {};
-        this.state.hasGarageIntent = false;
-        this.state.currentField = undefined;
+    resetSessionState(session) {
+        session.state.userFriendlyParams = {};
+        session.state.hasGarageIntent = false;
+        session.state.currentField = undefined;
+    }
+    async endSession(sessionId) {
+        if (this.sessions.has(sessionId)) {
+            this.sessions.delete(sessionId);
+            logger.info(`[LeadAgent] Session ended: ${sessionId}`);
+        }
+    }
+    getActiveSessionCount() {
+        return this.sessions.size;
     }
     async reset() {
-        this.resetState();
-        this.stateMapCache.clear();
-        this.roofMapCache.clear();
-        this.memory = new memory_1.BufferMemory({
-            memoryKey: "chat_history",
-            returnMessages: true,
-            chatHistory: new memory_1.ChatMessageHistory(),
-        });
+        this.sessions.clear();
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+        }
+        logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
     }
 }
 exports.LeadAgent = LeadAgent;

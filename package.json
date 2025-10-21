@@ -36,6 +36,7 @@
     "express-list-endpoints": "^7.1.0",
     "express-prom-bundle": "^8.0.0",
     "express-session": "^1.18.1",
+    "ioredis": "^5.8.1",
     "joi": "^17.7.0",
     "langchain": "^0.3.29",
     "memorystore": "^1.6.7",

@@ -198,8 +198,8 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
             this.normalizeNumericFields(params);
             return params;
         }
-        catch (err) {
-            logger.warn("Invalid JSON from LLM:", err);
+        catch (error) {
+            logger.warn("Invalid JSON from error: ", error);
             return {};
         }
     }

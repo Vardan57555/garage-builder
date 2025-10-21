@@ -33,6 +33,7 @@ export class PriceParamsExtractorTool extends BaseTool
     constructor(enforce: () => void)
     {
         super();
+
         if (enforce !== Enforce)
         {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Use PriceParamsExtractorTool.getInstance() instead of new.");

@@ -29,8 +29,6 @@ class PriceRouter extends CustomRouter_1.CustomRouter {
         this.route("/predict")
             .all(...StateMiddlewares_1.StateMiddlewares.common.fetchAllMiddlewares)
             .get(this.controller.predictPriceHandler);
-        this.route("/get-ai-prices")
-            .post(this.controller.fetchBuildingPricingWithUtilityHandler);
     }
 }
 exports.PriceRouter = PriceRouter;

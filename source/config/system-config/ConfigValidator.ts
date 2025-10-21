@@ -61,6 +61,18 @@ const mySqlConfigSchema: ObjectSchema = joi.object().keys({
     }).required()
 });
 
+
+/**
+ * Schema for Redis configuration.
+ */
+const redisConfigSchema: ObjectSchema = joi.object().keys({
+    host: joi.string().max(Constants.MAX_STRING_LENGTH).hostname().required(),
+    port: joi.number().integer().min(1).max(65535).required(),
+    password: joi.string().max(Constants.MAX_STRING_LENGTH).min(1).required(),
+    timeout: joi.number().integer().min(1).required(),
+    isLazyConnect: joi.boolean().required()
+});
+
 /**
  * Schema for OpenAi configuration.
  */
@@ -116,6 +128,16 @@ export function validateMySqlConfig(data: {}): ValidationResult
     return setupValidator(data, mySqlConfigSchema);
 }
 
+/**
+ * Validates the Redis configuration.
+ *
+ * @param data - The Redis configuration data to validate.
+ * @returns The validation result.
+ */
+export function validateRedisConfig(data: {}): ValidationResult
+{
+    return setupValidator(data, redisConfigSchema);
+}
 
 /**
  * Validates the onboarding configuration.

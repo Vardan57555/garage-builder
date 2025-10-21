@@ -4,6 +4,7 @@ import {BuildingRouter} from "@modules/building-service/routes/BuildingRouter";
 import {StateRouter} from "@modules/states-service/routes/StateRouter";
 import {ManufacturerRouter} from "@modules/manufacturer-service/routes/ManufacturerRouter";
 import {PriceRouter} from "@modules/price-service/routes/PriceRouter";
+import {ChatRouter} from "@modules/chat-service/routes/ChatRouter";
 
 /**
  * Class representing the API routes.
@@ -56,6 +57,13 @@ export class ApiRouter extends CustomRouter
          * @param router - The routes instance to use.
          */
         this.use("/price", PriceRouter.getInstance());
+
+        /**
+         * Use the `PriceRouter` for handling `/chat` endpoint.
+         * @param path - The path for the route.
+         * @param router - The routes instance to use.
+         */
+        this.use("/chat", ChatRouter.getInstance());
     }
 
     /**

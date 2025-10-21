@@ -62,31 +62,6 @@ export class PriceControllerImpl implements PriceController
      * @param next - The next middleware function.
      */
 
-    public fetchBuildingPricingWithUtilityHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
-    {
-        let pricesWithUtility;
-
-        try
-        {
-            pricesWithUtility = await this.service.generateAssistantResponse(req.body);
-        }
-        catch (error)
-        {
-            next(error);
-            return;
-        }
-
-        this.handleSuccessResponse(res, pricesWithUtility);
-    }
-
-    /**
-     * Handles retrieving all pricing.
-     *
-     * @param req - The request object.
-     * @param res - The response object.
-     * @param next - The next middleware function.
-     */
-
     public fetchAllPricesHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
     {
         let prices;

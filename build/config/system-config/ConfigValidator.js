@@ -7,6 +7,7 @@ exports.validateAuthConfig = validateAuthConfig;
 exports.validateAppConfig = validateAppConfig;
 exports.validateOpenAiConfig = validateOpenAiConfig;
 exports.validateMySqlConfig = validateMySqlConfig;
+exports.validateRedisConfig = validateRedisConfig;
 exports.validateCommonConfig = validateCommonConfig;
 const Constants_1 = require("../../common/io/Constants");
 const SetupValidator_1 = require("../../utils/validator/SetupValidator");
@@ -57,6 +58,13 @@ const mySqlConfigSchema = joi_1.default.object().keys({
         match_options: joi_1.default.array().items(joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH)).required()
     }).required()
 });
+const redisConfigSchema = joi_1.default.object().keys({
+    host: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).hostname().required(),
+    port: joi_1.default.number().integer().min(1).max(65535).required(),
+    password: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).min(1).required(),
+    timeout: joi_1.default.number().integer().min(1).required(),
+    isLazyConnect: joi_1.default.boolean().required()
+});
 const openAiConfigSchema = joi_1.default.object().keys({
     apiKey: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).required()
 });
@@ -75,6 +83,9 @@ function validateOpenAiConfig(data) {
 }
 function validateMySqlConfig(data) {
     return (0, SetupValidator_1.setupValidator)(data, mySqlConfigSchema);
+}
+function validateRedisConfig(data) {
+    return (0, SetupValidator_1.setupValidator)(data, redisConfigSchema);
 }
 function validateCommonConfig(data) {
     return (0, SetupValidator_1.setupValidator)(data, onboardingConfigSchema);

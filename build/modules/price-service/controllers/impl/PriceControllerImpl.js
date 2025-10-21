@@ -20,17 +20,6 @@ class PriceControllerImpl {
         }
         return PriceControllerImpl.instance;
     }
-    fetchBuildingPricingWithUtilityHandler = async (req, res, next) => {
-        let pricesWithUtility;
-        try {
-            pricesWithUtility = await this.service.generateAssistantResponse(req.body);
-        }
-        catch (error) {
-            next(error);
-            return;
-        }
-        this.handleSuccessResponse(res, pricesWithUtility);
-    };
     fetchAllPricesHandler = async (req, res, next) => {
         let prices;
         try {

@@ -21,14 +21,14 @@ import {
 import {Constants} from "@common/io/Constants";
 import {MySQLManager} from "@config/db/MySqlManager";
 import {PredictionManager} from "@config/AiModel/PredictionManager";
-import {IAiAnswer} from "@common/io/IAiAgent";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
-import {LeadAgent} from "@agents/LeadAgent";
+import {RedisCacheUtils} from "@utils/cache/RedisCacheUtils";
 const logger: pino.Logger = createLogger(module);
 
 export class PriceServiceImpl implements PriceService
 {
+
     /**
      * The singleton instance of `PriceService`.
      * @private
@@ -47,6 +47,12 @@ export class PriceServiceImpl implements PriceService
 
     private readonly mapIdCache = new Map<string, IMapResult>();
     private readonly ARRAY_FIELDS = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
+
+    /**
+     * Redis cache utility instance.
+     * @private
+     */
+    private cacheUtils: RedisCacheUtils;
 
     // private static readonly BASE_KEYS: string[] = [
     //     'truss_name',
@@ -191,15 +197,18 @@ export class PriceServiceImpl implements PriceService
      * Private constructor to enforce a Singleton pattern.
      *
      * @param enforce - Function to enforce a Singleton pattern.
+     * @param cacheUtils - The Redis service instance.
      * @throws Error if instantiation is attempted directly.
      */
 
-    constructor(enforce: () => void)
+    constructor(enforce: () => void, cacheUtils: RedisCacheUtils)
     {
         if(enforce !== Enforce)
         {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceService.getInstance() instead of new.");
         }
+
+        this.cacheUtils = cacheUtils;
     }
 
     /**
@@ -212,7 +221,7 @@ export class PriceServiceImpl implements PriceService
     {
         if(!PriceServiceImpl.instance)
         {
-            PriceServiceImpl.instance = new PriceServiceImpl(Enforce);
+            PriceServiceImpl.instance = new PriceServiceImpl(Enforce, RedisCacheUtils.getInstance());
         }
 
         return PriceServiceImpl.instance;
@@ -356,35 +365,6 @@ export class PriceServiceImpl implements PriceService
         {
             throw new ServerError(ServerError.INTERNAL, `Failed to predict price: ${error.message}`);
         }
-    }
-
-    /**
-     * Generate an AI-powered explanation from a natural language question.
-     * Delegates the parsing and interpretation to the PriceParamsExtractorTool,
-     * which extracts parameters and formulates a structured response.
-     *
-     * @param body - Object containing the user-provided question text
-     * @returns Object with the AI-generated explanation
-     * @throws ServerError if the parameter extraction or AI service call fails
-     */
-
-    public async generateAssistantResponse(body: Record<string, string>): Promise<IAiAnswer>
-    {
-        const { question } = body;
-
-        let pricingData;
-
-        try
-        {
-            const agent = await LeadAgent.getInstance();
-            pricingData = await agent.run(question);
-        }
-        catch (error)
-        {
-            throw new ServerError(ServerError.INTERNAL, `Failed to generate explanation for question: "${question}". Reason: ${error.message || error}`);
-        }
-
-        return pricingData;
     }
 
     /**
@@ -606,12 +586,7 @@ export class PriceServiceImpl implements PriceService
      * @throws {ServerError} If the side length calculation procedure fails.
      */
 
-    private async buildLengthString(
-        length: number,
-        end_length: number,
-        distance_on_center: number,
-        map_id: number
-    ): Promise<string>
+    private async buildLengthString(length: number, end_length: number, distance_on_center: number, map_id: number): Promise<string>
     {
         const lengths: number[] = await this.getSideHeightCostsLength(length, end_length, distance_on_center, map_id);
         return `'${lengths.join("','")}'`;
@@ -1057,17 +1032,29 @@ export class PriceServiceImpl implements PriceService
      * @param stateName - The state name (e.g., "Arizona", "Texas")
      * @returns Object containing map_id and manufacturer_id, or null if not found
      */
+
     public async mapStateToIds(stateName: string): Promise<{ map_id: number; manufacturer_id: number } | null>
     {
-        try {
+        try
+        {
+            const cacheKey: string = `mapStateToIds:${stateName}`;
+
+            const cachedState:{ map_id: number; manufacturer_id: number } = await this.cacheUtils.get(cacheKey);
+
+            if(cachedState)
+            {
+                return cachedState;
+            }
+
             const statesData = await ProcedureExecutor.getProcedureData<any>(
                 [],
                 'getStatesAndManufacturer()',
                 'states_manufacturers'
             );
 
-            if (statesData && statesData.length > 0) {
-                const normalizedInput = stateName.toLowerCase().trim();
+            if (statesData && statesData.length > 0)
+            {
+                const normalizedInput: string = stateName.toLowerCase().trim();
 
                 const matchedState = statesData.find((state: any) => {
                     const stateName = (state.state_name || '').toLowerCase().trim();
@@ -1076,7 +1063,10 @@ export class PriceServiceImpl implements PriceService
                     return stateName === normalizedInput || stateAbbr === normalizedInput;
                 });
 
-                if (matchedState) {
+                if (matchedState)
+                {
+                    await this.cacheUtils.put(cacheKey, matchedState);
+
                     return {
                         map_id: matchedState.map_id,
                         manufacturer_id: matchedState.manufacturer_id || matchedState.default_manufacturer_id || 1
@@ -1086,7 +1076,9 @@ export class PriceServiceImpl implements PriceService
 
             logger.warn(`[PriceService] State "${stateName}" not found in database`);
             return null;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[PriceService] Failed to map state "${stateName}":`, error);
             return null;
         }
@@ -1103,12 +1095,24 @@ export class PriceServiceImpl implements PriceService
      * @param manufacturer_id - Optional manufacturer_id to get specific roof name
      * @returns The roof_id (1, 2, or 3)
      */
+
     public async mapRoofTypeToId(roofTypeName: string, manufacturer_id?: number): Promise<number>
     {
-        try {
-            const normalizedRoofType = roofTypeName.toLowerCase().trim();
+        try
+        {
+            const cacheKey: string = `mapRoofTypeToId:${roofTypeName}`;
 
-            if (normalizedRoofType.includes('vertical')) {
+            const cachedRoofId: number = await this.cacheUtils.get(cacheKey);
+
+            if(cachedRoofId)
+            {
+                return cachedRoofId
+            }
+
+            const normalizedRoofType: string = roofTypeName.toLowerCase().trim();
+
+            if (normalizedRoofType.includes('vertical'))
+            {
                 return 3;
             }
 
@@ -1122,7 +1126,9 @@ export class PriceServiceImpl implements PriceService
                 normalizedRoofType.includes('eave') ||
                 normalizedRoofType.includes('eve') ||
                 normalizedRoofType.includes('horizontal')
-            ) {
+            )
+            {
+                await this.cacheUtils.put(cacheKey, 2);
                 return 2;
             }
 
@@ -1134,15 +1140,19 @@ export class PriceServiceImpl implements PriceService
                 normalizedRoofType.includes('round') ||
                 normalizedRoofType.includes('premium') ||
                 normalizedRoofType.includes('b-frame')
-            ) {
+            )
+            {
+                await this.cacheUtils.put(cacheKey, 1);
                 return 1;
             }
 
             logger.warn(`[PriceService] Roof type "${roofTypeName}" not recognized, defaulting to Regular (1)`);
             return 1;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[PriceService] Failed to map roof type "${roofTypeName}":`, error);
-            return 1; // Default to Regular
+            return 1;
         }
     }
 
@@ -1153,27 +1163,34 @@ export class PriceServiceImpl implements PriceService
      * @param mapId - The map_id to get manufacturer for that region
      * @returns The manufacturer_id, or null if not found
      */
+
     public async mapManufacturerToId(manufacturerName: string, mapId: number): Promise<number | null>
     {
-        try {
-            const manufacturers = await this.getManufacturer(mapId);
+        try
+        {
+            const manufacturers: IManufacturer[] = await this.getManufacturer(mapId);
 
-            if (manufacturers && manufacturers.length > 0) {
-                const normalizedInput = manufacturerName.toLowerCase().trim();
+            if (manufacturers && manufacturers.length > 0)
+            {
+                const normalizedInput: string = manufacturerName.toLowerCase().trim();
 
-                const matchedManufacturer = manufacturers.find((mfg: any) => {
+                const matchedManufacturer: IManufacturer = manufacturers.find((mfg: any) =>
+                {
                     const mfgName = (mfg.manufacturer_name || mfg.name || '').toLowerCase().trim();
                     return mfgName.includes(normalizedInput) || normalizedInput.includes(mfgName);
                 });
 
-                if (matchedManufacturer) {
+                if (matchedManufacturer)
+                {
                     return matchedManufacturer.manufacturer_id || matchedManufacturer.manufacturer_id;
                 }
             }
 
             logger.warn(`[PriceService] Manufacturer "${manufacturerName}" not found for map_id ${mapId}`);
             return null;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[PriceService] Failed to map manufacturer "${manufacturerName}":`, error);
             return null;
         }
@@ -1205,7 +1222,8 @@ export class PriceServiceImpl implements PriceService
         central_width?: number;
     }): Promise<IPricingParams>
     {
-        try {
+        try
+        {
             let map_id: number = 1;
             let manufacturer_id: number = 1;
 
@@ -1236,6 +1254,7 @@ export class PriceServiceImpl implements PriceService
                     userParams.manufacturer_name,
                     map_id
                 );
+
                 if (manufacturerIdResult)
                 {
                     manufacturer_id = manufacturerIdResult;
@@ -1278,6 +1297,12 @@ export class PriceServiceImpl implements PriceService
         }
     }
 
+    /**
+     * @param value - The input string value to format. If undefined or empty, an empty SQL string is returned.
+     * @param collation - The SQL collation to apply to the string value (defaults to `'utf8mb4_general_ci'`).
+     * @returns {string} A safely formatted SQL string literal with the specified collation applied.
+     */
+
     private static safeStringParam(value?: string, collation: string = 'utf8mb4_general_ci'): string
     {
         if (!value || value.trim() === '')
@@ -1287,6 +1312,12 @@ export class PriceServiceImpl implements PriceService
 
         return `'${value}' COLLATE ${collation}`;
     }
+
+    /**
+     * @param params - The pricing parameters object containing state and mapping information.
+     * @returns {Promise<void>} Resolves when the `map_id` (and `manufacturer_id`) have been ensured.
+     * @throws {ServerError.INTERNAL} If no `state_name` is provided or no valid mapping is found for the given state.
+     */
 
     private async ensureMapIdResolved(params: IPricingParams): Promise<void>
     {
@@ -1319,6 +1350,7 @@ export class PriceServiceImpl implements PriceService
         const mapResultsWrapper: IMapResult[][] = await ProcedureExecutor.getProcedureData<IMapResult[]>(args, query, 'getMapIdByStateName');
 
         const mapResults: IMapResult[] = mapResultsWrapper[0];
+
         if (!mapResults?.length)
         {
             throw new ServerError(ServerError.INTERNAL, `No mapping found for state ${params.state_name}`);
@@ -1332,6 +1364,12 @@ export class PriceServiceImpl implements PriceService
 
         logger.info(`[Pricing] map_id resolved`, { map_id: params.map_id, manufacturer_id: params.manufacturer_id });
     }
+
+    /**
+     * @param pricing - The target pricing object to be updated.
+     * @param components - The collection of component key-value pairs to merge into the pricing data.
+     * @returns {void}
+     */
 
     private mergeComponents(pricing: Record<string, any>, components: Record<string, unknown | unknown[]>): void
     {

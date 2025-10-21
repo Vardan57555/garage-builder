@@ -7,6 +7,7 @@ const BuildingRouter_1 = require("../../modules/building-service/routes/Building
 const StateRouter_1 = require("../../modules/states-service/routes/StateRouter");
 const ManufacturerRouter_1 = require("../../modules/manufacturer-service/routes/ManufacturerRouter");
 const PriceRouter_1 = require("../../modules/price-service/routes/PriceRouter");
+const ChatRouter_1 = require("../../modules/chat-service/routes/ChatRouter");
 class ApiRouter extends CustomRouter_1.CustomRouter {
     static instance;
     constructor(enforce) {
@@ -18,6 +19,7 @@ class ApiRouter extends CustomRouter_1.CustomRouter {
         this.use("/state", StateRouter_1.StateRouter.getInstance());
         this.use("/manufacturer", ManufacturerRouter_1.ManufacturerRouter.getInstance());
         this.use("/price", PriceRouter_1.PriceRouter.getInstance());
+        this.use("/chat", ChatRouter_1.ChatRouter.getInstance());
     }
     static getInstance() {
         if (!ApiRouter.instance) {
