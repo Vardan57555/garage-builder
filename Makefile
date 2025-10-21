@@ -21,7 +21,7 @@ start:
 	sh ./scripts/initialize_services/initialize.sh
 
 	echo "Starting main services..."
-	docker compose -f $(MAIN_COMPOSE_FILE) up -d garage-backend streamlit-client
+	docker compose -f $(MAIN_COMPOSE_FILE) up -d garage-backend streamlit-client redis
 
 
 db: down
