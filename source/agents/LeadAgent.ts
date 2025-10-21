@@ -3,19 +3,52 @@ import { InstantiationError } from "@errors/InstantiationError";
 import { PriceParamsExtractorTool } from "./tools/impl/PriceParamsExtractorTool";
 import { IPricingParams } from "@modules/price-service/services/io/IPrice";
 import { sharedLLM } from "@llm/SharedLLM";
-import { HumanMessage } from "@langchain/core/messages";
+import {AIMessageChunk, BaseMessage, HumanMessage} from "@langchain/core/messages";
 import { ProcedureExecutor } from "@utils/procedure/ProcedureExecutor";
-import { logger } from "sequelize/lib/utils/logger";
 import {ConversationState, RoofMappingResult, StateMapping, UserFriendlyParams} from "@agents/tools/io/IChat";
 import {Constants} from "@common/io/Constants";
+import pino from "pino";
+import {createLogger} from "@utils/logger/Log";
+const logger: pino.Logger = createLogger(module);
 
 export class LeadAgent
 {
+    /**
+     * The singleton instance of `LeadAgent`.
+     * @private
+     */
+
     private static instance: LeadAgent;
+
+    /**
+     * Stores the conversation history and other memory-related data for the LeadAgent.
+     */
+
     private memory: BufferMemory;
+
+    /**
+     * Tracks the current conversation state for the LeadAgent.
+     */
+
     private state: ConversationState;
+
+    /**
+     * Caches state name to database mapping results for faster lookups.
+     */
+
     private stateMapCache: Map<string, StateMapping | null> = new Map();
+    /**
+     * Caches a roof type to database `roof_id` mappings for faster lookups.
+     */
+
     private roofMapCache: Map<string, number> = new Map();
+
+    /**
+     * Private constructor to enforce a Singleton pattern.
+     *
+     * @param enforce - Function to enforce a Singleton pattern.
+     * @throws Error if instantiation is attempted directly.
+     */
 
     private constructor(enforce: () => void)
     {
@@ -36,6 +69,12 @@ export class LeadAgent
         };
     }
 
+    /**
+     * Gets the singleton instance of LeadAgent.
+     *
+     * @returns The singleton instance of LeadAgent.
+     */
+
     public static async getInstance(): Promise<LeadAgent>
     {
         if (!LeadAgent.instance)
@@ -45,85 +84,133 @@ export class LeadAgent
         return LeadAgent.instance;
     }
 
+    /**
+     * Converts a message content input into a single string representation.
+     * @param content - The message content, which can be a string, an array of objects, or any other type.
+     * @returns A string representing the full message content.
+     */
+
     private getMessageString(content: string | any[]): string
     {
-        if (typeof content === "string") return content;
-        if (Array.isArray(content)) {
+        if (typeof content === "string")
+        {
+            return content;
+        }
+
+        if (Array.isArray(content))
+        {
             return content
                 .map((c) => ("text" in c ? c.text : JSON.stringify(c)))
                 .join(" ");
         }
+
         return String(content);
     }
 
-    private async detectGarageIntentWithAI(input: string): Promise<boolean> {
-        try {
-            const prompt = Constants.INTENT_PROMPT.replace("{input}", input);
-            console.log("[LeadAgent] Intent detection prompt:", prompt);
+    /**
+     * Detects whether the user input indicates garage-related intent using an AI model.
+     * @param input - The raw user input string to analyze for garage-related intent.
+     * @returns A promise that resolves to `true` if the AI (or fallback) detects garage intent otherwise `false`.
+     * @throws Does not throw errors; logs warnings and falls back if AI invocation fails.
+     */
 
-            const aiMessage = await sharedLLM.invoke([new HumanMessage(prompt)]);
-            const response = (aiMessage.content as string).trim().toUpperCase();
-            console.log("[LeadAgent] Intent detection response:", response);
+    private async detectGarageIntentWithAI(input: string): Promise<boolean>
+    {
+        try {
+            const prompt: string = Constants.INTENT_PROMPT.replace("{input}", input);
+            logger.info("[LeadAgent] Intent detection prompt:", prompt);
+
+            const aiMessage: AIMessageChunk = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const response: string = (aiMessage.content as string).trim().toUpperCase();
+            logger.info("[LeadAgent] Intent detection response:", response);
 
             return response.includes("YES");
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.warn("[LeadAgent] AI intent detection failed, using fallback:", error);
             return this.detectGarageIntentFallback(input);
         }
     }
 
-    private detectGarageIntentFallback(input: string): boolean {
-        const lowerInput = input.toLowerCase();
+    /**
+     * Fallback method to detect garage-related intent from user input using keyword matching.
+     * @param input - The raw user input string to analyze.
+     * @returns `true` if any keyword from `Constants.INTENT_KEYWORDS` is found in the input, otherwise `false`.
+     */
+
+    private detectGarageIntentFallback(input: string): boolean
+    {
+        const lowerInput: string = input.toLowerCase();
         return Array.from(Constants.INTENT_KEYWORDS).some((kw) => lowerInput.includes(kw));
     }
 
-    private async mapStateToDB(
-        stateName: string,
-        preferredBuildingId = 1
-    ): Promise<StateMapping | null> {
+    /**
+     * Maps a given state name to its corresponding database identifiers (`map_id` and `manufacturer_id`).
+     * @param stateName - The name of the state to map.
+     * @param preferredBuildingId - Optional ID of the preferred building; defaults to `1`.
+     * @returns A promise resolving to a `StateMapping` object containing `map_id` and `manufacturer_id` if found,
+     * @throws Does not propagate errors; logs failures and caches `null` on error.
+     */
+
+    private async mapStateToDB(stateName: string, preferredBuildingId = 1): Promise<StateMapping | null>
+    {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
-        if (this.stateMapCache.has(cacheKey)) {
+
+        if (this.stateMapCache.has(cacheKey))
+        {
             return this.stateMapCache.get(cacheKey) ?? null;
         }
 
-        try {
+        try
+        {
             const result = await ProcedureExecutor.getProcedureData<any>(
                 [stateName],
                 "getMapIdByStateName(?)",
                 "getMapIdByStateName"
             );
 
-            if (result?.length > 0) {
+            if (result?.length > 0)
+            {
                 const preferredMapping = result.find(
                     (item: any) => item.building_id === preferredBuildingId
                 );
                 const mapping = preferredMapping || result[0];
-                const output: StateMapping = {
-                    map_id: mapping.map_id,
-                    manufacturer_id: mapping.manufacturer_id,
-                };
+                const output: StateMapping = {map_id: mapping.map_id, manufacturer_id: mapping.manufacturer_id};
                 this.stateMapCache.set(cacheKey, output);
                 return output;
             }
 
             this.stateMapCache.set(cacheKey, null);
             return null;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error("[LeadAgent] State mapping failed:", error);
             this.stateMapCache.set(cacheKey, null);
             return null;
         }
     }
 
-    private async mapRoofTypeToDB(roofType: string, mapId: number): Promise<number> {
-        const normalizedRoofType = roofType.toLowerCase();
+    /**
+     * @param roofType - The type of roof to map (e.g., "vertical", "box").
+     * @param mapId - The ID of the map associated with the roof type.
+     * @returns A promise resolving to the database `roof_id` corresponding to the given roof type and map ID.
+     * @throws Does not propagate errors; logs failures and uses a fallback ID if mapping fails.
+     */
+
+    private async mapRoofTypeToDB(roofType: string, mapId: number): Promise<number>
+    {
+        const normalizedRoofType: string = roofType.toLowerCase();
         const cacheKey = `${normalizedRoofType}:${mapId}`;
 
-        if (this.roofMapCache.has(cacheKey)) {
+        if (this.roofMapCache.has(cacheKey))
+        {
             return this.roofMapCache.get(cacheKey)!;
         }
 
-        try {
+        try
+        {
             const result: RoofMappingResult[] =
                 await ProcedureExecutor.getProcedureData<RoofMappingResult>(
                     [mapId, roofType],
@@ -131,47 +218,52 @@ export class LeadAgent
                     "roof_mapping"
                 );
 
-            if (result?.length > 0) {
+            if (result?.length > 0)
+            {
                 this.roofMapCache.set(cacheKey, result[0].roof_id);
                 return result[0].roof_id;
             }
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error("[LeadAgent] Roof type mapping failed:", error);
         }
 
-        // Fallback logic
-        const fallbackId = Constants.ROOF_TYPE_MAPPING[normalizedRoofType] ??
-            (normalizedRoofType.includes("vertical") ? 1 :
-                normalizedRoofType.includes("box") ? 3 : 2);
+        const fallbackId: number = Constants.ROOF_TYPE_MAPPING[normalizedRoofType] ?? (normalizedRoofType.includes("vertical") ? 1 : normalizedRoofType.includes("box") ? 3 : 2);
 
         this.roofMapCache.set(cacheKey, fallbackId);
         return fallbackId;
     }
 
-    private async convertToTechnicalParams(
-        userParams: UserFriendlyParams
-    ): Promise<IPricingParams | null> {
-        try {
+    /**
+     * @param userParams - An object containing user-friendly parameters such as dimensions, state, roof type, and building attributes.
+     * @returns A promise resolving to an `IPricingParams` object with fully mapped technical parameters, or `null` if conversion fails.
+     * @throws Does not propagate errors; logs failures and returns `null` on error.
+     */
+
+    private async convertToTechnicalParams(userParams: UserFriendlyParams): Promise<IPricingParams | null>
+    {
+        try
+        {
             let map_id = 1;
             let manufacturer_id = 1;
 
-            // Map state if provided
-            if (userParams.state_name) {
-                const mapping = await this.mapStateToDB(userParams.state_name);
-                if (mapping) {
+            if (userParams.state_name)
+            {
+                const mapping: StateMapping = await this.mapStateToDB(userParams.state_name);
+
+                if (mapping)
+                {
                     map_id = mapping.map_id;
                     manufacturer_id = mapping.manufacturer_id;
-                } else {
-                    console.warn(
-                        `[LeadAgent] State "${userParams.state_name}" not found, using defaults.`
-                    );
+                }
+                else
+                {
+                    logger.warn(`[LeadAgent] State "${userParams.state_name}" not found, using defaults.`);
                 }
             }
 
-            // Map roof type
-            const roof_id = userParams.roof_type
-                ? await this.mapRoofTypeToDB(userParams.roof_type, map_id)
-                : 2;
+            const roof_id: number = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id) : 2;
 
             return {
                 width: userParams.width ?? 0,
@@ -185,22 +277,32 @@ export class LeadAgent
                 gauge: userParams.gauge ?? 14,
                 is_barn: userParams.is_barn,
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error("[LeadAgent] Param conversion failed:", error);
             return null;
         }
     }
 
-    private getMissingFields(
-        params: Partial<UserFriendlyParams>
-    ): (keyof UserFriendlyParams)[] {
-        return Constants.REQUIRED_FIELDS.filter(
-            (field) => !params[field]
-        );
+    /**
+     * @param params - A partial object containing user-friendly parameters.
+     * @returns An array of keys from `UserFriendlyParams` that are missing or undefined in `params`.
+     */
+
+    private getMissingFields(params: Partial<UserFriendlyParams>): (keyof UserFriendlyParams)[]
+    {
+        return Constants.REQUIRED_FIELDS.filter((field) => !params[field]);
     }
 
-    private formatDimensionsResponse(extractedParams: Partial<UserFriendlyParams>): string {
-        const dimensions = (["width", "length", "height"] as const)
+    /**
+     * @param extractedParams - A partial object containing user-friendly parameters, potentially including width, length, and height.
+     * @returns A formatted string listing the available dimensions, or an empty string if none are provided.
+     */
+
+    private formatDimensionsResponse(extractedParams: Partial<UserFriendlyParams>): string
+    {
+        const dimensions: string = (["width", "length", "height"] as const)
             .filter((k) => extractedParams[k])
             .map((k) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${extractedParams[k]}ft.`)
             .join(" ");
@@ -208,16 +310,23 @@ export class LeadAgent
         return dimensions ? `Got it! ${dimensions}\n\n` : "";
     }
 
-    public async run(input: string): Promise<string> {
-        console.log("[LeadAgent] User input:", input);
+    /**
+     * @param input - The raw user input string to process.
+     * @returns A promise resolving to a user-friendly response string, which may include prompts for missing fields,
+     */
+
+    public async run(input: string): Promise<string>
+    {
+        logger.info("[LeadAgent] User input:", input);
 
         await this.memory.chatHistory.addUserMessage(input);
 
-        // Step 1: Detect intent
-        if (!this.state.hasGarageIntent) {
-            const hasIntent = await this.detectGarageIntentWithAI(input);
-            if (!hasIntent) {
-                const response =
+        if (!this.state.hasGarageIntent)
+        {
+            const hasIntent: boolean = await this.detectGarageIntentWithAI(input);
+            if (!hasIntent)
+            {
+                const response: string =
                     "Hello! 👋 I can help you get a price quote for a garage or metal building.\n" +
                     "Please tell me what type of building or provide dimensions (width, length, height in feet).";
                 await this.memory.chatHistory.addAIChatMessage(response);
@@ -226,61 +335,75 @@ export class LeadAgent
             this.state.hasGarageIntent = true;
         }
 
-        // Step 2: Extract parameters
-        const extractor = PriceParamsExtractorTool.getInstance();
-        const rawParams = await extractor._call(await this.getConversationContext());
-        console.log("[LeadAgent] Raw params from extractor:", rawParams);
+        const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
+        const rawParams: string = await extractor._call(await this.getConversationContext());
+        logger.info("[LeadAgent] Raw params from extractor:", rawParams);
 
-        const extractedParams = extractor.safeExtractUserFriendlyParams(rawParams);
-        console.log("[LeadAgent] Safe extracted user-friendly params:", extractedParams);
+        const extractedParams: Partial<UserFriendlyParams> = extractor.safeExtractUserFriendlyParams(rawParams);
+        logger.info("[LeadAgent] Safe extracted user-friendly params:", extractedParams);
 
         this.state.userFriendlyParams = {
             ...this.state.userFriendlyParams,
             ...extractedParams
         };
 
-        // Step 3: Ask missing fields
         const missingFields = this.getMissingFields(this.state.userFriendlyParams);
-        if (missingFields.length > 0) {
-            const nextField = missingFields[0];
+        if (missingFields.length > 0)
+        {
+            const nextField: keyof UserFriendlyParams = missingFields[0];
             this.state.currentField = nextField;
-            const response = this.formatDimensionsResponse(extractedParams) +
+            const response: string = this.formatDimensionsResponse(extractedParams) +
                 Constants.FIELD_PROMPTS[nextField];
 
             await this.memory.chatHistory.addAIChatMessage(response);
             return response;
         }
 
-        // Step 4: Convert & calculate
-        const technicalParams = await this.convertToTechnicalParams(
-            this.state.userFriendlyParams as UserFriendlyParams
-        );
+        const technicalParams: IPricingParams = await this.convertToTechnicalParams(this.state.userFriendlyParams as UserFriendlyParams);
 
-        if (!technicalParams) {
+        if (!technicalParams)
+        {
             return "⚠️ Failed to convert user input to technical parameters.";
         }
 
-        const result = await extractor.calculatePriceWithParams(technicalParams);
+        const result: string = await extractor.calculatePriceWithParams(technicalParams);
         await this.memory.chatHistory.addAIChatMessage(result);
 
-        // Reset state
         this.resetState();
 
         return result + "\n\n💬 Need another quote? Just describe what you're looking for!";
     }
 
-    private async getConversationContext(): Promise<string> {
-        const history = await this.memory.chatHistory.getMessages();
+    /**
+     * Retrieves the full conversation history as a single string.
+     * @returns A promise resolving to the complete conversation context as a single string.
+     */
+
+    private async getConversationContext(): Promise<string>
+    {
+        const history: BaseMessage[] = await this.memory.chatHistory.getMessages();
         return history.map(msg => this.getMessageString(msg.content)).join("\n");
     }
 
-    private resetState(): void {
+    /**
+     * Resets the internal state of the LeadAgent for a new conversation or interaction.
+     * Clears all stored user-friendly parameters, resets the garage intent flag, and clears the current field tracker.
+     */
+
+    private resetState(): void
+    {
         this.state.userFriendlyParams = {};
         this.state.hasGarageIntent = false;
         this.state.currentField = undefined;
     }
 
-    public async reset(): Promise<void> {
+    /**
+     * Performs a full reset of the LeadAgent instance.
+     * @returns A promise that resolves once the reset is complete.
+     */
+
+    public async reset(): Promise<void>
+    {
         this.resetState();
         this.stateMapCache.clear();
         this.roofMapCache.clear();

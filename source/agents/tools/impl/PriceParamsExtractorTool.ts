@@ -13,7 +13,7 @@ const logger: pino.Logger = createLogger(module);
 export class PriceParamsExtractorTool extends BaseTool
 {
     /**
-     * The singleton instance of `PriceService`.
+     * The singleton instance of `PriceParamsExtractorTool`.
      * @private
      */
 
