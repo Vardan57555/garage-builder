@@ -23,6 +23,9 @@ services:
       MYSQL_DB: garage
       MYSQL_USER: pricing_engine
       MYSQL_PASSWORD: secret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
     networks:
       - garage-network
     restart: always
@@ -53,14 +56,26 @@ services:
     ports:
       - "8501:8501"
     environment:
-      BACKEND_URL: http://garage-backend:3000/api/v1/price/get-ai-prices
+      BACKEND_URL: http://garage-backend:3000/api/v1/chat/
     depends_on:
       - garage-backend
     networks:
       - garage-network
 
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    networks:
+      - garage-network
+    restart: always
+
 volumes:
   ollama-data:
+  redis-data:
 
 networks:
   garage-network:

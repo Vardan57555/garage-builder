@@ -9,46 +9,23 @@ import {ConversationState, RoofMappingResult, StateMapping, UserFriendlyParams} 
 import {Constants} from "@common/io/Constants";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
+
 const logger: pino.Logger = createLogger(module);
+
+interface SessionData {
+    memory: BufferMemory;
+    state: ConversationState;
+    stateMapCache: Map<string, StateMapping | null>;
+    roofMapCache: Map<string, number>;
+    lastActivity: number;
+}
 
 export class LeadAgent
 {
-    /**
-     * The singleton instance of `LeadAgent`.
-     * @private
-     */
-
     private static instance: LeadAgent;
-
-    /**
-     * Stores the conversation history and other memory-related data for the LeadAgent.
-     */
-
-    private memory: BufferMemory;
-
-    /**
-     * Tracks the current conversation state for the LeadAgent.
-     */
-
-    private state: ConversationState;
-
-    /**
-     * Caches state name to database mapping results for faster lookups.
-     */
-
-    private stateMapCache: Map<string, StateMapping | null> = new Map();
-    /**
-     * Caches a roof type to database `roof_id` mappings for faster lookups.
-     */
-
-    private roofMapCache: Map<string, number> = new Map();
-
-    /**
-     * Private constructor to enforce a Singleton pattern.
-     *
-     * @param enforce - Function to enforce a Singleton pattern.
-     * @throws Error if instantiation is attempted directly.
-     */
+    private sessions: Map<string, SessionData> = new Map();
+    private readonly SESSION_TIMEOUT = 30 * 60 * 1000;
+    private cleanupInterval: NodeJS.Timeout | null = null;
 
     private constructor(enforce: () => void)
     {
@@ -57,23 +34,9 @@ export class LeadAgent
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Use LeadAgent.getInstance() instead of new.");
         }
 
-        this.memory = new BufferMemory({
-            memoryKey: "chat_history",
-            returnMessages: true,
-            chatHistory: new ChatMessageHistory(),
-        });
-
-        this.state = {
-            userFriendlyParams: {},
-            hasGarageIntent: false,
-        };
+        // Start periodic cleanup of expired sessions
+        this.startSessionCleanup();
     }
-
-    /**
-     * Gets the singleton instance of LeadAgent.
-     *
-     * @returns The singleton instance of LeadAgent.
-     */
 
     public static async getInstance(): Promise<LeadAgent>
     {
@@ -85,10 +48,67 @@ export class LeadAgent
     }
 
     /**
-     * Converts a message content input into a single string representation.
-     * @param content - The message content, which can be a string, an array of objects, or any other type.
-     * @returns A string representing the full message content.
+     * Creates or retrieves a session by ID
      */
+    private getOrCreateSession(sessionId: string): SessionData
+    {
+        if (this.sessions.has(sessionId))
+        {
+            const session = this.sessions.get(sessionId)!;
+            session.lastActivity = Date.now();
+            return session;
+        }
+
+        const newSession: SessionData = {
+            memory: new BufferMemory({
+                memoryKey: "chat_history",
+                returnMessages: true,
+                chatHistory: new ChatMessageHistory(),
+            }),
+            state: {
+                userFriendlyParams: {},
+                hasGarageIntent: false,
+            },
+            stateMapCache: new Map(),
+            roofMapCache: new Map(),
+            lastActivity: Date.now(),
+        };
+
+        this.sessions.set(sessionId, newSession);
+        logger.info(`[LeadAgent] New session created: ${sessionId}`);
+        return newSession;
+    }
+
+    /**
+     * Starts automatic cleanup of expired sessions
+     */
+    private startSessionCleanup(): void
+    {
+        if (this.cleanupInterval)
+        {
+            return;
+        }
+
+        this.cleanupInterval = setInterval(() => {
+            const now = Date.now();
+            let cleanedCount = 0;
+
+            for (const [sessionId, session] of this.sessions.entries())
+            {
+                if (now - session.lastActivity > this.SESSION_TIMEOUT)
+                {
+                    this.sessions.delete(sessionId);
+                    cleanedCount++;
+                    logger.info(`[LeadAgent] Session expired and cleaned: ${sessionId}`);
+                }
+            }
+
+            if (cleanedCount > 0)
+            {
+                logger.info(`[LeadAgent] Cleaned up ${cleanedCount} expired sessions. Active sessions: ${this.sessions.size}`);
+            }
+        }, 5 * 60 * 1000);
+    }
 
     private getMessageString(content: string | any[]): string
     {
@@ -106,13 +126,6 @@ export class LeadAgent
 
         return String(content);
     }
-
-    /**
-     * Detects whether the user input indicates garage-related intent using an AI model.
-     * @param input - The raw user input string to analyze for garage-related intent.
-     * @returns A promise that resolves to `true` if the AI (or fallback) detects garage intent otherwise `false`.
-     * @throws Does not throw errors; logs warnings and falls back if AI invocation fails.
-     */
 
     private async detectGarageIntentWithAI(input: string): Promise<boolean>
     {
@@ -133,33 +146,19 @@ export class LeadAgent
         }
     }
 
-    /**
-     * Fallback method to detect garage-related intent from user input using keyword matching.
-     * @param input - The raw user input string to analyze.
-     * @returns `true` if any keyword from `Constants.INTENT_KEYWORDS` is found in the input, otherwise `false`.
-     */
-
     private detectGarageIntentFallback(input: string): boolean
     {
         const lowerInput: string = input.toLowerCase();
         return Array.from(Constants.INTENT_KEYWORDS).some((kw) => lowerInput.includes(kw));
     }
 
-    /**
-     * Maps a given state name to its corresponding database identifiers (`map_id` and `manufacturer_id`).
-     * @param stateName - The name of the state to map.
-     * @param preferredBuildingId - Optional ID of the preferred building; defaults to `1`.
-     * @returns A promise resolving to a `StateMapping` object containing `map_id` and `manufacturer_id` if found,
-     * @throws Does not propagate errors; logs failures and caches `null` on error.
-     */
-
-    private async mapStateToDB(stateName: string, preferredBuildingId = 1): Promise<StateMapping | null>
+    private async mapStateToDB(stateName: string, session: SessionData, preferredBuildingId = 1): Promise<StateMapping | null>
     {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
 
-        if (this.stateMapCache.has(cacheKey))
+        if (session.stateMapCache.has(cacheKey))
         {
-            return this.stateMapCache.get(cacheKey) ?? null;
+            return session.stateMapCache.get(cacheKey) ?? null;
         }
 
         try
@@ -177,36 +176,29 @@ export class LeadAgent
                 );
                 const mapping = preferredMapping || result[0];
                 const output: StateMapping = {map_id: mapping.map_id, manufacturer_id: mapping.manufacturer_id};
-                this.stateMapCache.set(cacheKey, output);
+                session.stateMapCache.set(cacheKey, output);
                 return output;
             }
 
-            this.stateMapCache.set(cacheKey, null);
+            session.stateMapCache.set(cacheKey, null);
             return null;
         }
         catch (error)
         {
             logger.error("[LeadAgent] State mapping failed:", error);
-            this.stateMapCache.set(cacheKey, null);
+            session.stateMapCache.set(cacheKey, null);
             return null;
         }
     }
 
-    /**
-     * @param roofType - The type of roof to map (e.g., "vertical", "box").
-     * @param mapId - The ID of the map associated with the roof type.
-     * @returns A promise resolving to the database `roof_id` corresponding to the given roof type and map ID.
-     * @throws Does not propagate errors; logs failures and uses a fallback ID if mapping fails.
-     */
-
-    private async mapRoofTypeToDB(roofType: string, mapId: number): Promise<number>
+    private async mapRoofTypeToDB(roofType: string, mapId: number, session: SessionData): Promise<number>
     {
         const normalizedRoofType: string = roofType.toLowerCase();
         const cacheKey = `${normalizedRoofType}:${mapId}`;
 
-        if (this.roofMapCache.has(cacheKey))
+        if (session.roofMapCache.has(cacheKey))
         {
-            return this.roofMapCache.get(cacheKey)!;
+            return session.roofMapCache.get(cacheKey)!;
         }
 
         try
@@ -220,7 +212,7 @@ export class LeadAgent
 
             if (result?.length > 0)
             {
-                this.roofMapCache.set(cacheKey, result[0].roof_id);
+                session.roofMapCache.set(cacheKey, result[0].roof_id);
                 return result[0].roof_id;
             }
         }
@@ -231,17 +223,11 @@ export class LeadAgent
 
         const fallbackId: number = Constants.ROOF_TYPE_MAPPING[normalizedRoofType] ?? (normalizedRoofType.includes("vertical") ? 1 : normalizedRoofType.includes("box") ? 3 : 2);
 
-        this.roofMapCache.set(cacheKey, fallbackId);
+        session.roofMapCache.set(cacheKey, fallbackId);
         return fallbackId;
     }
 
-    /**
-     * @param userParams - An object containing user-friendly parameters such as dimensions, state, roof type, and building attributes.
-     * @returns A promise resolving to an `IPricingParams` object with fully mapped technical parameters, or `null` if conversion fails.
-     * @throws Does not propagate errors; logs failures and returns `null` on error.
-     */
-
-    private async convertToTechnicalParams(userParams: UserFriendlyParams): Promise<IPricingParams | null>
+    private async convertToTechnicalParams(userParams: UserFriendlyParams, session: SessionData): Promise<IPricingParams | null>
     {
         try
         {
@@ -250,7 +236,7 @@ export class LeadAgent
 
             if (userParams.state_name)
             {
-                const mapping: StateMapping = await this.mapStateToDB(userParams.state_name);
+                const mapping: StateMapping = await this.mapStateToDB(userParams.state_name, session);
 
                 if (mapping)
                 {
@@ -263,7 +249,7 @@ export class LeadAgent
                 }
             }
 
-            const roof_id: number = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id) : 2;
+            const roof_id: number = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id, session) : 2;
 
             return {
                 width: userParams.width ?? 0,
@@ -285,20 +271,10 @@ export class LeadAgent
         }
     }
 
-    /**
-     * @param params - A partial object containing user-friendly parameters.
-     * @returns An array of keys from `UserFriendlyParams` that are missing or undefined in `params`.
-     */
-
     private getMissingFields(params: Partial<UserFriendlyParams>): (keyof UserFriendlyParams)[]
     {
         return Constants.REQUIRED_FIELDS.filter((field) => !params[field]);
     }
-
-    /**
-     * @param extractedParams - A partial object containing user-friendly parameters, potentially including width, length, and height.
-     * @returns A formatted string listing the available dimensions, or an empty string if none are provided.
-     */
 
     private formatDimensionsResponse(extractedParams: Partial<UserFriendlyParams>): string
     {
@@ -310,18 +286,17 @@ export class LeadAgent
         return dimensions ? `Got it! ${dimensions}\n\n` : "";
     }
 
-    /**
-     * @param input - The raw user input string to process.
-     * @returns A promise resolving to a user-friendly response string, which may include prompts for missing fields,
-     */
-
-    public async run(input: string): Promise<string>
+    public async run(sessionId: string, input: string): Promise<string>
     {
-        logger.info("[LeadAgent] User input:", input);
+        console.log(sessionId);
 
-        await this.memory.chatHistory.addUserMessage(input);
+        logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
 
-        if (!this.state.hasGarageIntent)
+        const session = this.getOrCreateSession(sessionId);
+
+        await session.memory.chatHistory.addUserMessage(input);
+
+        if (!session.state.hasGarageIntent)
         {
             const hasIntent: boolean = await this.detectGarageIntentWithAI(input);
             if (!hasIntent)
@@ -329,37 +304,37 @@ export class LeadAgent
                 const response: string =
                     "Hello! 👋 I can help you get a price quote for a garage or metal building.\n" +
                     "Please tell me what type of building or provide dimensions (width, length, height in feet).";
-                await this.memory.chatHistory.addAIChatMessage(response);
+                await session.memory.chatHistory.addAIChatMessage(response);
                 return response;
             }
-            this.state.hasGarageIntent = true;
+            session.state.hasGarageIntent = true;
         }
 
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
-        const rawParams: string = await extractor._call(await this.getConversationContext());
-        logger.info("[LeadAgent] Raw params from extractor:", rawParams);
+        const rawParams: string = await extractor._call(await this.getConversationContext(session));
+        logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
 
         const extractedParams: Partial<UserFriendlyParams> = extractor.safeExtractUserFriendlyParams(rawParams);
-        logger.info("[LeadAgent] Safe extracted user-friendly params:", extractedParams);
+        logger.info(`[LeadAgent] Session ${sessionId} - Safe extracted user-friendly params:`, extractedParams);
 
-        this.state.userFriendlyParams = {
-            ...this.state.userFriendlyParams,
+        session.state.userFriendlyParams = {
+            ...session.state.userFriendlyParams,
             ...extractedParams
         };
 
-        const missingFields = this.getMissingFields(this.state.userFriendlyParams);
+        const missingFields = this.getMissingFields(session.state.userFriendlyParams);
         if (missingFields.length > 0)
         {
             const nextField: keyof UserFriendlyParams = missingFields[0];
-            this.state.currentField = nextField;
+            session.state.currentField = nextField;
             const response: string = this.formatDimensionsResponse(extractedParams) +
                 Constants.FIELD_PROMPTS[nextField];
 
-            await this.memory.chatHistory.addAIChatMessage(response);
+            await session.memory.chatHistory.addAIChatMessage(response);
             return response;
         }
 
-        const technicalParams: IPricingParams = await this.convertToTechnicalParams(this.state.userFriendlyParams as UserFriendlyParams);
+        const technicalParams: IPricingParams = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
 
         if (!technicalParams)
         {
@@ -367,51 +342,58 @@ export class LeadAgent
         }
 
         const result: string = await extractor.calculatePriceWithParams(technicalParams);
-        await this.memory.chatHistory.addAIChatMessage(result);
+        await session.memory.chatHistory.addAIChatMessage(result);
 
-        this.resetState();
+        this.resetSessionState(session);
 
         return result + "\n\n💬 Need another quote? Just describe what you're looking for!";
     }
 
-    /**
-     * Retrieves the full conversation history as a single string.
-     * @returns A promise resolving to the complete conversation context as a single string.
-     */
-
-    private async getConversationContext(): Promise<string>
+    private async getConversationContext(session: SessionData): Promise<string>
     {
-        const history: BaseMessage[] = await this.memory.chatHistory.getMessages();
+        const history: BaseMessage[] = await session.memory.chatHistory.getMessages();
         return history.map(msg => this.getMessageString(msg.content)).join("\n");
     }
 
-    /**
-     * Resets the internal state of the LeadAgent for a new conversation or interaction.
-     * Clears all stored user-friendly parameters, resets the garage intent flag, and clears the current field tracker.
-     */
-
-    private resetState(): void
+    private resetSessionState(session: SessionData): void
     {
-        this.state.userFriendlyParams = {};
-        this.state.hasGarageIntent = false;
-        this.state.currentField = undefined;
+        session.state.userFriendlyParams = {};
+        session.state.hasGarageIntent = false;
+        session.state.currentField = undefined;
     }
 
     /**
-     * Performs a full reset of the LeadAgent instance.
-     * @returns A promise that resolves once the reset is complete.
+     * Manually end a session
      */
+    public async endSession(sessionId: string): Promise<void>
+    {
+        if (this.sessions.has(sessionId))
+        {
+            this.sessions.delete(sessionId);
+            logger.info(`[LeadAgent] Session ended: ${sessionId}`);
+        }
+    }
 
+    /**
+     * Get active session count
+     */
+    public getActiveSessionCount(): number
+    {
+        return this.sessions.size;
+    }
+
+    /**
+     * Full reset (for testing/shutdown)
+     */
     public async reset(): Promise<void>
     {
-        this.resetState();
-        this.stateMapCache.clear();
-        this.roofMapCache.clear();
-        this.memory = new BufferMemory({
-            memoryKey: "chat_history",
-            returnMessages: true,
-            chatHistory: new ChatMessageHistory(),
-        });
+        this.sessions.clear();
+        if (this.cleanupInterval)
+        {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+        }
+        logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
     }
 }
 

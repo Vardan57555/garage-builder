@@ -1,5 +1,6 @@
 import { MySQLManager } from "@config/db/MySqlManager";
 import { App } from "./app";
+import {RedisManager} from "@config/redis/RedisManager";
 
 /**
  * Entry point of the application.
@@ -7,4 +8,5 @@ import { App } from "./app";
  */
 new App(
     MySQLManager.getInstance(),
+    RedisManager.getInstance()
 ).listen();
