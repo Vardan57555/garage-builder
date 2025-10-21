@@ -11,8 +11,8 @@ import httpx
 import streamlit as st
 
 # Backend URLs
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000/api/v1/price/get-ai-prices")
-BACKEND_STATUS_URL = os.getenv("BACKEND_STATUS_URL", "http://localhost:3000/api/v1/price/job-status")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/price/get-ai-prices")
+BACKEND_STATUS_URL = os.getenv("BACKEND_STATUS_URL", "http://localhost:5003/api/v1/price/job-status")
 
 st.set_page_config(page_title="Garage Builder Assistant", page_icon="🤖")
 
@@ -127,11 +127,11 @@ if prompt := st.chat_input("Type your question…"):
                     # Safely get nested values, checking types
                     data_field = job_data.get("data", {})
                     result_field = job_data.get("result", {})
-                    
+
                     # Only call .get() if they're actually dicts
                     data_job_id = data_field.get("job_id") if isinstance(data_field, dict) else None
                     result_job_id = result_field.get("job_id") if isinstance(result_field, dict) else None
-                    
+
                     job_id = (
                         job_data.get("job_id")
                         or data_job_id
