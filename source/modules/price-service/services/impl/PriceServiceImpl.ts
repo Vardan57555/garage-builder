@@ -45,6 +45,9 @@ export class PriceServiceImpl implements PriceService
         'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
     ];
 
+    private readonly mapIdCache = new Map<string, IMapResult>();
+    private readonly ARRAY_FIELDS = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
+
     // private static readonly BASE_KEYS: string[] = [
     //     'truss_name',
     //     // 'anchors_cost',
@@ -223,129 +226,81 @@ export class PriceServiceImpl implements PriceService
      * @throws {ServerError.INTERNAL} If any procedure call or calculation fails.
      */
 
-    public async fetchBuildingPricingWithUtility(params: IPricingParams) {
-        try {
-            // 🧭 STEP 0 — Log incoming params
-            console.log(`[Pricing] START fetchBuildingPricingWithUtility at ${new Date().toISOString()}`, JSON.stringify(params, null, 2));
+    public async fetchBuildingPricingWithUtility(params: IPricingParams)
+    {
+        try
+        {
+            await this.ensureMapIdResolved(params);
 
-            // 🧭 STEP 1 — Resolve map_id if not provided
-            if (!params.map_id) {
-                if (!params.state_name) {
-                    throw new ServerError(ServerError.INTERNAL, `Cannot resolve map_id — no state_name provided`);
-                }
+            const [{ finalWidth, finalLength, finalHeight }, { manufacturer, buildingStructureFull }] =
+                await Promise.all([
+                    this.calculateFinalDimensions(params),
+                    this.fetchBaseData(
+                        params.map_id!,
+                        params.roof_id,
+                        params.width,
+                        params.height,
+                        params.length
+                    )
+                ]);
 
-                const [args, query] = PriceServiceImpl.PROCEDURE_MAP.getMapIdByStateName({
-                    state_name: params.state_name,
-                    map_id: 0,
-                    width: 0,
-                    height: 0,
-                    length: 0,
-                    roof_id: 0,
-                    buildingStructureFull: [],
-                    manufacturer: [],
-                    componentKeys: [],
-                    structureString: ""
-                });
-
-                console.log(`[Pricing] STEP 1 — calling ProcedureExecutor.getProcedureData at ${new Date().toISOString()}`);
-                const mapResultsWrapper = await ProcedureExecutor.getProcedureData<IMapResult[]>(
-                    args,
-                    query,
-                    'getMapIdByStateName'
-                );
-                console.log(`[Pricing] STEP 1 — got ProcedureExecutor results`, mapResultsWrapper);
-
-                const mapResults: IMapResult[] = mapResultsWrapper[0];
-                if (!mapResults?.length) {
-                    throw new ServerError(ServerError.INTERNAL, `No mapping found for state ${params.state_name}`);
-                }
-
-                const randomMapping = mapResults[Math.floor(Math.random() * mapResults.length)];
-                params.map_id = randomMapping.map_id;
-                params.manufacturer_id = randomMapping.manufacturer_id;
-
-                console.log(`[Pricing] STEP 1 — map_id resolved`, {
-                    map_id: params.map_id,
-                    manufacturer_id: params.manufacturer_id
-                });
+            if (!buildingStructureFull.length)
+            {
+                return {
+                    status: false,
+                    message: 'The given dimension is not available for the building'
+                };
             }
 
-            // 🧮 STEP 2 — Calculate final dimensions
-            const { finalWidth, finalLength, finalHeight } = await this.calculateFinalDimensions(params);
-            console.log(`[Pricing] STEP 2 — final dimensions`, { finalWidth, finalLength, finalHeight });
-
-            // 🧮 STEP 3 — Fetch building structure
-            console.time("fetchBaseData");
-            const { manufacturer, buildingStructureFull } = await this.fetchBaseData(
-                params.map_id,
-                params.roof_id,
-                finalWidth,
-                finalHeight,
-                finalLength
-            );
-            console.timeEnd("fetchBaseData");
-
-            if (!buildingStructureFull.length) {
-                console.warn(`[Pricing] STEP 3 — no building structure returned`);
-                return { status: false, message: 'The given dimension is not available for the building' };
-            }
-            console.log(`[Pricing] STEP 3 — building structure fetched`, buildingStructureFull);
-
-            let pricing: Record<string, any> = {
+            const pricing: Record<string, any> = {
                 building_to_maxlength: finalLength,
                 manufacturer,
                 building_structure: buildingStructureFull
             };
 
-            // 🧩 STEP 4 — Fetch component pricing
             const componentKeys: string[] = this.getComponentKeys(params.single_slope_height);
-            const components: Record<string, unknown | unknown[]> = await this.fetchComponentsPricing({
-                map_id: params.map_id,
-                roof_id: params.roof_id,
-                width: finalWidth,
-                height: finalHeight,
-                length: finalLength,
-                buildingStructureFull,
-                manufacturer,
-                single_slope_height: params.single_slope_height,
-                componentKeys
-            });
 
-            for (const key in components) {
-                const value = components[key];
-                if (Array.isArray(value) && !['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses'].includes(key)) {
-                    components[key] = value[0] ?? null;
-                }
-            }
+            const [components, utilityPricing, centralPricing] = await Promise.all([
+                this.fetchComponentsPricing({
+                    map_id: params.map_id!,
+                    roof_id: params.roof_id,
+                    width: finalWidth,
+                    height: finalHeight,
+                    length: finalLength,
+                    buildingStructureFull,
+                    manufacturer,
+                    single_slope_height: params.single_slope_height,
+                    componentKeys
+                }),
+                params.utility_length && params.utility_length > 0
+                    ? this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull)
+                    : Promise.resolve(null),
+                params.central_map_id
+                    ? this.fetchCentralPricing(params)
+                    : Promise.resolve(null)
+            ]);
 
-            Object.assign(pricing, components);
-            console.log(`[Pricing] STEP 4 — component pricing`, components);
+            this.mergeComponents(pricing, components);
 
-            // 🧰 STEP 5 — Fetch utility pricing if applicable
-            console.log(`[Pricing] STEP 5 — utility check`, { utility_length: params.utility_length });
-            if (params.utility_length && params.utility_length > 0) {
-                const utilityPricing = await this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull);
-                console.log(`[Pricing] STEP 5 — utility pricing result`, utilityPricing);
+            if (utilityPricing)
+            {
                 Object.assign(pricing, utilityPricing);
             }
 
-            // 🏗 STEP 6 — Fetch central pricing if applicable
-            console.log(`[Pricing] STEP 6 — central structure check`, { central_map_id: params.central_map_id });
-            if (params.central_map_id) {
-                const centralPricing = await this.fetchCentralPricing(params);
-                console.log(`[Pricing] STEP 6 — central pricing result`, centralPricing);
+            if (centralPricing)
+            {
                 Object.assign(pricing, centralPricing);
             }
 
-            // 🛠 STEP 7 — Apply addons & adjust connection fees
             this.applyAddons(pricing);
             this.adjustConnectionFees(pricing, params.is_barn);
-            console.log(`[Pricing] STEP 7 — FINAL pricing`, pricing);
 
             return pricing;
-        } catch (error) {
-            console.error(`[Pricing] Error calculating pricing`, error);
-            throw new ServerError(ServerError.INTERNAL, `Failed to calculate pricing: ${error.message}`);
+        }
+        catch (error)
+        {
+            logger.error(`[Pricing] Error calculating pricing`, error);
+            throw new ServerError(ServerError.INTERNAL, `Failed to calculate pricing: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
 
@@ -670,7 +625,8 @@ export class PriceServiceImpl implements PriceService
      * @throws {ServerError} If any procedure execution fails.
      */
 
-    private async getUtilityPricing(params: GetUtilityPricingParams): Promise<IUtilityPricingResult> {
+    private async getUtilityPricing(params: GetUtilityPricingParams): Promise<IUtilityPricingResult>
+    {
         const { map_id, height, length, utility_length, buildingStructureFull, single_slope_height } = params;
         const { end_length, distance_on_center, side_end_name } = buildingStructureFull[0];
 
@@ -1101,7 +1057,8 @@ export class PriceServiceImpl implements PriceService
      * @param stateName - The state name (e.g., "Arizona", "Texas")
      * @returns Object containing map_id and manufacturer_id, or null if not found
      */
-    public async mapStateToIds(stateName: string): Promise<{ map_id: number; manufacturer_id: number } | null> {
+    public async mapStateToIds(stateName: string): Promise<{ map_id: number; manufacturer_id: number } | null>
+    {
         try {
             const statesData = await ProcedureExecutor.getProcedureData<any>(
                 [],
@@ -1146,7 +1103,8 @@ export class PriceServiceImpl implements PriceService
      * @param manufacturer_id - Optional manufacturer_id to get specific roof name
      * @returns The roof_id (1, 2, or 3)
      */
-    public async mapRoofTypeToId(roofTypeName: string, manufacturer_id?: number): Promise<number> {
+    public async mapRoofTypeToId(roofTypeName: string, manufacturer_id?: number): Promise<number>
+    {
         try {
             const normalizedRoofType = roofTypeName.toLowerCase().trim();
 
@@ -1195,7 +1153,8 @@ export class PriceServiceImpl implements PriceService
      * @param mapId - The map_id to get manufacturer for that region
      * @returns The manufacturer_id, or null if not found
      */
-    public async mapManufacturerToId(manufacturerName: string, mapId: number): Promise<number | null> {
+    public async mapManufacturerToId(manufacturerName: string, mapId: number): Promise<number | null>
+    {
         try {
             const manufacturers = await this.getManufacturer(mapId);
 
@@ -1244,40 +1203,45 @@ export class PriceServiceImpl implements PriceService
         central_utility_length?: number;
         central_length?: number;
         central_width?: number;
-    }): Promise<IPricingParams> {
+    }): Promise<IPricingParams>
+    {
         try {
-            let map_id = 1;
-            let manufacturer_id = 1;
+            let map_id: number = 1;
+            let manufacturer_id: number = 1;
 
-            if (userParams.state_name) {
+            if (userParams.state_name)
+            {
                 const stateMapping = await this.mapStateToIds(userParams.state_name);
-                if (stateMapping) {
+                if (stateMapping)
+                {
                     map_id = stateMapping.map_id;
                     manufacturer_id = stateMapping.manufacturer_id;
-                } else {
-                    throw new Error(
-                        `❌ State "${userParams.state_name}" is not available in our service area. ` +
-                        `Please provide a valid US state name.`
-                    );
+                }
+                else
+                {
+                    throw new Error(`❌ State "${userParams.state_name}" is not available in our service area. ` + `Please provide a valid US state name.`);
                 }
             }
 
-            let roof_id = 2;
-            if (userParams.roof_type) {
+            let roof_id: number  = 2;
+
+            if (userParams.roof_type)
+            {
                 roof_id = await this.mapRoofTypeToId(userParams.roof_type, map_id);
             }
 
-            if (userParams.manufacturer_name) {
-                const manufacturerIdResult = await this.mapManufacturerToId(
+            if (userParams.manufacturer_name)
+            {
+                const manufacturerIdResult: number = await this.mapManufacturerToId(
                     userParams.manufacturer_name,
                     map_id
                 );
-                if (manufacturerIdResult) {
+                if (manufacturerIdResult)
+                {
                     manufacturer_id = manufacturerIdResult;
                 }
             }
 
-            // Step 4: Build final technical params
             const technicalParams: IPricingParams = {
                 width: userParams.width || 0,
                 length: userParams.length || 0,
@@ -1306,15 +1270,82 @@ export class PriceServiceImpl implements PriceService
             });
 
             return technicalParams;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error('[PriceService] Failed to convert user params to technical:', error);
             throw error;
         }
     }
 
-    private static safeStringParam(value?: string, collation: string = 'utf8mb4_general_ci'): string {
-        if (!value || value.trim() === '') return `'' COLLATE ${collation}`;
+    private static safeStringParam(value?: string, collation: string = 'utf8mb4_general_ci'): string
+    {
+        if (!value || value.trim() === '')
+        {
+            return `'' COLLATE ${collation}`;
+        }
+
         return `'${value}' COLLATE ${collation}`;
+    }
+
+    private async ensureMapIdResolved(params: IPricingParams): Promise<void>
+    {
+        if (params.map_id)
+        {
+            return;
+        }
+
+        if (!params.state_name)
+        {
+            throw new ServerError(ServerError.INTERNAL, 'Cannot resolve map_id — no state_name provided');
+        }
+
+        const cached: IMapResult = this.mapIdCache.get(params.state_name);
+
+        if (cached)
+        {
+            params.map_id = cached.map_id;
+            params.manufacturer_id = cached.manufacturer_id;
+            logger.info(`[Pricing] map_id resolved from cache`, { map_id: params.map_id });
+            return;
+        }
+
+        const [args, query] = PriceServiceImpl.PROCEDURE_MAP.getMapIdByStateName({
+            state_name: params.state_name,
+            map_id: 0, width: 0, height: 0, length: 0, roof_id: 0,
+            buildingStructureFull: [], manufacturer: [], componentKeys: [], structureString: ""
+        });
+
+        const mapResultsWrapper: IMapResult[][] = await ProcedureExecutor.getProcedureData<IMapResult[]>(args, query, 'getMapIdByStateName');
+
+        const mapResults: IMapResult[] = mapResultsWrapper[0];
+        if (!mapResults?.length)
+        {
+            throw new ServerError(ServerError.INTERNAL, `No mapping found for state ${params.state_name}`);
+        }
+
+        const selectedMapping: IMapResult = mapResults[Math.floor(Math.random() * mapResults.length)];
+        params.map_id = selectedMapping.map_id;
+        params.manufacturer_id = selectedMapping.manufacturer_id;
+
+        this.mapIdCache.set(params.state_name, selectedMapping);
+
+        logger.info(`[Pricing] map_id resolved`, { map_id: params.map_id, manufacturer_id: params.manufacturer_id });
+    }
+
+    private mergeComponents(pricing: Record<string, any>, components: Record<string, unknown | unknown[]>): void
+    {
+        for (const [key, value] of Object.entries(components))
+        {
+            if (Array.isArray(value) && !this.ARRAY_FIELDS.has(key))
+            {
+                pricing[key] = value[0] ?? null;
+            }
+            else
+            {
+                pricing[key] = value;
+            }
+        }
     }
 }
 
