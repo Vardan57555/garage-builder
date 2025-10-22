@@ -1,5 +1,6 @@
 import { GuidVersions } from "joi";
 import {PricingComponent, UserFriendlyParams} from "@agents/tools/io/IChat";
+import {SessionConfig} from "@utils/session/io/ISession";
 
 /**
  * Global constants for the application.
@@ -115,11 +116,17 @@ export class Constants
         is_barn: "Is this a barn style? (yes/no)",
     };
 
-    public static readonly INTENT_PROMPT = `You are an intent classifier for a garage/building pricing service.
+    public static readonly INTENT_PROMPT: string = `You are an intent classifier for a garage/building pricing service.
          Analyze if the user wants pricing for a garage, carport, barn, metal building, or any similar structure.
          Return ONLY "YES" if they want building pricing, or "NO" if it's just general chat.
          User input: "{input}"
          Answer (YES or NO):`.trim();
 
-    public static readonly INTENT_KEYWORDS = new Set(["garage", "carport", "barn", "building", "price", "quote", "cost"]);
+    public static readonly INTENT_KEYWORDS: Set<string> = new Set(["garage", "carport", "barn", "building", "price", "quote", "cost"]);
+
+    public static readonly DEFAULT_CONFIG: SessionConfig = {
+        SESSION_TIMEOUT: 30 * 60 * 1000,
+        CLEANUP_INTERVAL: 5 * 60 * 1000,
+        WARNING_THRESHOLD: 5 * 60 * 1000,
+    };
 }

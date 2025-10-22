@@ -7,7 +7,6 @@ import {AIMessageChunk, BaseMessage, HumanMessage} from "@langchain/core/message
 import { ProcedureExecutor } from "@utils/procedure/ProcedureExecutor";
 import {
     RoofMappingResult,
-    SessionData,
     StateMapping,
     UserFriendlyParams
 } from "@agents/tools/io/IChat";
@@ -15,16 +14,35 @@ import {Constants} from "@common/io/Constants";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 import {RedisCacheUtils} from "@utils/cache/RedisCacheUtils";
+import {SessionManager} from "@utils/session/SessionManager";
+import {SessionMetadata} from "@utils/session/io/ISession";
 
 const logger: pino.Logger = createLogger(module);
 
+interface LeadAgentSessionMetadata extends SessionMetadata {
+    memory: BufferMemory;
+    state: {
+        userFriendlyParams: Partial<UserFriendlyParams>;
+        hasGarageIntent: boolean;
+        currentField?: keyof UserFriendlyParams;
+    };
+    stateMapCache: Map<string, StateMapping | null>;
+    roofMapCache: Map<string, number>;
+}
 
 export class LeadAgent
 {
+    /**
+     * The singleton instance of `LeadAgent`.
+     * @private
+     */
     private static instance: LeadAgent;
-    private sessions: Map<string, SessionData> = new Map();
-    private readonly SESSION_TIMEOUT: number = 30 * 60 * 1000;
-    private cleanupInterval: NodeJS.Timeout | null = null;
+
+    /**
+     * Session manager instance for handling all session operations.
+     * @private
+     */
+    private sessionManager: SessionManager;
 
     /**
      * Redis cache utility instance.
@@ -39,7 +57,6 @@ export class LeadAgent
      * @param cacheUtils - The Redis service instance.
      * @throws Error if instantiation is attempted directly.
      */
-
     private constructor(enforce: () => void, cacheUtils: RedisCacheUtils)
     {
         if (enforce !== Enforce)
@@ -48,15 +65,18 @@ export class LeadAgent
         }
 
         this.cacheUtils = cacheUtils;
-        this.startSessionCleanup();
+        this.sessionManager = SessionManager.getInstance({
+            SESSION_TIMEOUT: 30 * 60 * 1000,
+            CLEANUP_INTERVAL: 5 * 60 * 1000,
+            WARNING_THRESHOLD: 5 * 60 * 1000,
+        });
     }
 
     /**
-     * Gets the singleton instance of PriceService.
+     * Gets the singleton instance of LeadAgent.
      *
-     * @returns The singleton instance of PriceService.
+     * @returns The singleton instance of LeadAgent.
      */
-
     public static async getInstance(): Promise<LeadAgent>
     {
         if (!LeadAgent.instance)
@@ -68,20 +88,24 @@ export class LeadAgent
 
     /**
      * @param sessionId - A unique identifier for the user session.
-     * @returns {SessionData} The existing or newly created session data object.
+     * @returns {LeadAgentSessionMetadata} The existing or newly created session data object.
      * @throws {Error} If session creation or retrieval encounters unexpected issues.
      */
-
-    private getOrCreateSession(sessionId: string): SessionData
+    private getOrCreateSession(sessionId: string): LeadAgentSessionMetadata
     {
-        if (this.sessions.has(sessionId))
+        const existingSession: SessionMetadata = this.sessionManager.getSession(sessionId);
+
+        if (existingSession && this.sessionManager.isSessionValid(sessionId))
         {
-            const session = this.sessions.get(sessionId)!;
-            session.lastActivity = Date.now();
-            return session;
+            this.sessionManager.updateLastActivity(sessionId);
+            return <LeadAgentSessionMetadata>existingSession;
         }
 
-        const newSession: SessionData = {
+        const newSession: LeadAgentSessionMetadata = {
+            sessionId,
+            createdAt: Date.now(),
+            lastActivity: Date.now(),
+            expiresAt: Date.now() + 30 * 60 * 1000,
             memory: new BufferMemory({
                 memoryKey: "chat_history",
                 returnMessages: true,
@@ -93,45 +117,11 @@ export class LeadAgent
             },
             stateMapCache: new Map(),
             roofMapCache: new Map(),
-            lastActivity: Date.now(),
         };
 
-        this.sessions.set(sessionId, newSession);
+        this.sessionManager.createSession(sessionId, newSession);
         logger.info(`[LeadAgent] New session created: ${sessionId}`);
         return newSession;
-    }
-
-    /**
-     * Starts a periodic cleanup process to remove expired sessions.
-     * @returns {void}
-     */
-
-    private startSessionCleanup(): void
-    {
-        if (this.cleanupInterval)
-        {
-            return;
-        }
-
-        this.cleanupInterval = setInterval(() => {
-            const now = Date.now();
-            let cleanedCount = 0;
-
-            for (const [sessionId, session] of this.sessions.entries())
-            {
-                if (now - session.lastActivity > this.SESSION_TIMEOUT)
-                {
-                    this.sessions.delete(sessionId);
-                    cleanedCount++;
-                    logger.info(`[LeadAgent] Session expired and cleaned: ${sessionId}`);
-                }
-            }
-
-            if (cleanedCount > 0)
-            {
-                logger.info(`[LeadAgent] Cleaned up ${cleanedCount} expired sessions. Active sessions: ${this.sessions.size}`);
-            }
-        }, 5 * 60 * 1000);
     }
 
     /**
@@ -139,7 +129,6 @@ export class LeadAgent
      * @param content - The message content to format, which can be a string, an array, or another type.
      * @returns {string} A string representation of the provided content.
      */
-
     private getMessageString(content: string | any[]): string
     {
         if (typeof content === "string")
@@ -158,15 +147,15 @@ export class LeadAgent
     }
 
     /**
-     * Uses an AI model to detect whether the user input indicates a garage-building intent.
+     * Uses an AI model to detect whether the user input indicates garage-building intent.
      * @param input - The raw user input text to analyze for intent.
      * @returns {Promise<boolean>} `true` if garage intent is detected, otherwise `false`.
      * @throws {Error} If both AI and fallback detection fail unexpectedly.
      */
-
     private async detectGarageIntentWithAI(input: string): Promise<boolean>
     {
-        try {
+        try
+        {
             const prompt: string = Constants.INTENT_PROMPT.replace("{input}", input);
             logger.info("[LeadAgent] Intent detection prompt:", prompt);
 
@@ -189,7 +178,6 @@ export class LeadAgent
      * @param input - The raw user input text to analyze for intent.
      * @returns {boolean} `true` if any intent keyword is found, otherwise `false`.
      */
-
     private detectGarageIntentFallback(input: string): boolean
     {
         const lowerInput: string = input.toLowerCase();
@@ -203,14 +191,13 @@ export class LeadAgent
      * @returns {Promise<StateMapping | null>} The matched state mapping object, or `null` if no match is found.
      * @throws {Error} If the database procedure call fails unexpectedly.
      */
-
-    private async mapStateToDB(stateName: string, session: SessionData, preferredBuildingId = 1): Promise<StateMapping | null>
+    private async mapStateToDB(stateName: string, session: LeadAgentSessionMetadata, preferredBuildingId = 1): Promise<StateMapping | null>
     {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
 
-        const cachedState: StateMapping = session.stateMapCache.get(cacheKey)
+        const cachedState: StateMapping | null | undefined = session.stateMapCache.get(cacheKey)
 
-        if (cachedState)
+        if (cachedState !== undefined)
         {
             return cachedState;
         }
@@ -231,10 +218,12 @@ export class LeadAgent
                 const mapping = preferredMapping || result[0];
                 const output: StateMapping = {map_id: mapping.map_id, manufacturer_id: mapping.manufacturer_id};
                 await this.cacheUtils.put(cacheKey, output);
+                session.stateMapCache.set(cacheKey, output);
                 return output;
             }
 
             await this.cacheUtils.put(cacheKey, null);
+            session.stateMapCache.set(cacheKey, null);
             return null;
         }
         catch (error)
@@ -252,8 +241,7 @@ export class LeadAgent
      * @returns {Promise<number>} The resolved roof ID, either from the database, cache, or fallback mapping.
      * @throws {Error} If database interaction encounters unexpected issues.
      */
-
-    private async mapRoofTypeToDB(roofType: string, mapId: number, session: SessionData): Promise<number>
+    private async mapRoofTypeToDB(roofType: string, mapId: number, session: LeadAgentSessionMetadata): Promise<number>
     {
         const normalizedRoofType: string = roofType.toLowerCase();
         const cacheKey = `${normalizedRoofType}:${mapId}`;
@@ -298,8 +286,7 @@ export class LeadAgent
      *
      * @throws {Error} If state or roof mapping fails unexpectedly.
      */
-
-    private async convertToTechnicalParams(userParams: UserFriendlyParams, session: SessionData): Promise<IPricingParams | null>
+    private async convertToTechnicalParams(userParams: UserFriendlyParams, session: LeadAgentSessionMetadata): Promise<IPricingParams | null>
     {
         try
         {
@@ -308,7 +295,7 @@ export class LeadAgent
 
             if (userParams.state_name)
             {
-                const mapping: StateMapping = await this.mapStateToDB(userParams.state_name, session);
+                const mapping: StateMapping | null = await this.mapStateToDB(userParams.state_name, session);
 
                 if (mapping)
                 {
@@ -347,7 +334,6 @@ export class LeadAgent
      * @param params - A partial object containing user-friendly parameters.
      * @returns {(keyof UserFriendlyParams)[]} An array of missing required field names.
      */
-
     private getMissingFields(params: Partial<UserFriendlyParams>): (keyof UserFriendlyParams)[]
     {
         return Constants.REQUIRED_FIELDS.filter((field) => !params[field]);
@@ -357,7 +343,6 @@ export class LeadAgent
      * @param extractedParams - A partial object containing user-friendly building parameters.
      * @returns {string} A formatted string summarizing the provided dimensions, or an empty string if none are found.
      */
-
     private formatDimensionsResponse(extractedParams: Partial<UserFriendlyParams>): string
     {
         const dimensions: string = (["width", "length", "height"] as const)
@@ -374,11 +359,8 @@ export class LeadAgent
      * @returns {Promise<string>} A response string from the AI, either prompting for more info or providing a price quote.
      * @throws {Error} If parameter extraction, AI intent detection, or price calculation encounters unexpected issues.
      */
-
     public async run(sessionId: string, input: string): Promise<string>
     {
-        console.log(sessionId);
-
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
 
         const session = this.getOrCreateSession(sessionId);
@@ -391,7 +373,7 @@ export class LeadAgent
             if (!hasIntent)
             {
                 const response: string =
-                    "Hello! 👋 I can help you get a price quote for a garage or metal building.\n" +
+                    "Hello! I can help you get a price quote for a garage or metal building.\n" +
                     "Please tell me what type of building or provide dimensions (width, length, height in feet).";
                 await session.memory.chatHistory.addAIChatMessage(response);
                 return response;
@@ -411,7 +393,7 @@ export class LeadAgent
             ...extractedParams
         };
 
-        const missingFields = this.getMissingFields(session.state.userFriendlyParams);
+        const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(session.state.userFriendlyParams);
         if (missingFields.length > 0)
         {
             const nextField: keyof UserFriendlyParams = missingFields[0];
@@ -423,11 +405,11 @@ export class LeadAgent
             return response;
         }
 
-        const technicalParams: IPricingParams = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
+        const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
 
         if (!technicalParams)
         {
-            return "⚠️ Failed to convert user input to technical parameters.";
+            return "Failed to convert user input to technical parameters.";
         }
 
         const result: string = await extractor.calculatePriceWithParams(technicalParams);
@@ -435,15 +417,14 @@ export class LeadAgent
 
         this.resetSessionState(session);
 
-        return result + "\n\n💬 Need another quote? Just describe what you're looking for!";
+        return result + "\n\nNeed another quote? Just describe what you're looking for!";
     }
 
     /**
      * @param session - The current session containing the chat history.
      * @returns {Promise<string>} The conversation context as a single concatenated string.
      */
-
-    private async getConversationContext(session: SessionData): Promise<string>
+    private async getConversationContext(session: LeadAgentSessionMetadata): Promise<string>
     {
         const history: BaseMessage[] = await session.memory.chatHistory.getMessages();
         return history.map(msg => this.getMessageString(msg.content)).join("\n");
@@ -453,8 +434,7 @@ export class LeadAgent
      * @param session - The session whose state is to be reset.
      * @returns {void}
      */
-
-    private resetSessionState(session: SessionData): void
+    private resetSessionState(session: LeadAgentSessionMetadata): void
     {
         session.state.userFriendlyParams = {};
         session.state.hasGarageIntent = false;
@@ -466,10 +446,13 @@ export class LeadAgent
      */
     public async endSession(sessionId: string): Promise<void>
     {
-        if (this.sessions.has(sessionId))
+        if (this.sessionManager.endSession(sessionId))
         {
-            this.sessions.delete(sessionId);
             logger.info(`[LeadAgent] Session ended: ${sessionId}`);
+        }
+        else
+        {
+            logger.warn(`[LeadAgent] Attempted to end non-existent session: ${sessionId}`);
         }
     }
 
@@ -478,12 +461,7 @@ export class LeadAgent
      */
     public async reset(): Promise<void>
     {
-        this.sessions.clear();
-        if (this.cleanupInterval)
-        {
-            clearInterval(this.cleanupInterval);
-            this.cleanupInterval = null;
-        }
+        this.sessionManager.destroy();
         logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
     }
 }
