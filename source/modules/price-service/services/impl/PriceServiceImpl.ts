@@ -257,10 +257,10 @@ export class PriceServiceImpl implements PriceService
                     componentKeys
                 }),
                 params.utility_length && params.utility_length > 0
-                    ? this.fetchUtilityPricing(params, finalHeight, finalLength, buildingStructureFull)
+                    ? this.getUtilityPricing({...params, height: finalHeight, utility_length: params.utility_length, length: finalLength, buildingStructureFull})
                     : Promise.resolve(null),
                 params.central_map_id
-                    ? this.fetchCentralPricing(params)
+                    ? this.getCentralStructurePricing(params)
                     : Promise.resolve(null)
             ]);
 
@@ -622,46 +622,6 @@ export class PriceServiceImpl implements PriceService
     }
 
     /**
-     * @param params - The main building parameters including map ID, utility length, and optional single-slope height.
-     * @param height - The height to be used for utility pricing calculation.
-     * @param length - The length to be used for utility pricing calculation.
-     * @param buildingStructureFull - The full building structure data required for accurate pricing.
-     * @returns The pricing details for the building's utility section.
-     * @throws {ServerError} If the utility pricing calculation fails.
-     */
-
-    private async fetchUtilityPricing(params: IPricingParams, height: number, length: number, buildingStructureFull: any[])
-    {
-        return this.getUtilityPricing({
-            map_id: params.map_id,
-            height,
-            length,
-            utility_length: params.utility_length,
-            buildingStructureFull,
-            single_slope_height: params.single_slope_height
-        });
-    }
-
-    /**
-     * @param params - The building parameters including central section dimensions, utility length, and map/roof IDs.
-     * @returns The pricing details for the building's central section.
-     * @throws {ServerError} If the central pricing calculation fails.
-     */
-
-    private async fetchCentralPricing(params: IPricingParams)
-    {
-        return this.getCentralStructurePricing({
-            central_map_id: params.central_map_id!,
-            roof_id: params.roof_id,
-            central_height: params.central_height,
-            central_length: params.central_length,
-            central_width: params.central_width,
-            central_utility_length: params.central_utility_length,
-            map_id: params.map_id
-        });
-    }
-
-    /**
      * Applies additional pricing options (addons) to the given pricing object.
      * @param pricing - The pricing object to which addon values will be applied.
      */
@@ -694,18 +654,11 @@ export class PriceServiceImpl implements PriceService
      * @throws {ServerError} If any database procedure call or calculation fails.
      */
 
-    private async getCentralStructurePricing({central_map_id, roof_id, central_height, central_length, central_width, central_utility_length, map_id}: {
-        central_map_id: number;
-        roof_id: number;
-        central_height: number;
-        central_length: number;
-        central_width: number;
-        central_utility_length: number;
-        map_id: number;
-    }): Promise<Record<string, any>>
+    private async getCentralStructurePricing(params: IPricingParams): Promise<Record<string, any>>
     {
         const pricing: Record<string, any> = {};
 
+        const { central_map_id, roof_id, central_height, central_length, central_width, central_utility_length, map_id } = params;
         try
         {
             const centralStructure = await ProcedureExecutor.getProcedureData<any>(
