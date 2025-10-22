@@ -7,6 +7,7 @@ import { InstantiationError } from "@errors/InstantiationError";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import {SessionMetadata, SessionMetrics} from "@modules/chat-service/routes/io/IChat";
+import {Constants} from "@common/io/Constants";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -21,10 +22,6 @@ export class ChatServiceImpl implements ChatService
 
     private sessionMetadata: Map<string, SessionMetadata> = new Map();
     private clientSessions: Map<string, string> = new Map();
-
-    private readonly SESSION_TIMEOUT: number = 30 * 60 * 1000;
-    private readonly CLEANUP_INTERVAL: number = 5 * 60 * 1000;
-    private readonly WARNING_THRESHOLD: number = 5 * 60 * 1000;
 
     private cleanupInterval: NodeJS.Timeout | null = null;
     private metrics: SessionMetrics = {
@@ -197,7 +194,7 @@ export class ChatServiceImpl implements ChatService
         }
 
         const newSessionId: string | Uint8Array = uuidv4();
-        const expiresAt: number = now + this.SESSION_TIMEOUT;
+        const expiresAt: number = now + Constants.DEFAULT_CONFIG.SESSION_TIMEOUT;
 
         const metadata: SessionMetadata = {
             sessionId: newSessionId,
@@ -228,9 +225,9 @@ export class ChatServiceImpl implements ChatService
 
         this.cleanupInterval = setInterval(() => {
             this.performCleanup();
-        }, this.CLEANUP_INTERVAL);
+        }, Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL);
 
-        logger.info("[ChatService] Cleanup interval started", {intervalMinutes: this.CLEANUP_INTERVAL / 60000});
+        logger.info("[ChatService] Cleanup interval started", {intervalMinutes: Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL / 60000});
     }
 
     /**
@@ -257,7 +254,7 @@ export class ChatServiceImpl implements ChatService
                 cleanedCount++;
                 this.metrics.totalExpired++;
             }
-            else if (timeUntilExpiry < this.WARNING_THRESHOLD)
+            else if (timeUntilExpiry < Constants.DEFAULT_CONFIG.WARNING_THRESHOLD)
             {
                 warningCount++;
             }
