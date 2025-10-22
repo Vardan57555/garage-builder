@@ -1,4 +1,5 @@
 import {BufferMemory} from "langchain/memory";
+import {SessionMetadata} from "@utils/session/io/ISession";
 
 export interface UserFriendlyParams {
     garage_type?: string;
@@ -56,4 +57,15 @@ export interface SessionData {
     stateMapCache: Map<string, StateMapping | null>;
     roofMapCache: Map<string, number>;
     lastActivity: number;
+}
+
+export interface LeadAgentSessionMetadata extends SessionMetadata {
+    memory: BufferMemory;
+    state: {
+        userFriendlyParams: Partial<UserFriendlyParams>;
+        hasGarageIntent: boolean;
+        currentField?: keyof UserFriendlyParams;
+    };
+    stateMapCache: Map<string, StateMapping | null>;
+    roofMapCache: Map<string, number>;
 }

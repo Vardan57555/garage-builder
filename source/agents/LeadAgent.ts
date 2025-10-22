@@ -6,6 +6,7 @@ import { sharedLLM } from "@llm/SharedLLM";
 import {AIMessageChunk, BaseMessage, HumanMessage} from "@langchain/core/messages";
 import { ProcedureExecutor } from "@utils/procedure/ProcedureExecutor";
 import {
+    LeadAgentSessionMetadata,
     RoofMappingResult,
     StateMapping,
     UserFriendlyParams
@@ -18,17 +19,6 @@ import {SessionManager} from "@utils/session/SessionManager";
 import {SessionMetadata} from "@utils/session/io/ISession";
 
 const logger: pino.Logger = createLogger(module);
-
-interface LeadAgentSessionMetadata extends SessionMetadata {
-    memory: BufferMemory;
-    state: {
-        userFriendlyParams: Partial<UserFriendlyParams>;
-        hasGarageIntent: boolean;
-        currentField?: keyof UserFriendlyParams;
-    };
-    stateMapCache: Map<string, StateMapping | null>;
-    roofMapCache: Map<string, number>;
-}
 
 export class LeadAgent
 {
