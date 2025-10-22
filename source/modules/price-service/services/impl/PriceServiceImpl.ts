@@ -23,7 +23,6 @@ import {MySQLManager} from "@config/db/MySqlManager";
 import {PredictionManager} from "@config/AiModel/PredictionManager";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
-import {RedisCacheUtils} from "@utils/cache/RedisCacheUtils";
 const logger: pino.Logger = createLogger(module);
 
 export class PriceServiceImpl implements PriceService
@@ -48,11 +47,6 @@ export class PriceServiceImpl implements PriceService
     private readonly mapIdCache = new Map<string, IMapResult>();
     private readonly ARRAY_FIELDS = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
 
-    /**
-     * Redis cache utility instance.
-     * @private
-     */
-    private cacheUtils: RedisCacheUtils;
 
     // private static readonly BASE_KEYS: string[] = [
     //     'truss_name',
@@ -197,18 +191,16 @@ export class PriceServiceImpl implements PriceService
      * Private constructor to enforce a Singleton pattern.
      *
      * @param enforce - Function to enforce a Singleton pattern.
-     * @param cacheUtils - The Redis service instance.
      * @throws Error if instantiation is attempted directly.
      */
 
-    constructor(enforce: () => void, cacheUtils: RedisCacheUtils)
+    constructor(enforce: () => void)
     {
         if(enforce !== Enforce)
         {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceService.getInstance() instead of new.");
         }
 
-        this.cacheUtils = cacheUtils;
     }
 
     /**
@@ -221,7 +213,7 @@ export class PriceServiceImpl implements PriceService
     {
         if(!PriceServiceImpl.instance)
         {
-            PriceServiceImpl.instance = new PriceServiceImpl(Enforce, RedisCacheUtils.getInstance());
+            PriceServiceImpl.instance = new PriceServiceImpl(Enforce);
         }
 
         return PriceServiceImpl.instance;
@@ -1019,282 +1011,6 @@ export class PriceServiceImpl implements PriceService
         }
 
         return outputValidation.value;
-    }
-
-    /**
-     * Add these methods to your PriceServiceImpl class
-     * These use your EXISTING stored procedures
-     */
-
-    /**
-     * 🗺️ Maps a state name to its corresponding map_id and default manufacturer_id
-     * Uses your existing getStatesAndManufacturer procedure
-     * @param stateName - The state name (e.g., "Arizona", "Texas")
-     * @returns Object containing map_id and manufacturer_id, or null if not found
-     */
-
-    public async mapStateToIds(stateName: string): Promise<{ map_id: number; manufacturer_id: number } | null>
-    {
-        try
-        {
-            const cacheKey: string = `mapStateToIds:${stateName}`;
-
-            const cachedState:{ map_id: number; manufacturer_id: number } = await this.cacheUtils.get(cacheKey);
-
-            if(cachedState)
-            {
-                return cachedState;
-            }
-
-            const statesData = await ProcedureExecutor.getProcedureData<any>(
-                [],
-                'getStatesAndManufacturer()',
-                'states_manufacturers'
-            );
-
-            if (statesData && statesData.length > 0)
-            {
-                const normalizedInput: string = stateName.toLowerCase().trim();
-
-                const matchedState = statesData.find((state: any) => {
-                    const stateName = (state.state_name || '').toLowerCase().trim();
-                    const stateAbbr = (state.state_abbr || state.abbreviation || '').toLowerCase().trim();
-
-                    return stateName === normalizedInput || stateAbbr === normalizedInput;
-                });
-
-                if (matchedState)
-                {
-                    await this.cacheUtils.put(cacheKey, matchedState);
-
-                    return {
-                        map_id: matchedState.map_id,
-                        manufacturer_id: matchedState.manufacturer_id || matchedState.default_manufacturer_id || 1
-                    };
-                }
-            }
-
-            logger.warn(`[PriceService] State "${stateName}" not found in database`);
-            return null;
-        }
-        catch (error)
-        {
-            logger.error(`[PriceService] Failed to map state "${stateName}":`, error);
-            return null;
-        }
-    }
-
-    /**
-     * 🏠 Maps a roof type name to its corresponding roof_id
-     * Based on your manufacturer_roofs table:
-     * - roof_id 1 = Regular/Standard/Round/Classical/Traditional/Premium
-     * - roof_id 2 = A-Frame/Boxed Eave/Box/Economy (horizontal)
-     * - roof_id 3 = Vertical
-     *
-     * @param roofTypeName - The roof type name (e.g., "vertical", "regular", "box", "a-frame")
-     * @param manufacturer_id - Optional manufacturer_id to get specific roof name
-     * @returns The roof_id (1, 2, or 3)
-     */
-
-    public async mapRoofTypeToId(roofTypeName: string, manufacturer_id?: number): Promise<number>
-    {
-        try
-        {
-            const cacheKey: string = `mapRoofTypeToId:${roofTypeName}`;
-
-            const cachedRoofId: number = await this.cacheUtils.get(cacheKey);
-
-            if(cachedRoofId)
-            {
-                return cachedRoofId
-            }
-
-            const normalizedRoofType: string = roofTypeName.toLowerCase().trim();
-
-            if (normalizedRoofType.includes('vertical'))
-            {
-                return 3;
-            }
-
-            if (
-                normalizedRoofType.includes('a-frame') ||
-                normalizedRoofType.includes('a frame') ||
-                normalizedRoofType.includes('aframe') ||
-                normalizedRoofType.includes('boxed') ||
-                normalizedRoofType.includes('box') ||
-                normalizedRoofType.includes('economy') ||
-                normalizedRoofType.includes('eave') ||
-                normalizedRoofType.includes('eve') ||
-                normalizedRoofType.includes('horizontal')
-            )
-            {
-                await this.cacheUtils.put(cacheKey, 2);
-                return 2;
-            }
-
-            if (
-                normalizedRoofType.includes('regular') ||
-                normalizedRoofType.includes('standard') ||
-                normalizedRoofType.includes('classic') ||
-                normalizedRoofType.includes('traditional') ||
-                normalizedRoofType.includes('round') ||
-                normalizedRoofType.includes('premium') ||
-                normalizedRoofType.includes('b-frame')
-            )
-            {
-                await this.cacheUtils.put(cacheKey, 1);
-                return 1;
-            }
-
-            logger.warn(`[PriceService] Roof type "${roofTypeName}" not recognized, defaulting to Regular (1)`);
-            return 1;
-        }
-        catch (error)
-        {
-            logger.error(`[PriceService] Failed to map roof type "${roofTypeName}":`, error);
-            return 1;
-        }
-    }
-
-    /**
-     * 🏭 Maps a manufacturer name to its corresponding manufacturer_id
-     * Uses your existing getManufacture procedure
-     * @param manufacturerName - The manufacturer name
-     * @param mapId - The map_id to get manufacturer for that region
-     * @returns The manufacturer_id, or null if not found
-     */
-
-    public async mapManufacturerToId(manufacturerName: string, mapId: number): Promise<number | null>
-    {
-        try
-        {
-            const manufacturers: IManufacturer[] = await this.getManufacturer(mapId);
-
-            if (manufacturers && manufacturers.length > 0)
-            {
-                const normalizedInput: string = manufacturerName.toLowerCase().trim();
-
-                const matchedManufacturer: IManufacturer = manufacturers.find((mfg: any) =>
-                {
-                    const mfgName = (mfg.manufacturer_name || mfg.name || '').toLowerCase().trim();
-                    return mfgName.includes(normalizedInput) || normalizedInput.includes(mfgName);
-                });
-
-                if (matchedManufacturer)
-                {
-                    return matchedManufacturer.manufacturer_id || matchedManufacturer.manufacturer_id;
-                }
-            }
-
-            logger.warn(`[PriceService] Manufacturer "${manufacturerName}" not found for map_id ${mapId}`);
-            return null;
-        }
-        catch (error)
-        {
-            logger.error(`[PriceService] Failed to map manufacturer "${manufacturerName}":`, error);
-            return null;
-        }
-    }
-
-    /**
-     * 🔄 Converts user-friendly parameters to technical IPricingParams
-     * This is the main orchestration method
-     * @param userParams - User-friendly parameters with names instead of IDs
-     * @returns Technical IPricingParams with all IDs resolved
-     * @throws Error if required mappings fail
-     */
-    public async convertUserParamsToTechnical(userParams: {
-        width?: number;
-        length?: number;
-        height?: number;
-        state_name?: string;
-        roof_type?: string;
-        manufacturer_name?: string;
-        utility_length?: number;
-        building_type?: string;
-        gauge?: number;
-        is_barn?: boolean;
-        single_slope_height?: number;
-        central_map_id?: number;
-        central_height?: number;
-        central_utility_length?: number;
-        central_length?: number;
-        central_width?: number;
-    }): Promise<IPricingParams>
-    {
-        try
-        {
-            let map_id: number = 1;
-            let manufacturer_id: number = 1;
-
-            if (userParams.state_name)
-            {
-                const stateMapping = await this.mapStateToIds(userParams.state_name);
-                if (stateMapping)
-                {
-                    map_id = stateMapping.map_id;
-                    manufacturer_id = stateMapping.manufacturer_id;
-                }
-                else
-                {
-                    throw new Error(`❌ State "${userParams.state_name}" is not available in our service area. ` + `Please provide a valid US state name.`);
-                }
-            }
-
-            let roof_id: number  = 2;
-
-            if (userParams.roof_type)
-            {
-                roof_id = await this.mapRoofTypeToId(userParams.roof_type, map_id);
-            }
-
-            if (userParams.manufacturer_name)
-            {
-                const manufacturerIdResult: number = await this.mapManufacturerToId(
-                    userParams.manufacturer_name,
-                    map_id
-                );
-
-                if (manufacturerIdResult)
-                {
-                    manufacturer_id = manufacturerIdResult;
-                }
-            }
-
-            const technicalParams: IPricingParams = {
-                width: userParams.width || 0,
-                length: userParams.length || 0,
-                height: userParams.height || 0,
-                map_id,
-                roof_id,
-                manufacturer_id,
-                utility_length: userParams.utility_length || 0,
-                building_type: userParams.building_type,
-                gauge: userParams.gauge,
-                is_barn: userParams.is_barn || false,
-                single_slope_height: userParams.single_slope_height,
-                central_map_id: userParams.central_map_id,
-                central_height: userParams.central_height,
-                central_utility_length: userParams.central_utility_length,
-                central_length: userParams.central_length,
-                central_width: userParams.central_width,
-            };
-
-            logger.info('[PriceService] Converted user params to technical:', {
-                state: userParams.state_name,
-                roof: userParams.roof_type,
-                map_id,
-                roof_id,
-                manufacturer_id
-            });
-
-            return technicalParams;
-        }
-        catch (error)
-        {
-            logger.error('[PriceService] Failed to convert user params to technical:', error);
-            throw error;
-        }
     }
 
     /**

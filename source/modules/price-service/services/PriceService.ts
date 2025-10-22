@@ -8,23 +8,4 @@ export interface PriceService extends Service
     fetchAllPrices({map_id, height, building_type, gauge}: IFetchPricesParams): Promise<IPrice | IPrice[]>
 
     predict(body: IPricingParams);
-
-    convertUserParamsToTechnical(userParams: {
-        width?: number;
-        length?: number;
-        height?: number;
-        state_name?: string;
-        roof_type?: string;
-        manufacturer_name?: string;
-        utility_length?: number;
-        building_type?: string;
-        gauge?: number;
-        is_barn?: boolean;
-        single_slope_height?: number;
-        central_map_id?: number;
-        central_height?: number;
-        central_utility_length?: number;
-        central_length?: number;
-        central_width?: number;
-    }): Promise<IPricingParams>
 }

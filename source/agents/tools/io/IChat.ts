@@ -1,3 +1,5 @@
+import {BufferMemory} from "langchain/memory";
+
 export interface UserFriendlyParams {
     garage_type?: string;
     width?: number;
@@ -46,4 +48,12 @@ export interface UserFriendlyParams {
     building_type?: string;
     gauge?: number;
     is_barn?: boolean;
+}
+
+export interface SessionData {
+    memory: BufferMemory;
+    state: ConversationState;
+    stateMapCache: Map<string, StateMapping | null>;
+    roofMapCache: Map<string, number>;
+    lastActivity: number;
 }
