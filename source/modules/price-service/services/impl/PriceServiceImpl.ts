@@ -8,19 +8,17 @@ import {PriceDataValidator} from "@modules/price-service/services/validator/Pric
 import {IBuildingStructure} from "@modules/building-service/services/io/IBuildingStructure";
 import {IManufacturer} from "@modules/manufacturer-service/service/io/IManufacturer";
 import {ServerError} from "@errors/ServerError";
-import * as ort from "onnxruntime-node";
 import {
     FetchComponentsParams, GetUtilityPricingParams, IAddon, IAnchor,
     IBasePrice,
     IBaseStructureParams,
-    IEndCost, IFetchPricesParams, IFullStructureParams, IMapResult,
+    IEndCost, IFetchPricesParams, IFullStructureParams,
     IPrice, IPricing,
     IPricingParams,
     ISideHeight, ISidePriceResult, IUtilityPricingResult, ProcedureConfig
 } from "@modules/price-service/services/io/IPrice";
 import {Constants} from "@common/io/Constants";
 import {MySQLManager} from "@config/db/MySqlManager";
-import {PredictionManager} from "@config/AiModel/PredictionManager";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 const logger: pino.Logger = createLogger(module);
@@ -35,8 +33,6 @@ export class PriceServiceImpl implements PriceService
 
     public static instance: PriceService;
 
-    private session: ort.InferenceSession | null = null;
-
     private static readonly BASE_KEYS: string[] = [
         'anchors_cost', 'truss_name','garage_door','garage_door_frameout','walkin_door_frameout',
         'window_frameout','end','end_cross_bracing','insulation','certificate',
@@ -44,21 +40,10 @@ export class PriceServiceImpl implements PriceService
         'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
     ];
 
-    private readonly mapIdCache = new Map<string, IMapResult>();
     private readonly ARRAY_FIELDS = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
 
-
-    // private static readonly BASE_KEYS: string[] = [
-    //     'truss_name',
-    //     // 'anchors_cost',
-    //     // 'garage_door','garage_door_frameout','walkin_door_frameout',
-    //     // 'window_frameout','end','gable_end','end_cross_bracing','insulation','certificate',
-    //     // 'full_length_panel','side_cross_bracing','delux_two_tone','braces','bows','addons',
-    //     // 'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
-    // ];
-
-        private static readonly PROCEDURE_MAP: Record<string, ProcedureConfig> =
-            {
+    private static readonly PROCEDURE_MAP: Record<string, ProcedureConfig> =
+        {
             end: ({ map_id, width, height }) => [
                 [map_id, height, width],
                 'getEachEndClose(?, ?, ?)'
@@ -231,8 +216,6 @@ export class PriceServiceImpl implements PriceService
     {
         try
         {
-            await this.ensureMapIdResolved(params);
-
             const [{ finalWidth, finalLength, finalHeight }, { manufacturer, buildingStructureFull }] =
                 await Promise.all([
                     this.calculateFinalDimensions(params),
@@ -302,60 +285,6 @@ export class PriceServiceImpl implements PriceService
         {
             logger.error(`[Pricing] Error calculating pricing`, error);
             throw new ServerError(ServerError.INTERNAL, `Failed to calculate pricing: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-    }
-
-    /**
-     * Predicts the price for a building configuration using a preloaded ONNX model.
-     * Converts all relevant building parameters into a numeric feature array for prediction.
-     * @param body - An object containing all building parameters (`IPricingParams`), including dimensions, roof and utility details, and building type flags.
-     * @returns A promise resolving to a number representing the predicted price.
-     */
-
-    public async predict(body: IPricingParams)
-    {
-        if (!this.session)
-        {
-            throw new Error("Model not loaded yet");
-        }
-
-        try
-        {
-            const {
-                width,
-                length,
-                height,
-                single_slope_height = 0,
-                map_id = 0,
-                roof_id = 0,
-                utility_length = 0,
-                central_length = 0,
-                central_width = 0,
-                central_height = 0,
-                central_utility_length = 0,
-                is_barn = false
-            } = body;
-
-            const features: number[] = [
-                width,
-                length,
-                height,
-                single_slope_height,
-                Number(map_id),
-                Number(roof_id),
-                utility_length,
-                central_length,
-                central_width,
-                central_height,
-                central_utility_length,
-                is_barn ? 1 : 0
-            ];
-
-            return await PredictionManager.getInstance().predict(features);
-        }
-        catch (error)
-        {
-            throw new ServerError(ServerError.INTERNAL, `Failed to predict price: ${error.message}`);
         }
     }
 
@@ -1027,58 +956,6 @@ export class PriceServiceImpl implements PriceService
         }
 
         return `'${value}' COLLATE ${collation}`;
-    }
-
-    /**
-     * @param params - The pricing parameters object containing state and mapping information.
-     * @returns {Promise<void>} Resolves when the `map_id` (and `manufacturer_id`) have been ensured.
-     * @throws {ServerError.INTERNAL} If no `state_name` is provided or no valid mapping is found for the given state.
-     */
-
-    private async ensureMapIdResolved(params: IPricingParams): Promise<void>
-    {
-        if (params.map_id)
-        {
-            return;
-        }
-
-        if (!params.state_name)
-        {
-            throw new ServerError(ServerError.INTERNAL, 'Cannot resolve map_id — no state_name provided');
-        }
-
-        const cached: IMapResult = this.mapIdCache.get(params.state_name);
-
-        if (cached)
-        {
-            params.map_id = cached.map_id;
-            params.manufacturer_id = cached.manufacturer_id;
-            logger.info(`[Pricing] map_id resolved from cache`, { map_id: params.map_id });
-            return;
-        }
-
-        const [args, query] = PriceServiceImpl.PROCEDURE_MAP.getMapIdByStateName({
-            state_name: params.state_name,
-            map_id: 0, width: 0, height: 0, length: 0, roof_id: 0,
-            buildingStructureFull: [], manufacturer: [], componentKeys: [], structureString: ""
-        });
-
-        const mapResultsWrapper: IMapResult[][] = await ProcedureExecutor.getProcedureData<IMapResult[]>(args, query, 'getMapIdByStateName');
-
-        const mapResults: IMapResult[] = mapResultsWrapper[0];
-
-        if (!mapResults?.length)
-        {
-            throw new ServerError(ServerError.INTERNAL, `No mapping found for state ${params.state_name}`);
-        }
-
-        const selectedMapping: IMapResult = mapResults[Math.floor(Math.random() * mapResults.length)];
-        params.map_id = selectedMapping.map_id;
-        params.manufacturer_id = selectedMapping.manufacturer_id;
-
-        this.mapIdCache.set(params.state_name, selectedMapping);
-
-        logger.info(`[Pricing] map_id resolved`, { map_id: params.map_id, manufacturer_id: params.manufacturer_id });
     }
 
     /**

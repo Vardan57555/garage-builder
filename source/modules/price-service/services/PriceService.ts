@@ -6,6 +6,4 @@ export interface PriceService extends Service
     fetchBuildingPricingWithUtility(body: IPricingParams)
 
     fetchAllPrices({map_id, height, building_type, gauge}: IFetchPricesParams): Promise<IPrice | IPrice[]>
-
-    predict(body: IPricingParams);
 }
