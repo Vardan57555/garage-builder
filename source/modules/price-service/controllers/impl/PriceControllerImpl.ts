@@ -80,32 +80,6 @@ export class PriceControllerImpl implements PriceController
     }
 
     /**
-     * Handles predicting price.
-     *
-     * @param req - The request object.
-     * @param res - The response object.
-     * @param next - The next middleware function.
-     */
-
-
-    public predictPriceHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
-    {
-        let price;
-
-        try
-        {
-            price = this.service.predict(req.body);
-        }
-        catch (error)
-        {
-            next(error);
-            return;
-        }
-
-        this.handleSuccessResponse(res, price);
-    }
-
-    /**
      * Handles the service response.
      *
      * @param res - The response object.
