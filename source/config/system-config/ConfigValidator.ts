@@ -27,18 +27,6 @@ const appConfigSchema: ObjectSchema = joi.object().keys({
 });
 
 /**
- * Schema for the Auth configuration.
- */
-
-const authConfigSchema: ObjectSchema = joi.object().keys({
-    jwt_secret: joi.string().max(Constants.MAX_STRING_LENGTH).required(),
-    callbackUrl: joi.string().max(Constants.MAX_STRING_LENGTH).required(),
-    sessionSecret: joi.string().max(Constants.MAX_STRING_LENGTH).required(),
-    frontend_url: joi.string().required(),
-    reviro_host: joi.string().required()
-});
-
-/**
  * Schema for the MySQL configuration.
  */
 const mySqlConfigSchema: ObjectSchema = joi.object().keys({
@@ -74,22 +62,6 @@ const redisConfigSchema: ObjectSchema = joi.object().keys({
 });
 
 /**
- * Schema for the authentication configuration.
- */
-export function validateAuthConfig(data: {}): ValidationResult
-{
-    return setupValidator(data, authConfigSchema);
-}
-
-/**
- * Schema for onboarding configuration.
- */
-const onboardingConfigSchema: ObjectSchema = joi.object().keys({
-    self_onboarding_host: joi.string().required(),
-    request_body_limit: joi.string().required()
-});
-
-/**
  * Validates the application configuration.
  *
  * @param data - The application configuration data to validate.
@@ -120,15 +92,4 @@ export function validateMySqlConfig(data: {}): ValidationResult
 export function validateRedisConfig(data: {}): ValidationResult
 {
     return setupValidator(data, redisConfigSchema);
-}
-
-/**
- * Validates the onboarding configuration.
- *
- * @param data - The onboarding configuration data to validate.
- * @returns The validation result.
- */
-export function validateCommonConfig(data: {}): ValidationResult
-{
-    return setupValidator(data, onboardingConfigSchema);
 }

@@ -114,7 +114,7 @@ export class App
      */
     private setupMiddlewares(): void
     {
-        const requestBodyLimit: string = process.env.REQUEST_BODY_LIMIT || Config.getInstance().commonConfig.request_body_limit;
+        const requestBodyLimit: string = process.env.REQUEST_BODY_LIMIT;
 
         this.app.use(
             bodyParser.json({
@@ -138,7 +138,7 @@ export class App
             }),
             resave: false,
             saveUninitialized: false,
-            secret: process.env.SESSION_SECRET || Config.getInstance().authConfig.sessionSecret
+            secret: process.env.SESSION_SECRET
         }));
         this.app.use(CorsUtils.setupCors());
     }

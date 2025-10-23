@@ -6,15 +6,11 @@ import path from "path";
 import pino from "pino";
 import {
     validateAppConfig,
-    validateCommonConfig,
     validateMySqlConfig,
-    validateAuthConfig,
     validateRedisConfig
 } from "./ConfigValidator";
 import { IAppConfig } from "./io/IAppConfig";
 import { IMySqlConfig } from "./io/IMySqlConfig";
-import {ICommonConfig} from "@config/system-config/io/ICommonConfig";
-import { IAuthConfig } from "./io/IAuthConfig";
 import {IRedisConfig} from "@config/system-config/io/IRedisConfig";
 
 const logger: pino.Logger = createLogger(module);
@@ -29,9 +25,7 @@ export default class Config
     private static instance: Config;
     private readonly _appConfig: IAppConfig;
     private readonly _mySqlConfig: IMySqlConfig;
-    private readonly _authConfig: IAuthConfig;
     private readonly _redisConfig: IRedisConfig;
-    private readonly _commonConfig: ICommonConfig;
 
     /**
      * Constructs a new instance of the Config class.
@@ -49,9 +43,7 @@ export default class Config
         {
             this._appConfig = this.readConfigFile<IAppConfig>("app.json", validateAppConfig);
             this._mySqlConfig = this.readConfigFile<IMySqlConfig>("mysql.json", validateMySqlConfig);
-            this._authConfig = this.readConfigFile<IAuthConfig>("auth.json", validateAuthConfig);
             this._redisConfig = this.readConfigFile<IRedisConfig>("redis-config.json", validateRedisConfig);
-            this._commonConfig = this.readConfigFile<ICommonConfig>("common.json", validateCommonConfig);
         }
         catch (error)
         {
@@ -75,26 +67,6 @@ export default class Config
     public get mysqlConfig(): IMySqlConfig
     {
         return this._mySqlConfig;
-    }
-
-    /**
-     * Gets the authentication configuration.
-     * @returns The authentication configuration.
-     */
-
-    public get authConfig(): IAuthConfig
-    {
-        return this._authConfig;
-    }
-
-
-    /**
-     * Gets the common configuration.
-     * @returns The common configuration.
-     */
-    public get commonConfig(): ICommonConfig
-    {
-        return this._commonConfig;
     }
 
     /**
