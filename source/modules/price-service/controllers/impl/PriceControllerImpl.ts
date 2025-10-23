@@ -5,6 +5,7 @@ import { constants as HttpStatuses } from "node:http2";
 import {PriceController} from "@modules/price-service/controllers/PriceController";
 import {PriceService} from "@modules/price-service/services/PriceService";
 import {PriceServiceImpl} from "@modules/price-service/services/impl/PriceServiceImpl";
+import { IPrice } from "@modules/price-service/services/io/IPrice";
 
 export class PriceControllerImpl implements PriceController
 {
@@ -30,7 +31,7 @@ export class PriceControllerImpl implements PriceController
      */
     constructor(service: PriceService, enforce: () => void)
     {
-        if(enforce !== Enforce)
+        if (enforce !== Enforce)
         {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceController.getInstance() instead of new.");
         }
@@ -44,10 +45,8 @@ export class PriceControllerImpl implements PriceController
      * @returns The singleton instance of PriceController.
      */
 
-    public static getInstance(): PriceController
-    {
-        if(!PriceControllerImpl.instance)
-        {
+    public static getInstance(): PriceController {
+        if (!PriceControllerImpl.instance) {
             PriceControllerImpl.instance = new PriceControllerImpl(PriceServiceImpl.getInstance(), Enforce);
         }
 
@@ -64,7 +63,7 @@ export class PriceControllerImpl implements PriceController
 
     public fetchAllPricesHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
     {
-        let prices;
+        let prices: Promise<IPrice | IPrice[]>;
 
         try
         {

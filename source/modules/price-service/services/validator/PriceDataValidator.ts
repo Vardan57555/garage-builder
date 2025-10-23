@@ -5,27 +5,6 @@ import {Constants} from "@common/io/Constants";
 
 export class PriceDataValidator
 {
-
-    /**
-     * Schema for validating the request body of get company by state and manufacturer ids.
-     */
-
-    private static fetchByStateAndManufacturerIdsSchema: ObjectSchema = joi.object().keys({
-        state_id: joi.string().required(),
-        manufacturer_id: joi.string().required(),
-        state_check: joi.boolean().default(false)
-    })
-
-    /**
-     * Schema for validating the request body of get state by manufacturer id.
-     */
-    private static fetchByIdRequestBodySchema: ObjectSchema = joi.object().keys({
-        id: joi.string().max(Constants.MAX_STRING_LENGTH).uuid({
-            version: Constants.UUIDV4,
-            separator: Constants.SEPARATOR
-        }).required()
-    });
-
     /**
      * Schema for validating the output of a state.
      */
@@ -59,28 +38,6 @@ export class PriceDataValidator
     private static outputItemSchema: ObjectSchema = joi.object({
         data: joi.array().items(PriceDataValidator.outputSchema).required(),
     });
-
-    /**
-     * Validates the state and manufacturer ids in the request params.
-     *
-     * @param data - The data to validate.
-     * @returns The validation result.
-     */
-    public static validateFetchByStateAndManufacturerIdsSchema(data: {}): ValidationResult
-    {
-        return setupValidator(data, PriceDataValidator.fetchByStateAndManufacturerIdsSchema)
-    }
-
-    /**
-     * Validates the output after get state by manufacturer id.
-     *
-     * @param data - The data to validate.
-     * @returns The validation result.
-     */
-    public static validateFetchByIdRequestBody(data: {}): ValidationResult
-    {
-        return setupValidator(data, PriceDataValidator.fetchByIdRequestBodySchema);
-    }
 
     /**
      * Validates the output of a state.

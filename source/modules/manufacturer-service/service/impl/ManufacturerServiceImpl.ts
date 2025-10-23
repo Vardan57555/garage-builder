@@ -49,6 +49,13 @@ export class ManufacturerServiceImpl implements ManufacturerService
         return ManufacturerServiceImpl.instance;
     }
 
+    /**
+     * Gets all manufacturers.
+     *
+     * @returns An array of all manufacturers.
+     * @throws ServerError if ngo retrieval fails.
+     */
+
     public async fetchAll(): Promise<IManufacturer | IManufacturer[]>
     {
         let manufacturers: Manufacturer[];
@@ -100,6 +107,7 @@ export class ManufacturerServiceImpl implements ManufacturerService
      * @param manufacturer
      * @param type
      */
+
     public validateOutput(manufacturer: {} | {}[], type: ValidationTypes = ValidationTypes.SINGLE): IManufacturer | IManufacturer[]
     {
         const validationMethods: Partial<Record<ValidationTypes, (data: {}) => ValidationResult>> = {
