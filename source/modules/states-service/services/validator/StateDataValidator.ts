@@ -5,17 +5,6 @@ import {Constants} from "@common/io/Constants";
 
 export class StateDataValidator
 {
-
-    /**
-     * Schema for validating the request body of get company by state and manufacturer ids.
-     */
-
-    private static fetchByStateAndManufacturerIdsSchema: ObjectSchema = joi.object().keys({
-        state_id: joi.string().required(),
-        manufacturer_id: joi.string().required(),
-        state_check: joi.boolean().default(false)
-    })
-
     /**
      * Schema for validating the request body of get state by manufacturer id.
      */
@@ -39,37 +28,12 @@ export class StateDataValidator
         updated_at: joi.number().required()
     });
 
-
-    /**
-     * Schema for validating the output of a state attribute.
-     */
-    public static outputAttributesSchema: ObjectSchema = joi.object().keys({
-        state_id: joi.string().uuid({
-            version: Constants.UUIDV4,
-            separator: Constants.SEPARATOR
-        }).allow(Constants.NULL, Constants.EMPTY_STRING),
-        name: joi.string().allow(Constants.NULL, Constants.EMPTY_STRING),
-        created_at: joi.number().allow(Constants.NULL, Constants.EMPTY_STRING),
-        updated_at: joi.number().allow(Constants.NULL, Constants.EMPTY_STRING)
-    });
-
     /**
      * Schema for validating the output of a bulk region.
      */
     private static outputItemSchema: ObjectSchema = joi.object({
         data: joi.array().items(StateDataValidator.outputSchema).required(),
     });
-
-    /**
-     * Validates the state and manufacturer ids in the request params.
-     *
-     * @param data - The data to validate.
-     * @returns The validation result.
-     */
-    public static validateFetchByStateAndManufacturerIdsSchema(data: {}): ValidationResult
-    {
-        return setupValidator(data, StateDataValidator.fetchByStateAndManufacturerIdsSchema)
-    }
 
     /**
      * Validates the output after get state by manufacturer id.

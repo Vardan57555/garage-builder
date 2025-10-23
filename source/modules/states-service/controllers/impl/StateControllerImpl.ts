@@ -21,6 +21,7 @@ export class StateControllerImpl implements StateController
      * The StateService instance.
      * @private
      */
+
     private service: StateService;
 
     /**
@@ -30,6 +31,7 @@ export class StateControllerImpl implements StateController
      * @param enforce - A function to enforce the Singleton pattern.
      * @throws Error if instantiated directly.
      */
+
     constructor(service: StateService, enforce: () => void)
     {
         if(enforce !== Enforce)
@@ -45,6 +47,7 @@ export class StateControllerImpl implements StateController
      *
      * @returns The singleton instance of StateController.
      */
+
     public static getInstance(): StateController
     {
         if(!StateControllerImpl.instance)
@@ -62,6 +65,7 @@ export class StateControllerImpl implements StateController
      * @param res - The response object.
      * @param next - The next middleware function.
      */
+
     public fetchAllHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
     {
         let states: IState | IState[];
@@ -88,6 +92,7 @@ export class StateControllerImpl implements StateController
      * @param res - The response object.
      * @param next - The next middleware function.
      */
+
     public fetchByManufacturerIdHandler: (req: Request, res: Response, next: NextFunction) => Promise<void> = async (req: Request, res: Response, next: NextFunction): Promise<void> =>
     {
         let states: IState | IState[];
@@ -114,6 +119,7 @@ export class StateControllerImpl implements StateController
      * @param pagination - A flag indicating whether to include pagination data.
      * @param status - The HTTP status code to set.
      */
+
     public handleSuccessResponse(res: Response, outcome: {}, pagination: boolean = false, status: number = HttpStatuses.HTTP_STATUS_OK): void
     {
         const serviceResponse: ServiceResponse = new ServiceResponse(res).setStatus(status);

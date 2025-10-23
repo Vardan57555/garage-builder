@@ -26,12 +26,6 @@ export type RoofMappingResult = {
     roof_id: number;
 };
 
-export interface ConversationState {
-    userFriendlyParams: Partial<UserFriendlyParams>;
-    hasGarageIntent: boolean;
-    currentField?: keyof UserFriendlyParams;
-}
-
 export interface StateMapping {
     map_id: number;
     manufacturer_id: number;
@@ -49,14 +43,6 @@ export interface UserFriendlyParams {
     building_type?: string;
     gauge?: number;
     is_barn?: boolean;
-}
-
-export interface SessionData {
-    memory: BufferMemory;
-    state: ConversationState;
-    stateMapCache: Map<string, StateMapping | null>;
-    roofMapCache: Map<string, number>;
-    lastActivity: number;
 }
 
 export interface LeadAgentSessionMetadata extends SessionMetadata {

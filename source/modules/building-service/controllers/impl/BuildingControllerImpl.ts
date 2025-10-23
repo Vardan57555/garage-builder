@@ -82,9 +82,6 @@ export class BuildingControllerImpl implements BuildingController
         this.handleSuccessResponse(res, building)
     }
 
-
-
-
     /**
      * Handles the service response.
      *

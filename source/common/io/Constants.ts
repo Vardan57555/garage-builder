@@ -19,20 +19,8 @@ export class Constants
     public static readonly UUIDV4: GuidVersions | GuidVersions[] = "uuidv4";
     public static readonly MAX_STRING_LENGTH: number = 255;
     public static readonly SEPARATOR: boolean | "-" | ":" = "-";
-    public static readonly DEFAULT_JWT_EXPIRATION: string = "1d";
-    public static readonly DAY_IN_HOURS: number = 24 * 60 * 60;
-    public static readonly X_API_KEY: string = "X-API-KEY";
-    public static readonly CONTENT_TYPE: string = "Content-Type";
-    public static readonly ACCEPT_ENCODING: string = "accept-encoding";
-    public static readonly OBJECT: string = "object";
-    public static readonly UNDEFINED: string = "undefined";
     public static readonly EMPTY_STRING: "" = "";
     public static readonly NULL: null = null;
-    public static readonly MAX_PAGE_SIZE: number = 100;
-    public static readonly MIN_PAGE_SIZE: number = 1;
-    public static readonly MATCHERS: Record<string, RegExp> = {
-        UUID_V4: /^[0-9(a-f|A-F)]{8}-[0-9(a-f|A-F)]{4}-4[0-9(a-f|A-F)]{3}-[89ab][0-9(a-f|A-F)]{3}-[0-9(a-f|A-F)]{12}$/i
-    };
     public static readonly ENVIRONMENTS: Record<string, string> = {
         PRODUCTION: "production",
         STAGING: "staging",
@@ -47,7 +35,6 @@ export class Constants
         'jtrim',
         'end_cross_bracing'
     ];
-
     public static readonly LABEL_NAMES: Record<string, string> = {
         fourth_center_cost: "4ft on Center",
         risk_cost: "Risk Category II",
@@ -59,29 +46,21 @@ export class Constants
         peak_braces: "Peak Braces",
         end_cross_bracing: "End Cross Bracing"
     };
-    public static readonly AGENT_TYPES = {
-        STRUCTURED_CHAT: "structured-chat-zero-shot-react-description"
-    } as const;
-
     public static readonly PRICING_COMPONENTS: PricingComponent[] = [
         { name: "End Panels", key: "end", extractor: (p) => p.end?.end_close_cost ?? 0 },
         { name: "Garage Door", key: "garage_door", extractor: (p) => p.garage_door?.cost ?? 0 },
     ];
-
     public static readonly ROOF_NAMES: Record<number, string> = {
         1: "Vertical",
         2: "Regular",
         3: "Boxed-Eave"
     };
-
     public static readonly ROOF_PRICE_KEYS: Record<number, string> = {
         1: 'vertical_roof_cost',
         3: 'box_style_cost'
     };
-
     public static readonly NUMERIC_FIELDS: (keyof UserFriendlyParams)[] =
         ["width", "length", "height", "utility_length", "gauge"];
-
     public static readonly ROOF_TYPE_MAPPING: Record<string, number> = {
         vertical: 1,
         regular: 2,
@@ -90,7 +69,6 @@ export class Constants
         boxed: 3,
         economy: 3,
     };
-
     public static readonly REQUIRED_FIELDS: (keyof UserFriendlyParams)[] = [
         "width",
         "length",
@@ -99,7 +77,6 @@ export class Constants
         "roof_type",
         "gauge",
     ]
-
     public static readonly FIELD_PROMPTS: Record<keyof UserFriendlyParams, string> = {
         garage_type: "What type of garage do you need?",
         width: "What width do you need for your garage (in feet)?",
@@ -115,7 +92,6 @@ export class Constants
         gauge: "Metal gauge preference? (12/14 or blank for standard)",
         is_barn: "Is this a barn style? (yes/no)",
     };
-
     public static readonly INTENT_PROMPT: string = `You are an intent classifier for a garage/building pricing service.
          Analyze if the user wants pricing for a garage, carport, barn, metal building, or any similar structure.
          Return ONLY "YES" if they want building pricing, or "NO" if it's just general chat.
@@ -123,11 +99,9 @@ export class Constants
          Answer (YES or NO):`.trim();
 
     public static readonly INTENT_KEYWORDS: Set<string> = new Set(["garage", "carport", "barn", "building", "price", "quote", "cost"]);
-
     public static readonly DEFAULT_CONFIG: SessionConfig = {
         SESSION_TIMEOUT: 30 * 60 * 1000,
         CLEANUP_INTERVAL: 5 * 60 * 1000,
         WARNING_THRESHOLD: 5 * 60 * 1000,
     };
-
 }

@@ -40,7 +40,7 @@ export class PriceServiceImpl implements PriceService
         'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
     ];
 
-    private readonly ARRAY_FIELDS = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
+    private readonly ARRAY_FIELDS: Set<string> = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
 
     private static readonly PROCEDURE_MAP: Record<string, ProcedureConfig> =
         {
@@ -49,7 +49,7 @@ export class PriceServiceImpl implements PriceService
                 'getEachEndClose(?, ?, ?)'
             ],
                 gable_end: ({ map_id, width, side_end_name }) => {
-                    const safeSideEndName = this.safeStringParam(side_end_name); // defaults to utf8mb4_general_ci
+                    const safeSideEndName = this.safeStringParam(side_end_name);
                     return [
                         [map_id, width, safeSideEndName],
                         'getGableEnd(?, ?, ?)'

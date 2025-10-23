@@ -168,9 +168,3 @@ export interface IUtilityPricingResult {
     utility_side: ISidePriceResult[];
     utility_slope_height: ISidePriceResult[];
 }
-
-export interface IMapResult {
-    map_id: number;
-    manufacturer_id?: number;
-    building_id?: number;
-}
