@@ -179,6 +179,11 @@ export class ChatServiceImpl implements ChatService
             if (metadata && metadata.expiresAt > now)
             {
                 metadata.lastActivity = now;
+                metadata.lastIp = ip;
+                metadata.lastUserAgent = userAgent;
+                metadata.accessCount++;
+
+                logger.debug("[ChatService] Session reused", { clientId, sessionId: existingSessionId });
 
                 return { sessionId: existingSessionId, isNew: false };
             }
@@ -189,11 +194,13 @@ export class ChatServiceImpl implements ChatService
                 {
                     this.sessionMetadata.delete(existingSessionId);
                     this.metrics.totalExpired++;
+
+                    logger.info("[ChatService] Expired session cleaned up", { clientId, sessionId: existingSessionId });
                 }
             }
         }
 
-        const newSessionId: string | Uint8Array = uuidv4();
+        const newSessionId: string = uuidv4();
         const expiresAt: number = now + Constants.DEFAULT_CONFIG.SESSION_TIMEOUT;
 
         const metadata: SessionMetadata = {
@@ -201,14 +208,45 @@ export class ChatServiceImpl implements ChatService
             clientIdentifier: clientId,
             createdAt: now,
             lastActivity: now,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            ip: ip,
+            userAgent: userAgent,
+            lastIp: ip,
+            lastUserAgent: userAgent,
+            deviceFingerprint: this.generateFingerprint(ip, userAgent),
+            accessCount: 1
         };
 
         this.sessionMetadata.set(newSessionId, metadata);
         this.clientSessions.set(clientId, newSessionId);
         this.metrics.totalCreated++;
 
+        logger.info("[ChatService] New session created", {
+            clientId,
+            sessionId: newSessionId,
+            ip: ip,
+            expiresAt: new Date(expiresAt).toISOString()
+        });
+
         return { sessionId: newSessionId, isNew: true };
+    }
+
+    /**
+     * Generates a security fingerprint from IP and User-Agent
+     */
+    private generateFingerprint(ip: string, userAgent: string): string
+    {
+        const combined: string = `${ip}:${userAgent}`;
+        let hash: number = 0;
+
+        for (let i = 0; i < combined.length; i++)
+        {
+            const char: number = combined.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+
+        return `fp-${Math.abs(hash)}`;
     }
 
     /**
@@ -223,9 +261,7 @@ export class ChatServiceImpl implements ChatService
             return;
         }
 
-        this.cleanupInterval = setInterval(() => {
-            this.performCleanup();
-        }, Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL);
+        this.cleanupInterval = setInterval(() => {this.performCleanup();}, Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL);
 
         logger.info("[ChatService] Cleanup interval started", {intervalMinutes: Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL / 60000});
     }
