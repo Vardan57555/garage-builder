@@ -9,16 +9,13 @@ import {
     validateCommonConfig,
     validateMySqlConfig,
     validateAuthConfig,
-    validateOpenAiConfig,
     validateRedisConfig
 } from "./ConfigValidator";
 import { IAppConfig } from "./io/IAppConfig";
 import { IMySqlConfig } from "./io/IMySqlConfig";
 import {ICommonConfig} from "@config/system-config/io/ICommonConfig";
 import { IAuthConfig } from "./io/IAuthConfig";
-import {IOpenAiConfig} from "@config/system-config/io/IOpenAi";
 import {IRedisConfig} from "@config/system-config/io/IRedisConfig";
-
 
 const logger: pino.Logger = createLogger(module);
 
@@ -32,7 +29,6 @@ export default class Config
     private static instance: Config;
     private readonly _appConfig: IAppConfig;
     private readonly _mySqlConfig: IMySqlConfig;
-    private readonly _openAiConfig: IOpenAiConfig;
     private readonly _authConfig: IAuthConfig;
     private readonly _redisConfig: IRedisConfig;
     private readonly _commonConfig: ICommonConfig;
@@ -55,7 +51,6 @@ export default class Config
             this._mySqlConfig = this.readConfigFile<IMySqlConfig>("mysql.json", validateMySqlConfig);
             this._authConfig = this.readConfigFile<IAuthConfig>("auth.json", validateAuthConfig);
             this._redisConfig = this.readConfigFile<IRedisConfig>("redis-config.json", validateRedisConfig);
-            this._openAiConfig = this.readConfigFile<IOpenAiConfig>("openAi.json", validateOpenAiConfig);
             this._commonConfig = this.readConfigFile<ICommonConfig>("common.json", validateCommonConfig);
         }
         catch (error)
@@ -100,15 +95,6 @@ export default class Config
     public get commonConfig(): ICommonConfig
     {
         return this._commonConfig;
-    }
-
-    /**
-     * Gets the OpenAI configuration.
-     * @returns The OpenAI configuration.
-     */
-    public get openAiConfig(): IOpenAiConfig
-    {
-        return this._openAiConfig;
     }
 
     /**

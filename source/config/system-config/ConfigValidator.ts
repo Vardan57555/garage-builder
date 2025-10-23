@@ -74,14 +74,6 @@ const redisConfigSchema: ObjectSchema = joi.object().keys({
 });
 
 /**
- * Schema for OpenAi configuration.
- */
-const openAiConfigSchema: ObjectSchema = joi.object().keys({
-    apiKey: joi.string().max(Constants.MAX_STRING_LENGTH).required()
-});
-
-
-/**
  * Schema for the authentication configuration.
  */
 export function validateAuthConfig(data: {}): ValidationResult
@@ -106,15 +98,6 @@ const onboardingConfigSchema: ObjectSchema = joi.object().keys({
 export function validateAppConfig(data: {}): ValidationResult
 {
     return setupValidator(data, appConfigSchema);
-}
-
-
-/**
- * Schema for the OpenAI configuration.
- */
-export function validateOpenAiConfig(data: {}): ValidationResult
-{
-    return setupValidator(data, openAiConfigSchema);
 }
 
 /**

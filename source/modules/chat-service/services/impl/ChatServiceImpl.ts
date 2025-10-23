@@ -108,13 +108,13 @@ export class ChatServiceImpl implements ChatService
      * @param sessionId - The unique identifier of the session to be ended.
      * @returns {Promise<{ success: boolean; message: string }>} A promise resolving to an object
      * indicating whether the session was successfully terminated, along with a descriptive message.
-     * @throws {ServerError.INTERNAL} If the session does not exist or if an error occurs during
+     * @throws {ServerError.INTERNAL} If the session does not exist, or if an error occurs during
      * the session termination process.
      */
 
     public async endSession(sessionId: string): Promise<{ success: boolean; message: string }>
     {
-        const metadata = this.sessionMetadata.get(sessionId);
+        const metadata: SessionMetadata = this.sessionMetadata.get(sessionId);
 
         if (!metadata)
         {
