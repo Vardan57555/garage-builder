@@ -17,6 +17,9 @@ start:
 	echo "Starting Ollama service..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d ollama
 
+	echo "Starting phpMyAdmin..."
+	docker compose -f $(MAIN_COMPOSE_FILE) up -d phpmyadmin
+
 	echo "Installing dependencies..."
 	sh ./scripts/initialize_services/initialize.sh
 
@@ -55,3 +58,13 @@ dock_up:
 	docker compose -f $(DB_COMPOSE_FILE) up -d
 	make run-migrations
 	make run-seeders
+
+clean: down
+	@echo "Removing all project containers, networks, and volumes..."
+	docker compose -f $(MAIN_COMPOSE_FILE) down --rmi all --volumes --remove-orphans
+	docker compose -f $(DB_COMPOSE_FILE) down --volumes --remove-orphans
+	
+	@echo "Removing project-specific volumes..."
+	-docker volume rm garage-builder_ollama-data garage-builder_redis-data garage-builder_mysql-data 2>/dev/null || true
+	
+	@echo "Project cleanup complete!"
