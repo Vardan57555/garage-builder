@@ -65,10 +65,13 @@ services:
       - "8501:8501"
     environment:
       BACKEND_URL: http://garage-backend:3000/api/v1/chat/
+      IMAGE_GEN_URL: http://host.docker.internal:5001
     depends_on:
       - garage-backend
     networks:
       - garage-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   redis:
     image: redis:latest
