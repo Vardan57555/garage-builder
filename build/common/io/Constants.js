@@ -7,20 +7,8 @@ class Constants {
     static UUIDV4 = "uuidv4";
     static MAX_STRING_LENGTH = 255;
     static SEPARATOR = "-";
-    static DEFAULT_JWT_EXPIRATION = "1d";
-    static DAY_IN_HOURS = 24 * 60 * 60;
-    static X_API_KEY = "X-API-KEY";
-    static CONTENT_TYPE = "Content-Type";
-    static ACCEPT_ENCODING = "accept-encoding";
-    static OBJECT = "object";
-    static UNDEFINED = "undefined";
     static EMPTY_STRING = "";
     static NULL = null;
-    static MAX_PAGE_SIZE = 100;
-    static MIN_PAGE_SIZE = 1;
-    static MATCHERS = {
-        UUID_V4: /^[0-9(a-f|A-F)]{8}-[0-9(a-f|A-F)]{4}-4[0-9(a-f|A-F)]{3}-[89ab][0-9(a-f|A-F)]{3}-[0-9(a-f|A-F)]{12}$/i
-    };
     static ENVIRONMENTS = {
         PRODUCTION: "production",
         STAGING: "staging",
@@ -45,9 +33,6 @@ class Constants {
         interior_anchor: "Interior Anchor",
         peak_braces: "Peak Braces",
         end_cross_bracing: "End Cross Bracing"
-    };
-    static AGENT_TYPES = {
-        STRUCTURED_CHAT: "structured-chat-zero-shot-react-description"
     };
     static PRICING_COMPONENTS = [
         { name: "End Panels", key: "end", extractor: (p) => p.end?.end_close_cost ?? 0 },
@@ -98,6 +83,11 @@ class Constants {
          User input: "{input}"
          Answer (YES or NO):`.trim();
     static INTENT_KEYWORDS = new Set(["garage", "carport", "barn", "building", "price", "quote", "cost"]);
+    static DEFAULT_CONFIG = {
+        SESSION_TIMEOUT: 30 * 60 * 1000,
+        CLEANUP_INTERVAL: 5 * 60 * 1000,
+        WARNING_THRESHOLD: 5 * 60 * 1000,
+    };
 }
 exports.Constants = Constants;
 //# sourceMappingURL=Constants.js.map

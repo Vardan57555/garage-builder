@@ -6,14 +6,12 @@ const LeadAgent_1 = require("../../../../agents/LeadAgent");
 const uuid_1 = require("uuid");
 const InstantiationError_1 = require("../../../../errors/InstantiationError");
 const Log_1 = require("../../../../utils/logger/Log");
+const Constants_1 = require("../../../../common/io/Constants");
 const logger = (0, Log_1.createLogger)(module);
 class ChatServiceImpl {
     static instance;
     sessionMetadata = new Map();
     clientSessions = new Map();
-    SESSION_TIMEOUT = 30 * 60 * 1000;
-    CLEANUP_INTERVAL = 5 * 60 * 1000;
-    WARNING_THRESHOLD = 5 * 60 * 1000;
     cleanupInterval = null;
     metrics = {
         totalCreated: 0,
@@ -89,6 +87,10 @@ class ChatServiceImpl {
             const metadata = this.sessionMetadata.get(existingSessionId);
             if (metadata && metadata.expiresAt > now) {
                 metadata.lastActivity = now;
+                metadata.lastIp = ip;
+                metadata.lastUserAgent = userAgent;
+                metadata.accessCount++;
+                logger.debug("[ChatService] Session reused", { clientId, sessionId: existingSessionId });
                 return { sessionId: existingSessionId, isNew: false };
             }
             else {
@@ -96,31 +98,52 @@ class ChatServiceImpl {
                 if (metadata) {
                     this.sessionMetadata.delete(existingSessionId);
                     this.metrics.totalExpired++;
+                    logger.info("[ChatService] Expired session cleaned up", { clientId, sessionId: existingSessionId });
                 }
             }
         }
         const newSessionId = (0, uuid_1.v4)();
-        const expiresAt = now + this.SESSION_TIMEOUT;
+        const expiresAt = now + Constants_1.Constants.DEFAULT_CONFIG.SESSION_TIMEOUT;
         const metadata = {
             sessionId: newSessionId,
             clientIdentifier: clientId,
             createdAt: now,
             lastActivity: now,
-            expiresAt: expiresAt
+            expiresAt: expiresAt,
+            ip: ip,
+            userAgent: userAgent,
+            lastIp: ip,
+            lastUserAgent: userAgent,
+            deviceFingerprint: this.generateFingerprint(ip, userAgent),
+            accessCount: 1
         };
         this.sessionMetadata.set(newSessionId, metadata);
         this.clientSessions.set(clientId, newSessionId);
         this.metrics.totalCreated++;
+        logger.info("[ChatService] New session created", {
+            clientId,
+            sessionId: newSessionId,
+            ip: ip,
+            expiresAt: new Date(expiresAt).toISOString()
+        });
         return { sessionId: newSessionId, isNew: true };
+    }
+    generateFingerprint(ip, userAgent) {
+        const combined = `${ip}:${userAgent}`;
+        let hash = 0;
+        for (let i = 0; i < combined.length; i++) {
+            const char = combined.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return `fp-${Math.abs(hash)}`;
     }
     startSessionCleanup() {
         if (this.cleanupInterval) {
             return;
         }
-        this.cleanupInterval = setInterval(() => {
-            this.performCleanup();
-        }, this.CLEANUP_INTERVAL);
-        logger.info("[ChatService] Cleanup interval started", { intervalMinutes: this.CLEANUP_INTERVAL / 60000 });
+        this.cleanupInterval = setInterval(() => { this.performCleanup(); }, Constants_1.Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL);
+        logger.info("[ChatService] Cleanup interval started", { intervalMinutes: Constants_1.Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL / 60000 });
     }
     performCleanup() {
         const now = Date.now();
@@ -134,7 +157,7 @@ class ChatServiceImpl {
                 cleanedCount++;
                 this.metrics.totalExpired++;
             }
-            else if (timeUntilExpiry < this.WARNING_THRESHOLD) {
+            else if (timeUntilExpiry < Constants_1.Constants.DEFAULT_CONFIG.WARNING_THRESHOLD) {
                 warningCount++;
             }
         }

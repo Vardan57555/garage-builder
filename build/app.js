@@ -79,7 +79,7 @@ class App {
         this.setupRoutes();
     }
     setupMiddlewares() {
-        const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || Config_1.default.getInstance().commonConfig.request_body_limit;
+        const requestBodyLimit = process.env.REQUEST_BODY_LIMIT;
         this.app.use(body_parser_1.default.json({
             verify: function (req, _res, buf) {
                 req["rawBody"] = buf;
@@ -98,7 +98,7 @@ class App {
             }),
             resave: false,
             saveUninitialized: false,
-            secret: process.env.SESSION_SECRET || Config_1.default.getInstance().authConfig.sessionSecret
+            secret: process.env.SESSION_SECRET
         }));
         this.app.use(CorsUtils_1.CorsUtils.setupCors());
     }

@@ -3,12 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.validateAuthConfig = validateAuthConfig;
 exports.validateAppConfig = validateAppConfig;
-exports.validateOpenAiConfig = validateOpenAiConfig;
 exports.validateMySqlConfig = validateMySqlConfig;
 exports.validateRedisConfig = validateRedisConfig;
-exports.validateCommonConfig = validateCommonConfig;
 const Constants_1 = require("../../common/io/Constants");
 const SetupValidator_1 = require("../../utils/validator/SetupValidator");
 const joi_1 = __importDefault(require("joi"));
@@ -31,13 +28,6 @@ const appConfigSchema = joi_1.default.object().keys({
             threshold: joi_1.default.number().greater(0).required()
         }).required()
     }).required()
-});
-const authConfigSchema = joi_1.default.object().keys({
-    jwt_secret: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).required(),
-    callbackUrl: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).required(),
-    sessionSecret: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).required(),
-    frontend_url: joi_1.default.string().required(),
-    reviro_host: joi_1.default.string().required()
 });
 const mySqlConfigSchema = joi_1.default.object().keys({
     host: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).hostname().required(),
@@ -65,29 +55,13 @@ const redisConfigSchema = joi_1.default.object().keys({
     timeout: joi_1.default.number().integer().min(1).required(),
     isLazyConnect: joi_1.default.boolean().required()
 });
-const openAiConfigSchema = joi_1.default.object().keys({
-    apiKey: joi_1.default.string().max(Constants_1.Constants.MAX_STRING_LENGTH).required()
-});
-function validateAuthConfig(data) {
-    return (0, SetupValidator_1.setupValidator)(data, authConfigSchema);
-}
-const onboardingConfigSchema = joi_1.default.object().keys({
-    self_onboarding_host: joi_1.default.string().required(),
-    request_body_limit: joi_1.default.string().required()
-});
 function validateAppConfig(data) {
     return (0, SetupValidator_1.setupValidator)(data, appConfigSchema);
-}
-function validateOpenAiConfig(data) {
-    return (0, SetupValidator_1.setupValidator)(data, openAiConfigSchema);
 }
 function validateMySqlConfig(data) {
     return (0, SetupValidator_1.setupValidator)(data, mySqlConfigSchema);
 }
 function validateRedisConfig(data) {
     return (0, SetupValidator_1.setupValidator)(data, redisConfigSchema);
-}
-function validateCommonConfig(data) {
-    return (0, SetupValidator_1.setupValidator)(data, onboardingConfigSchema);
 }
 //# sourceMappingURL=ConfigValidator.js.map

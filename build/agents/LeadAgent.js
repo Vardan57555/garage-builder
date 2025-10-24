@@ -9,31 +9,41 @@ const messages_1 = require("@langchain/core/messages");
 const ProcedureExecutor_1 = require("../utils/procedure/ProcedureExecutor");
 const Constants_1 = require("../common/io/Constants");
 const Log_1 = require("../utils/logger/Log");
+const RedisCacheUtils_1 = require("../utils/cache/RedisCacheUtils");
+const SessionManager_1 = require("../utils/session/SessionManager");
 const logger = (0, Log_1.createLogger)(module);
 class LeadAgent {
     static instance;
-    sessions = new Map();
-    SESSION_TIMEOUT = 30 * 60 * 1000;
-    cleanupInterval = null;
-    constructor(enforce) {
+    sessionManager;
+    cacheUtils;
+    constructor(enforce, cacheUtils) {
         if (enforce !== Enforce) {
             throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Use LeadAgent.getInstance() instead of new.");
         }
-        this.startSessionCleanup();
+        this.cacheUtils = cacheUtils;
+        this.sessionManager = SessionManager_1.SessionManager.getInstance({
+            SESSION_TIMEOUT: 30 * 60 * 1000,
+            CLEANUP_INTERVAL: 5 * 60 * 1000,
+            WARNING_THRESHOLD: 5 * 60 * 1000,
+        });
     }
     static async getInstance() {
         if (!LeadAgent.instance) {
-            LeadAgent.instance = new LeadAgent(Enforce);
+            LeadAgent.instance = new LeadAgent(Enforce, RedisCacheUtils_1.RedisCacheUtils.getInstance());
         }
         return LeadAgent.instance;
     }
     getOrCreateSession(sessionId) {
-        if (this.sessions.has(sessionId)) {
-            const session = this.sessions.get(sessionId);
-            session.lastActivity = Date.now();
-            return session;
+        const existingSession = this.sessionManager.getSession(sessionId);
+        if (existingSession && this.sessionManager.isSessionValid(sessionId)) {
+            this.sessionManager.updateLastActivity(sessionId);
+            return existingSession;
         }
         const newSession = {
+            sessionId,
+            createdAt: Date.now(),
+            lastActivity: Date.now(),
+            expiresAt: Date.now() + 30 * 60 * 1000,
             memory: new memory_1.BufferMemory({
                 memoryKey: "chat_history",
                 returnMessages: true,
@@ -45,30 +55,10 @@ class LeadAgent {
             },
             stateMapCache: new Map(),
             roofMapCache: new Map(),
-            lastActivity: Date.now(),
         };
-        this.sessions.set(sessionId, newSession);
+        this.sessionManager.createSession(sessionId, newSession);
         logger.info(`[LeadAgent] New session created: ${sessionId}`);
         return newSession;
-    }
-    startSessionCleanup() {
-        if (this.cleanupInterval) {
-            return;
-        }
-        this.cleanupInterval = setInterval(() => {
-            const now = Date.now();
-            let cleanedCount = 0;
-            for (const [sessionId, session] of this.sessions.entries()) {
-                if (now - session.lastActivity > this.SESSION_TIMEOUT) {
-                    this.sessions.delete(sessionId);
-                    cleanedCount++;
-                    logger.info(`[LeadAgent] Session expired and cleaned: ${sessionId}`);
-                }
-            }
-            if (cleanedCount > 0) {
-                logger.info(`[LeadAgent] Cleaned up ${cleanedCount} expired sessions. Active sessions: ${this.sessions.size}`);
-            }
-        }, 5 * 60 * 1000);
     }
     getMessageString(content) {
         if (typeof content === "string") {
@@ -101,8 +91,9 @@ class LeadAgent {
     }
     async mapStateToDB(stateName, session, preferredBuildingId = 1) {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
-        if (session.stateMapCache.has(cacheKey)) {
-            return session.stateMapCache.get(cacheKey) ?? null;
+        const cachedState = session.stateMapCache.get(cacheKey);
+        if (cachedState !== undefined) {
+            return cachedState;
         }
         try {
             const result = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([stateName], "getMapIdByStateName(?)", "getMapIdByStateName");
@@ -110,9 +101,11 @@ class LeadAgent {
                 const preferredMapping = result.find((item) => item.building_id === preferredBuildingId);
                 const mapping = preferredMapping || result[0];
                 const output = { map_id: mapping.map_id, manufacturer_id: mapping.manufacturer_id };
+                await this.cacheUtils.put(cacheKey, output);
                 session.stateMapCache.set(cacheKey, output);
                 return output;
             }
+            await this.cacheUtils.put(cacheKey, null);
             session.stateMapCache.set(cacheKey, null);
             return null;
         }
@@ -125,8 +118,9 @@ class LeadAgent {
     async mapRoofTypeToDB(roofType, mapId, session) {
         const normalizedRoofType = roofType.toLowerCase();
         const cacheKey = `${normalizedRoofType}:${mapId}`;
-        if (session.roofMapCache.has(cacheKey)) {
-            return session.roofMapCache.get(cacheKey);
+        const cachedRoofId = await this.cacheUtils.get(cacheKey);
+        if (cachedRoofId) {
+            return cachedRoofId;
         }
         try {
             const result = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([mapId, roofType], "getRoofIdByType(?, ?)", "roof_mapping");
@@ -139,7 +133,7 @@ class LeadAgent {
             logger.error("[LeadAgent] Roof type mapping failed:", error);
         }
         const fallbackId = Constants_1.Constants.ROOF_TYPE_MAPPING[normalizedRoofType] ?? (normalizedRoofType.includes("vertical") ? 1 : normalizedRoofType.includes("box") ? 3 : 2);
-        session.roofMapCache.set(cacheKey, fallbackId);
+        await this.cacheUtils.put(cacheKey, fallbackId);
         return fallbackId;
     }
     async convertToTechnicalParams(userParams, session) {
@@ -186,14 +180,13 @@ class LeadAgent {
         return dimensions ? `Got it! ${dimensions}\n\n` : "";
     }
     async run(sessionId, input) {
-        console.log(sessionId);
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
         const session = this.getOrCreateSession(sessionId);
         await session.memory.chatHistory.addUserMessage(input);
         if (!session.state.hasGarageIntent) {
             const hasIntent = await this.detectGarageIntentWithAI(input);
             if (!hasIntent) {
-                const response = "Hello! 👋 I can help you get a price quote for a garage or metal building.\n" +
+                const response = "Hello! I can help you get a price quote for a garage or metal building.\n" +
                     "Please tell me what type of building or provide dimensions (width, length, height in feet).";
                 await session.memory.chatHistory.addAIChatMessage(response);
                 return response;
@@ -220,12 +213,12 @@ class LeadAgent {
         }
         const technicalParams = await this.convertToTechnicalParams(session.state.userFriendlyParams, session);
         if (!technicalParams) {
-            return "⚠️ Failed to convert user input to technical parameters.";
+            return "Failed to convert user input to technical parameters.";
         }
         const result = await extractor.calculatePriceWithParams(technicalParams);
         await session.memory.chatHistory.addAIChatMessage(result);
         this.resetSessionState(session);
-        return result + "\n\n💬 Need another quote? Just describe what you're looking for!";
+        return result + "\n\nNeed another quote? Just describe what you're looking for!";
     }
     async getConversationContext(session) {
         const history = await session.memory.chatHistory.getMessages();
@@ -237,20 +230,15 @@ class LeadAgent {
         session.state.currentField = undefined;
     }
     async endSession(sessionId) {
-        if (this.sessions.has(sessionId)) {
-            this.sessions.delete(sessionId);
+        if (this.sessionManager.endSession(sessionId)) {
             logger.info(`[LeadAgent] Session ended: ${sessionId}`);
         }
-    }
-    getActiveSessionCount() {
-        return this.sessions.size;
+        else {
+            logger.warn(`[LeadAgent] Attempted to end non-existent session: ${sessionId}`);
+        }
     }
     async reset() {
-        this.sessions.clear();
-        if (this.cleanupInterval) {
-            clearInterval(this.cleanupInterval);
-            this.cleanupInterval = null;
-        }
+        this.sessionManager.destroy();
         logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
     }
 }
