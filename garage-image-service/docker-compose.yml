@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  image-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile.complete
+    container_name: garage-image-generator
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - COMFYUI_URL=http://localhost:8188
+      - PORT=5001
+    ports:
+      - "5001:5001"  # Image generation service
+      - "8188:8188"  # ComfyUI (optional, for debugging)
+    volumes:
+      - ./outputs:/app/service/outputs
+      - comfyui-models:/app/ComfyUI/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 16g
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  comfyui-models:
+    driver: local

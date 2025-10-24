@@ -1,0 +1,60 @@
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV COMFYUI_URL=http://localhost:8188
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    git \
+    wget \
+    curl \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directories
+WORKDIR /app
+
+# Install ComfyUI
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /app/ComfyUI
+WORKDIR /app/ComfyUI
+
+# Install ComfyUI dependencies
+RUN pip3 install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Create model directory (model will be downloaded to volume on first run)
+RUN mkdir -p models/checkpoints
+
+# Set up image generation service
+WORKDIR /app/service
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy service code
+COPY . .
+
+# Make download script executable
+RUN chmod +x download_models.sh
+
+# Create outputs directory
+RUN mkdir -p outputs
+
+# Configure supervisor to run both services
+RUN mkdir -p /var/log/supervisor
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Expose ports
+EXPOSE 8188 5001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5001/health || exit 1
+
+# Start supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
