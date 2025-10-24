@@ -42,11 +42,19 @@ services:
     restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
     deploy:
       resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
         limits:
           cpus: 4.0
-          memory: 4g
+          memory: 16g
 
   streamlit-client:
     build:
@@ -69,6 +77,20 @@ services:
       - '6379:6379'
     volumes:
       - redis-data:/data
+    networks:
+      - garage-network
+    restart: always
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: pricing_engine
+      PMA_PASSWORD: secret
+    ports:
+      - '8080:80'
     networks:
       - garage-network
     restart: always
