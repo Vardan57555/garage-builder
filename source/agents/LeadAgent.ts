@@ -38,6 +38,7 @@ export class LeadAgent
      * Redis cache utility instance.
      * @private
      */
+
     private cacheUtils: RedisCacheUtils;
 
     /**
@@ -47,6 +48,7 @@ export class LeadAgent
      * @param cacheUtils - The Redis service instance.
      * @throws Error if instantiation is attempted directly.
      */
+
     private constructor(enforce: () => void, cacheUtils: RedisCacheUtils)
     {
         if (enforce !== Enforce)
@@ -67,6 +69,7 @@ export class LeadAgent
      *
      * @returns The singleton instance of LeadAgent.
      */
+
     public static async getInstance(): Promise<LeadAgent>
     {
         if (!LeadAgent.instance)
@@ -77,10 +80,101 @@ export class LeadAgent
     }
 
     /**
+     * Detects if user wants to update a parameter
+     * @param input - User input to check for update intent
+     * @returns Object with detected field and value, or null
+     */
+    private async detectParameterUpdate(input: string): Promise<{field: keyof UserFriendlyParams, value: any} | null>
+    {
+        const updatePatterns = [
+            { regex: /change|update|correct|fix|actually|wait|let me/i, weight: 1 },
+            { regex: /height|length|width|roof|state|gauge/i, weight: 2 }
+        ];
+
+        const hasUpdateIntent = updatePatterns.some(p => p.regex.test(input));
+
+        if (!hasUpdateIntent) return null;
+
+        try
+        {
+            const prompt = `Given this user message: "${input}"
+            
+Determine if they want to UPDATE/CHANGE a parameter and extract:
+1. Which parameter (width, length, height, roof_type, state_name, gauge, building_type)
+2. The new value
+
+Respond in JSON format only:
+{"isUpdate": true/false, "field": "parameter_name", "value": extracted_value}
+or
+{"isUpdate": false}`;
+
+            const aiMessage: AIMessageChunk = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const response = JSON.parse((aiMessage.content as string).trim());
+
+            if (response.isUpdate && response.field && response.value)
+            {
+                return {
+                    field: response.field as keyof UserFriendlyParams,
+                    value: response.value
+                };
+            }
+        }
+        catch (error)
+        {
+            logger.warn("[LeadAgent] Update detection failed:", error);
+        }
+
+        return null;
+    }
+
+    /**
+     * Handles parameter update and validation
+     */
+    private handleParameterUpdate(
+        session: LeadAgentSessionMetadata,
+        update: {field: keyof UserFriendlyParams, value: any}
+    ): {success: boolean, message: string, updatedField?: keyof UserFriendlyParams}
+    {
+        const { field, value } = update;
+
+        logger.info(`[LeadAgent] Attempting to update ${field} from ${(session.state.userFriendlyParams as any)[field]} to ${value}`);
+
+        // Validate numeric fields
+        if (["width", "length", "height", "gauge", "utility_length"].includes(field))
+        {
+            const numValue = parseFloat(String(value));
+            if (isNaN(numValue) || numValue <= 0)
+            {
+                logger.warn(`[LeadAgent] Invalid ${field} value: ${value}`);
+                return {
+                    success: false,
+                    message: `Invalid ${field}. Please provide a positive number.`
+                };
+            }
+            (session.state.userFriendlyParams as any)[field] = numValue;
+            logger.info(`[LeadAgent] Successfully updated ${field} to ${numValue} (numeric)`);
+        }
+        else
+        {
+            (session.state.userFriendlyParams as any)[field] = value;
+            logger.info(`[LeadAgent] Successfully updated ${field} to ${value} (string)`);
+        }
+
+        logger.info(`[LeadAgent] Current session params:`, JSON.stringify(session.state.userFriendlyParams));
+
+        return {
+            success: true,
+            message: `Updated ${field} to ${value}. ✓`,
+            updatedField: field
+        };
+    }
+
+    /**
      * @param sessionId - A unique identifier for the user session.
      * @returns {LeadAgentSessionMetadata} The existing or newly created session data object.
      * @throws {Error} If session creation or retrieval encounters unexpected issues.
      */
+
     private getOrCreateSession(sessionId: string): LeadAgentSessionMetadata
     {
         const existingSession: SessionMetadata = this.sessionManager.getSession(sessionId);
@@ -119,6 +213,7 @@ export class LeadAgent
      * @param content - The message content to format, which can be a string, an array, or another type.
      * @returns {string} A string representation of the provided content.
      */
+
     private getMessageString(content: string | any[]): string
     {
         if (typeof content === "string")
@@ -142,6 +237,7 @@ export class LeadAgent
      * @returns {Promise<boolean>} `true` if garage intent is detected, otherwise `false`.
      * @throws {Error} If both AI and fallback detection fail unexpectedly.
      */
+
     private async detectGarageIntentWithAI(input: string): Promise<boolean>
     {
         try
@@ -168,6 +264,7 @@ export class LeadAgent
      * @param input - The raw user input text to analyze for intent.
      * @returns {boolean} `true` if any intent keyword is found, otherwise `false`.
      */
+
     private detectGarageIntentFallback(input: string): boolean
     {
         const lowerInput: string = input.toLowerCase();
@@ -181,6 +278,7 @@ export class LeadAgent
      * @returns {Promise<StateMapping | null>} The matched state mapping object, or `null` if no match is found.
      * @throws {Error} If the database procedure call fails unexpectedly.
      */
+
     private async mapStateToDB(stateName: string, session: LeadAgentSessionMetadata, preferredBuildingId = 1): Promise<StateMapping | null>
     {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
@@ -231,6 +329,7 @@ export class LeadAgent
      * @returns {Promise<number>} The resolved roof ID, either from the database, cache, or fallback mapping.
      * @throws {Error} If database interaction encounters unexpected issues.
      */
+
     private async mapRoofTypeToDB(roofType: string, mapId: number, session: LeadAgentSessionMetadata): Promise<number>
     {
         const normalizedRoofType: string = roofType.toLowerCase();
@@ -276,6 +375,7 @@ export class LeadAgent
      *
      * @throws {Error} If state or roof mapping fails unexpectedly.
      */
+
     private async convertToTechnicalParams(userParams: UserFriendlyParams, session: LeadAgentSessionMetadata): Promise<IPricingParams | null>
     {
         try
@@ -300,7 +400,7 @@ export class LeadAgent
 
             const roof_id: number = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id, session) : 2;
 
-            return {
+            const technicalParams: IPricingParams = {
                 width: userParams.width ?? 0,
                 length: userParams.length ?? 0,
                 height: userParams.height ?? 0,
@@ -312,6 +412,22 @@ export class LeadAgent
                 gauge: userParams.gauge ?? 14,
                 is_barn: userParams.is_barn,
             };
+
+            // ← ADD THIS COMPREHENSIVE DEBUG LOGGING
+            logger.info("[LeadAgent] ====== TECHNICAL PARAMS CONVERSION DEBUG ======");
+            logger.info("[LeadAgent] User-friendly params:", JSON.stringify(userParams, null, 2));
+            logger.info("[LeadAgent] State name:", userParams.state_name);
+            logger.info("[LeadAgent] Roof type:", userParams.roof_type);
+            logger.info("[LeadAgent] Building type:", userParams.building_type, "← CRITICAL: This determines pricing!");
+            logger.info("[LeadAgent] Gauge:", userParams.gauge ?? 14);
+            logger.info("[LeadAgent] ----");
+            logger.info("[LeadAgent] Map ID:", map_id, "(resolved from state)");
+            logger.info("[LeadAgent] Roof ID:", roof_id, "(resolved from roof type)");
+            logger.info("[LeadAgent] Manufacturer ID:", manufacturer_id);
+            logger.info("[LeadAgent] Final technical params:", JSON.stringify(technicalParams, null, 2));
+            logger.info("[LeadAgent] ====== END DEBUG ======");
+
+            return technicalParams;
         }
         catch (error)
         {
@@ -324,6 +440,7 @@ export class LeadAgent
      * @param params - A partial object containing user-friendly parameters.
      * @returns {(keyof UserFriendlyParams)[]} An array of missing required field names.
      */
+
     private getMissingFields(params: Partial<UserFriendlyParams>): (keyof UserFriendlyParams)[]
     {
         return Constants.REQUIRED_FIELDS.filter((field) => !params[field]);
@@ -333,11 +450,15 @@ export class LeadAgent
      * @param extractedParams - A partial object containing user-friendly building parameters.
      * @returns {string} A formatted string summarizing the provided dimensions, or an empty string if none are found.
      */
-    private formatDimensionsResponse(extractedParams: Partial<UserFriendlyParams>): string
+
+    private formatDimensionsResponse(
+        extractedParams: Partial<UserFriendlyParams>,
+        currentParams: Partial<UserFriendlyParams>  // ← ADD THIS
+    ): string
     {
         const dimensions: string = (["width", "length", "height"] as const)
-            .filter((k) => extractedParams[k])
-            .map((k) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${extractedParams[k]}ft.`)
+            .filter((k) => currentParams[k])  // ← Use currentParams (merged state)
+            .map((k) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${currentParams[k]}ft.`)
             .join(" ");
 
         return dimensions ? `Got it! ${dimensions}\n\n` : "";
@@ -349,6 +470,7 @@ export class LeadAgent
      * @returns {Promise<string>} A response string from the AI, either prompting for more info or providing a price quote.
      * @throws {Error} If parameter extraction, AI intent detection, or price calculation encounters unexpected issues.
      */
+
     public async run(sessionId: string, input: string): Promise<string>
     {
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
@@ -371,6 +493,50 @@ export class LeadAgent
             session.state.hasGarageIntent = true;
         }
 
+        const paramUpdate = await this.detectParameterUpdate(input);
+        if (paramUpdate)
+        {
+            const updateResult = this.handleParameterUpdate(session, paramUpdate);
+
+            if (updateResult.success)
+            {
+                const missingFields = this.getMissingFields(session.state.userFriendlyParams);
+
+                if (missingFields.length === 0)
+                {
+                    const confirmMessage = `Got it! ${updateResult.updatedField}: ${(session.state.userFriendlyParams as any)[updateResult.updatedField!]}ft.\n\n✓ All parameters set! Calculating price...`;
+                    await session.memory.chatHistory.addAIChatMessage(confirmMessage);
+
+                    const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
+                    if (technicalParams)
+                    {
+                        const priceResult: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(technicalParams);
+                        const finalResponse = priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
+                        await session.memory.chatHistory.addAIChatMessage(priceResult);
+                        this.resetSessionState(session);
+                        return finalResponse;
+                    }
+                }
+                else
+                {
+                    const nextField: keyof UserFriendlyParams = missingFields[0];
+                    session.state.currentField = nextField;
+
+                    const updatedValue = (session.state.userFriendlyParams as any)[updateResult.updatedField!];
+                    const fieldSuffix = ["width", "length", "height", "gauge", "utility_length"].includes(updateResult.updatedField as string) ? "ft." : "";
+
+                    const response: string = `Got it! ${updateResult.updatedField}: ${updatedValue}${fieldSuffix}\n\n${Constants.FIELD_PROMPTS[nextField]}`;
+                    await session.memory.chatHistory.addAIChatMessage(response);
+                    return response;
+                }
+            }
+            else
+            {
+                await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+                return updateResult.message;
+            }
+        }
+
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
         const rawParams: string = await extractor._call(await this.getConversationContext(session));
         logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
@@ -378,9 +544,19 @@ export class LeadAgent
         const extractedParams: Partial<UserFriendlyParams> = extractor.safeExtractUserFriendlyParams(rawParams);
         logger.info(`[LeadAgent] Session ${sessionId} - Safe extracted user-friendly params:`, extractedParams);
 
+        const filteredExtractedParams: Partial<UserFriendlyParams> = {};
+        for (const [key, value] of Object.entries(extractedParams))
+        {
+            if (value !== undefined && value !== null && !session.state.userFriendlyParams[key as keyof UserFriendlyParams])
+            {
+                // @ts-ignore
+                filteredExtractedParams[key as keyof UserFriendlyParams] = value;
+            }
+        }
+
         session.state.userFriendlyParams = {
             ...session.state.userFriendlyParams,
-            ...extractedParams
+            ...filteredExtractedParams
         };
 
         const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(session.state.userFriendlyParams);
@@ -388,8 +564,11 @@ export class LeadAgent
         {
             const nextField: keyof UserFriendlyParams = missingFields[0];
             session.state.currentField = nextField;
-            const response: string = this.formatDimensionsResponse(extractedParams) +
-                Constants.FIELD_PROMPTS[nextField];
+
+            const response: string = this.formatDimensionsResponse(
+                extractedParams,
+                session.state.userFriendlyParams
+            ) + Constants.FIELD_PROMPTS[nextField];
 
             await session.memory.chatHistory.addAIChatMessage(response);
             return response;
@@ -414,6 +593,7 @@ export class LeadAgent
      * @param session - The current session containing the chat history.
      * @returns {Promise<string>} The conversation context as a single concatenated string.
      */
+
     private async getConversationContext(session: LeadAgentSessionMetadata): Promise<string>
     {
         const history: BaseMessage[] = await session.memory.chatHistory.getMessages();
@@ -424,6 +604,7 @@ export class LeadAgent
      * @param session - The session whose state is to be reset.
      * @returns {void}
      */
+
     private resetSessionState(session: LeadAgentSessionMetadata): void
     {
         session.state.userFriendlyParams = {};
@@ -434,6 +615,7 @@ export class LeadAgent
     /**
      * Manually end a session
      */
+
     public async endSession(sessionId: string): Promise<void>
     {
         if (this.sessionManager.endSession(sessionId))
@@ -449,6 +631,7 @@ export class LeadAgent
     /**
      * Full reset (for testing/shutdown)
      */
+
     public async reset(): Promise<void>
     {
         this.sessionManager.destroy();

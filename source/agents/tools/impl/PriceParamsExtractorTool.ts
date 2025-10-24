@@ -18,9 +18,7 @@ export class PriceParamsExtractorTool extends BaseTool
      */
 
     private static instance: PriceParamsExtractorTool;
-
     readonly name = "priceParamsExtractor";
-
     readonly description = "Extracts building pricing parameters from natural language.";
 
     /**
@@ -33,7 +31,6 @@ export class PriceParamsExtractorTool extends BaseTool
     constructor(enforce: () => void)
     {
         super();
-
         if (enforce !== Enforce)
         {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Use PriceParamsExtractorTool.getInstance() instead of new.");
@@ -67,14 +64,167 @@ export class PriceParamsExtractorTool extends BaseTool
     {
         try
         {
-            const aiMessage: AIMessageChunk = await sharedLLM.invoke([new HumanMessage(this.buildPrompt(userInput))]);
-            return aiMessage.content as string;
+            logger.info("[PriceParamsExtractorTool] Processing input:", userInput);
+
+            const aiMessage: AIMessageChunk = await sharedLLM.invoke(
+                [new HumanMessage(this.buildInferencePrompt(userInput))],
+
+            );
+
+            const rawOutput = aiMessage.content as string;
+            logger.info("[PriceParamsExtractorTool] LLM response:", rawOutput);
+
+            const extracted = this.safeExtractUserFriendlyParams(rawOutput);
+            const validated = this.validateAndInferMissingParams(extracted, userInput);
+
+            const result = JSON.stringify(validated);
+            logger.info("[PriceParamsExtractorTool] Final result:", result);
+            return result;
         }
         catch (error)
         {
             logger.error(`[PriceParamsExtractorTool] _call failed:`, error);
-            return "{}";
+            return JSON.stringify({});
         }
+    }
+
+    /**
+     * NEW: Validate extracted parameters and intelligently infer missing ones from user context
+     * This is the KEY FIX - instead of returning incomplete data, we infer what's missing
+     */
+    private validateAndInferMissingParams(params: Partial<UserFriendlyParams>, userInput: string): Partial<UserFriendlyParams>
+    {
+        const input = userInput.toLowerCase();
+
+        if (!params.width || !params.length || !params.height)
+        {
+            const garageType = params.garage_type || this.detectGarageType(input);
+            const dimensions = this.getStandardDimensions(garageType);
+
+            if (!params.width) params.width = dimensions.width;
+            if (!params.length) params.length = dimensions.length;
+            if (!params.height) params.height = dimensions.height;
+            if (!params.garage_type) params.garage_type = garageType;
+
+            logger.info("[validateAndInferMissingParams] Inferred dimensions from garage type:", {
+                garageType,
+                dimensions,
+            });
+        }
+
+        if (!params.roof_type)
+        {
+            params.roof_type = "regular";
+            logger.info("[validateAndInferMissingParams] Defaulted roof_type to regular");
+        }
+
+        if (!params.state_name)
+        {
+            const state = this.extractState(input);
+            if (state) params.state_name = state;
+        }
+
+        return params;
+    }
+
+    /**
+     * NEW: Detect garage type from user input using pattern matching
+     */
+    private detectGarageType(input: string): string
+    {
+        if (/\b1\s*(?:car|bay)\b|\bone\s*(?:car|bay)\b/i.test(input)) return "1 car garage";
+        if (/\b2\s*(?:car|bay)\b|\btwo\s*(?:car|bay)\b/i.test(input)) return "2 car garage";
+        if (/\b3\s*(?:car|bay)\b|\bthree\s*(?:car|bay)\b/i.test(input)) return "3 car garage";
+        if (/truck\s*garage|garage.*truck|heavy.*truck/i.test(input)) return "truck garage";
+        if (/rv\s*garage|rv\s*(?:carport|shelter)|garage.*rv/i.test(input)) return "RV garage";
+        if (/barn/i.test(input)) return "barn";
+        return "garage";
+    }
+
+    /**
+     * NEW: Get standard dimensions for garage types based on industry standards
+     */
+    private getStandardDimensions(garageType: string): { width: number; length: number; height: number }
+    {
+        const standardDimensions: Record<string, { width: number; length: number; height: number }> = {
+            "1 car garage": { width: 12, length: 20, height: 10 },
+            "2 car garage": { width: 20, length: 20, height: 10 },
+            "3 car garage": { width: 30, length: 20, height: 10 },
+            "truck garage": { width: 16, length: 24, height: 12 },
+            "rv garage": { width: 14, length: 40, height: 12 },
+            "barn": { width: 30, length: 40, height: 14 },
+            "garage": { width: 20, length: 20, height: 10 },
+        };
+
+        return standardDimensions[garageType] || { width: 20, length: 20, height: 10 };
+    }
+
+    /**
+     * NEW: Extract state from input string
+     */
+    private extractState(input: string): string | null
+    {
+        const statePatterns: Record<string, string> = {
+            "texas|tx": "Texas",
+            "california|ca": "California",
+            "florida|fl": "Florida",
+            "new york|ny": "New York",
+            "pennsylvania|pa": "Pennsylvania",
+            "illinois|il": "Illinois",
+            "ohio|oh": "Ohio",
+            "georgia|ga": "Georgia",
+            "north carolina|nc": "North Carolina",
+            "michigan|mi": "Michigan",
+            "new jersey|nj": "New Jersey",
+            "virginia|va": "Virginia",
+            "washington|wa": "Washington",
+            "arizona|az": "Arizona",
+            "massachusetts|ma": "Massachusetts",
+            "tennessee|tn": "Tennessee",
+            "maryland|md": "Maryland",
+            "missouri|mo": "Missouri",
+            "wisconsin|wi": "Wisconsin",
+            "colorado|co": "Colorado",
+            "minnesota|mn": "Minnesota",
+            "south carolina|sc": "South Carolina",
+            "alabama|al": "Alabama",
+            "louisiana|la": "Louisiana",
+            "kentucky|ky": "Kentucky",
+            "oregon|or": "Oregon",
+            "oklahoma|ok": "Oklahoma",
+            "connecticut|ct": "Connecticut",
+            "iowa|ia": "Iowa",
+            "nevada|nv": "Nevada",
+            "arkansas|ar": "Arkansas",
+            "mississippi|ms": "Mississippi",
+            "kansas|ks": "Kansas",
+            "utah|ut": "Utah",
+            "new mexico|nm": "New Mexico",
+            "nebraska|ne": "Nebraska",
+            "idaho|id": "Idaho",
+            "maine|me": "Maine",
+            "montana|mt": "Montana",
+            "rhode island|ri": "Rhode Island",
+            "delaware|de": "Delaware",
+            "south dakota|sd": "South Dakota",
+            "north dakota|nd": "North Dakota",
+            "alaska|ak": "Alaska",
+            "hawaii|hi": "Hawaii",
+            "wyoming|wy": "Wyoming",
+            "vermont|vt": "Vermont",
+            "new hampshire|nh": "New Hampshire",
+            "west virginia|wv": "West Virginia",
+        };
+
+        for (const [pattern, stateName] of Object.entries(statePatterns))
+        {
+            if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input))
+            {
+                return stateName;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -289,58 +439,57 @@ export class PriceParamsExtractorTool extends BaseTool
     }
 
     /**
-     * Constructs a detailed prompt for the AI to extract structured JSON data from flexible user input.
-     * @param userInput - The raw user input describing a garage or building, which may include dimensions, roof type, state, gauge, and other details.
-     * @returns A formatted string prompt instructing the AI to extract relevant information and return it as JSON.
+     * IMPROVED: Smarter prompt that tells LLM to INFER missing data instead of asking
      */
-
-    private buildPrompt(userInput: string): string
+    private buildInferencePrompt(userInput: string): string
     {
-        return `You are a parameter extraction assistant for garage/building pricing.
+        return `You are a garage/building specification extraction system.
 
-                    Your job: **extract structured JSON data** from flexible user language. Users may mention garage size, type, location, roof style, gauge, and other details in **natural language**. You must interpret and normalize their meaning, **not just match fixed patterns**.
-                    
-                    📐 **Dimension Extraction Rules**:
-                    - If the user provides explicit dimensions (e.g., "20 feet wide 30 feet long 10 feet high" or "20x30x10"):
-                        * Extract exact numeric values for width, length, and height.
-                    - If the user only mentions a vehicle or garage type (e.g., "2 car garage", "truck garage", "RV garage"):
-                        * Infer realistic approximate standard dimensions.
-                    
-                    🗺️ **State/Location Extraction**:
-                    - Extract the state name from natural language text (e.g., "I'm in Texas" → "Texas").
-                    
-                    🏠 **Roof Type Extraction**:
-                    - Normalize roof type names to one of: "regular", "a-frame", or "vertical".
-                    
-                    ⚙️ **Gauge Extraction**:
-                    - Look for metal gauge if specified in user input (12, 14, etc.)
-                    - Normalize to number.
-                    - If not mentioned, set "gauge": null.
-                    
-                    📋 **JSON Schema**:
-                    {
-                      "garage_type": string | null,
-                      "width": number | null,
-                      "length": number | null,
-                      "height": number | null,
-                      "state_name": string | null,
-                      "roof_type": string | null,
-                      "manufacturer_name": string | null,
-                      "utility_length": number | null,
-                      "building_type": string | null,
-                      "gauge": number | null,
-                      "is_barn": boolean | null
-                    }
-                    
-                    ⚠️ **CRITICAL RULES**:
-                    1. Return only valid JSON, no explanations.
-                    2. Use null for unknown values.
-                    3. Always prefer explicit numbers over inferred defaults.
-                    4. Handle all U.S. states dynamically.
-                    5. Extract gauge if mentioned; otherwise, set to null.
-                    
-                    User input: "${userInput}"
-                JSON output:`.trim();
+CRITICAL: You MUST infer all required data from context. NEVER ask clarifying questions.
+
+Task: Extract and intelligently infer building parameters from user input.
+
+RULES:
+1. If user specifies garage type (e.g., "2 car garage"), infer standard dimensions:
+   - 1 car garage: 12×20×10 ft
+   - 2 car garage: 20×20×10 ft
+   - 3 car garage: 30×20×10 ft
+   - Truck garage: 16×24×12 ft
+   - RV garage: 14×40×12 ft
+
+2. If explicit dimensions given (e.g., "20x30x10"), use those exact numbers
+
+3. For missing optional fields: Use null, don't ask for them
+
+4. Default values for common fields:
+   - roof_type: "regular" if not specified
+   - height: infer from garage type or default 10 ft
+
+5. Extract state if mentioned in input
+
+OUTPUT FORMAT - Return ONLY valid JSON:
+{
+  "garage_type": "detected type or null",
+  "width": number or null,
+  "length": number or null,
+  "height": number or null,
+  "state_name": "state name or null",
+  "roof_type": "regular|a-frame|vertical or null",
+  "manufacturer_name": "string or null",
+  "utility_length": number or null,
+  "building_type": "string or null",
+  "gauge": number or null,
+  "is_barn": boolean or null
+}
+
+ABSOLUTE REQUIREMENTS:
+- Return ONLY JSON, nothing else
+- NEVER ask questions
+- ALWAYS infer missing standard parameters
+- Use null only for truly optional/unknown data
+- Ensure width, length, height are ALWAYS numbers
+
+User input: "${userInput}"`;
     }
 
     /**
@@ -353,27 +502,38 @@ export class PriceParamsExtractorTool extends BaseTool
     {
         try
         {
-            const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-            if (!jsonMatch)
+            let cleanedOutput = rawOutput
+                .replace(/```json\s*/g, "")
+                .replace(/```\s*/g, "")
+                .trim();
+
+            const startIdx = cleanedOutput.indexOf('{');
+            const endIdx = cleanedOutput.lastIndexOf('}');
+
+            if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx)
             {
-                logger.warn("No JSON found in AI output");
+                logger.warn("No valid JSON found in AI output:", rawOutput);
                 return {};
             }
 
-            const cleanedJson: string = jsonMatch[0]
+            const jsonString = cleanedOutput.substring(startIdx, endIdx + 1);
+
+            const cleanedJson: string = jsonString
                 .replace(/undefined|NaN|\bNone\b/g, "null")
-                .replace(/\s*\r?\n\s*/g, "");
+                .replace(/,\s*}/g, "}")
+                .replace(/,\s*]/g, "]");
 
             const params: Partial<UserFriendlyParams> = JSON.parse(cleanedJson);
 
             this.removeNullValues(params);
             this.normalizeNumericFields(params);
 
+            logger.info("Extracted parameters:", params);
             return params;
         }
         catch (error)
         {
-            logger.warn("Invalid JSON from error: ", error);
+            logger.warn("Failed to extract JSON from AI output:", rawOutput, error);
             return {};
         }
     }
@@ -403,9 +563,11 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private normalizeNumericFields(params: Partial<UserFriendlyParams>): void
     {
-        for (const field of Constants.NUMERIC_FIELDS)
+        const numericFields = ["width", "length", "height", "utility_length", "gauge"];
+
+        for (const field of numericFields)
         {
-            const value: string | number | boolean = params[field];
+            const value: any = params[field as keyof UserFriendlyParams];
 
             if (typeof value === "string")
             {
@@ -416,7 +578,7 @@ export class PriceParamsExtractorTool extends BaseTool
                 }
                 else
                 {
-                    delete params[field];
+                    delete params[field as keyof UserFriendlyParams];
                 }
             }
         }
