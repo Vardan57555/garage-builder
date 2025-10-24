@@ -76,6 +76,7 @@ export class Constants
         "state_name",
         "roof_type",
         "gauge",
+        "building_type"
     ]
     public static readonly FIELD_PROMPTS: Record<keyof UserFriendlyParams, string> = {
         garage_type: "What type of garage do you need?",
@@ -103,5 +104,32 @@ export class Constants
         SESSION_TIMEOUT: 30 * 60 * 1000,
         CLEANUP_INTERVAL: 5 * 60 * 1000,
         WARNING_THRESHOLD: 5 * 60 * 1000,
+    };
+    public static readonly BUILDING_ID_MAP: Record<string, number> = {
+        'garage': 1,
+        'carport': 1,
+        'standard': 1,
+        '1': 1,
+        'lean': 2,
+        'lean-to': 2,
+        'leantos': 2,
+        '2': 2,
+        'triple': 3,
+        'triple wide': 3,
+        '3': 3,
+        'rv': 4,
+        'rv cover': 4,
+        '4': 4,
+        'commercial': 6,
+        '6': 6,
+        'custom': 7,
+        '7': 7,
+        'clear': 8,
+        'clear span': 8,
+        'free standing': 8,
+        '8': 8,
+        'risk': 9,
+        'risk ii': 9,
+        '9': 9,
     };
 }
