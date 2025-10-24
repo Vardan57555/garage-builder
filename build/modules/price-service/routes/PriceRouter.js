@@ -26,9 +26,6 @@ class PriceRouter extends CustomRouter_1.CustomRouter {
         this.route("/")
             .all(...StateMiddlewares_1.StateMiddlewares.common.fetchAllMiddlewares)
             .get(this.controller.fetchAllPricesHandler);
-        this.route("/predict")
-            .all(...StateMiddlewares_1.StateMiddlewares.common.fetchAllMiddlewares)
-            .get(this.controller.predictPriceHandler);
     }
 }
 exports.PriceRouter = PriceRouter;

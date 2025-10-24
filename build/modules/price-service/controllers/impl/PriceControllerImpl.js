@@ -31,17 +31,6 @@ class PriceControllerImpl {
         }
         this.handleSuccessResponse(res, prices);
     };
-    predictPriceHandler = async (req, res, next) => {
-        let price;
-        try {
-            price = this.service.predict(req.body);
-        }
-        catch (error) {
-            next(error);
-            return;
-        }
-        this.handleSuccessResponse(res, price);
-    };
     handleSuccessResponse(res, outcome, pagination = false, status = node_http2_1.constants.HTTP_STATUS_OK) {
         const serviceResponse = new ServiceResponse_1.ServiceResponse(res).setStatus(status);
         serviceResponse.setOutcome(outcome);
