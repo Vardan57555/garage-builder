@@ -270,6 +270,12 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private formatPricingResult(pricing: any, params: IPricingParams): string
     {
+        logger.info("[formatPricingResult] ====== PRICE CALC DEBUG ======");
+        logger.info("[formatPricingResult] Roof ID:", params.roof_id);
+        logger.info("[formatPricingResult] Constants.ROOF_PRICE_KEYS mapping:", Constants.ROOF_PRICE_KEYS);
+        logger.info("[formatPricingResult] Building structure data:", JSON.stringify(pricing.building_structure, null, 2));
+        logger.info("[formatPricingResult] ====== END DEBUG ======");
+
         const roofName: string = Constants.ROOF_NAMES[params.roof_id] || 'Custom';
         const { total: totalPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
         const breakdownLines: string[] = this.buildBreakdownLines(pricing, params, roofPrice);
@@ -296,14 +302,27 @@ export class PriceParamsExtractorTool extends BaseTool
     {
         const specs = [
             "📐 **Building Specifications:**",
-            `   • Dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft`,
-            `   • Roof Style: ${roofName}`,
-            `   • Map ID: ${params.map_id}`
+            `   • Dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft`
         ];
+
+        // ✅ Add building type if available
+        if (params.building_type)
+        {
+            specs.push(`   • Building Type: ${params.building_type}`);
+        }
+
+        specs.push(`   • Roof Style: ${roofName}`);
+        specs.push(`   • Gauge: ${pricing.gauge ?? params.gauge ?? 14}`);
 
         if (params.utility_length && params.utility_length > 0)
         {
             specs.push(`   • Utility Length: ${params.utility_length}ft`);
+        }
+
+        // ✅ Add is_barn if applicable
+        if (params.is_barn)
+        {
+            specs.push(`   • Barn: Yes`);
         }
 
         if (pricing.manufacturer?.length > 0)
@@ -327,9 +346,25 @@ export class PriceParamsExtractorTool extends BaseTool
         const roofName: string = Constants.ROOF_NAMES[params.roof_id] || 'Custom';
         const lines: string[] = [`   • Base Building with ${roofName} Roof: $${this.formatCurrency(roofPrice)}`];
 
+        // ✅ ADD THIS DEBUG LOGGING
+        logger.info("[buildBreakdownLines] ====== COMPONENT DEBUG ======");
+        logger.info("[buildBreakdownLines] Components being processed:", {
+            insulation: pricing.insulation,
+            certificate: pricing.certificate,
+            end_cross_bracing: pricing.end_cross_bracing,
+            side_cross_bracing: pricing.side_cross_bracing,
+            full_length_panel: pricing.full_length_panel,
+            connection_fees: pricing.connection_fees,
+            utility_cost: pricing.utility_cost,
+            additional_features: pricing.additional_features,
+            jtrim: pricing.jtrim
+        });
+        logger.info("[buildBreakdownLines] ====== END DEBUG ======");
+
         for (const component of Constants.PRICING_COMPONENTS)
         {
             const cost: number = component.extractor(pricing);
+            logger.info(`[buildBreakdownLines] Component "${component.name}":`, cost);
             if (cost > 0)
             {
                 lines.push(`   • ${component.name}: $${this.formatCurrency(cost)}`);
@@ -381,15 +416,41 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private selectRoofPrice(structure: any, roofId: number): number
     {
-        const priceKey: string = Constants.ROOF_PRICE_KEYS[roofId];
+        logger.info(`[selectRoofPrice] Selecting price for roofId=${roofId}`);
+        logger.info(`[selectRoofPrice] Available prices:`, {
+            regular_cost: structure.regular_cost,
+            box_style_cost: structure.box_style_cost,
+            vertical_roof_cost: structure.vertical_roof_cost
+        });
 
-        if (priceKey && structure[priceKey] > 0)
-        {
-            return structure[priceKey];
+        // Map roof_id to the correct price field
+        // Typically: 1=regular, 2=box_style, 3=vertical, etc.
+        // Adjust these mappings based on your Constants.ROOF_PRICE_KEYS
+        let selectedPrice: number = 0;
+
+        switch (roofId) {
+            case 1:  // Vertical
+                selectedPrice = structure.vertical_roof_cost ?? 0;
+                logger.info(`[selectRoofPrice] Using vertical_roof_cost: $${selectedPrice}`);
+                break;
+            case 2:  // Box style
+                selectedPrice = structure.box_style_cost ?? 0;
+                logger.info(`[selectRoofPrice] Using box_style_cost: $${selectedPrice}`);
+                break;
+            case 3:  // Regular
+            default:
+                selectedPrice = structure.regular_cost ?? 0;
+                logger.info(`[selectRoofPrice] Using regular_cost: $${selectedPrice}`);
         }
 
-        return structure.regular_cost > 0 ? structure.regular_cost : (structure.total_price ?? 0);
+        if (selectedPrice === 0) {
+            logger.warn(`[selectRoofPrice] Selected price is $0! Falling back to regular_cost`);
+            selectedPrice = structure.regular_cost ?? 0;
+        }
+
+        return selectedPrice;
     }
+
 
     /**
      * Calculates the total price of a building including roof, components, add-ons, and utilities.
@@ -402,10 +463,22 @@ export class PriceParamsExtractorTool extends BaseTool
     {
         let selectedRoofPrice: number = 0;
 
-        if (pricing.building_structure?.length > 0)
-        {
-            selectedRoofPrice = this.selectRoofPrice(pricing.building_structure[0], params.roof_id);
-        }
+        logger.info("[calculateTotalPrice] ====== PRICE CALCULATION DEBUG ======");
+        logger.info("[calculateTotalPrice] Roof ID:", params.roof_id);
+        logger.info("[calculateTotalPrice] Available price fields:", {
+            regular: pricing.base_price_regular,
+            box: pricing.base_price_box,
+            vertical: pricing.base_price_vertical
+        });
+
+        // ✅ FIX: Select correct roof price based on roof_id
+        selectedRoofPrice = this.selectRoofPrice({
+            regular_cost: pricing.base_price_regular ?? 0,
+            box_style_cost: pricing.base_price_box ?? 0,
+            vertical_roof_cost: pricing.base_price_vertical ?? 0
+        }, params.roof_id);
+
+        logger.info("[calculateTotalPrice] Selected roof price:", selectedRoofPrice);
 
         let totalPrice: number = selectedRoofPrice;
 
@@ -424,8 +497,12 @@ export class PriceParamsExtractorTool extends BaseTool
             totalPrice *= (1 + pricing.additional_features.cost / 100);
         }
 
+        logger.info("[calculateTotalPrice] Final total price:", totalPrice);
+        logger.info("[calculateTotalPrice] ====== END DEBUG ======");
+
         return { total: totalPrice, roofPrice: selectedRoofPrice };
     }
+
 
     /**
      * Formats a numeric value as a currency string with two decimal places and comma separators.
