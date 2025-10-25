@@ -236,10 +236,47 @@ export class PriceServiceImpl implements PriceService
                 };
             }
 
+            // ✅ FIX: Call getBasicPrice with CORRECT parameters
+            // Parameters: map_id, structure (string like '12x20'), show_price_with_zero
+            const structureString = `'${finalWidth}x${finalLength}'`;  // Format: '20x20'
+
+            logger.info("[fetchBuildingPricingWithUtility] ====== PRICING DATA DEBUG ======");
+            logger.info("[fetchBuildingPricingWithUtility] Calling getBasicPrice with:");
+            logger.info("[fetchBuildingPricingWithUtility] - map_id:", params.map_id);
+            logger.info("[fetchBuildingPricingWithUtility] - structure:", structureString);
+            logger.info("[fetchBuildingPricingWithUtility] - show_price_with_zero: No");
+
+            const basePrices: any[] = await ProcedureExecutor.getProcedureData<any>(
+                [params.map_id!, structureString, 'No'],  // ← CORRECT PARAMETERS
+                'getBasicPrice(?, ?, ?)',
+                'base_prices'
+            );
+
+            logger.info("[fetchBuildingPricingWithUtility] Base prices returned:", basePrices.length);
+            if (basePrices.length > 0) {
+                logger.info("[fetchBuildingPricingWithUtility] Price record:", JSON.stringify(basePrices[0], null, 2));
+            }
+            logger.info("[fetchBuildingPricingWithUtility] ====== END DEBUG ======");
+
+            if (!basePrices || basePrices.length === 0) {
+                logger.warn(`[fetchBuildingPricingWithUtility] No pricing found for structure ${structureString}`);
+                return {
+                    status: false,
+                    message: `No pricing available for dimensions ${finalWidth}x${finalLength}ft`
+                };
+            }
+
+            const matchingPrice = basePrices[0];  // getBasicPrice already filtered by structure
+
             const pricing: Record<string, any> = {
                 building_to_maxlength: finalLength,
                 manufacturer,
-                building_structure: buildingStructureFull
+                building_structure: buildingStructureFull,
+                // ✅ Store the pricing data with correct fields
+                base_price_regular: matchingPrice.regular_cost ?? 0,
+                base_price_box: matchingPrice.box_style_cost ?? 0,
+                base_price_vertical: matchingPrice.vertical_roof_cost ?? 0,
+                gauge: matchingPrice.gauge ?? (params.gauge ?? 14)
             };
 
             const componentKeys: string[] = this.getComponentKeys(params.single_slope_height);
