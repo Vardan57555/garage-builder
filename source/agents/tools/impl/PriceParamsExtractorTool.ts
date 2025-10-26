@@ -277,16 +277,22 @@ export class PriceParamsExtractorTool extends BaseTool
         logger.info("[formatPricingResult] ====== END DEBUG ======");
 
         const roofName: string = Constants.ROOF_NAMES[params.roof_id] || 'Custom';
-        const { total: totalPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
+        const { total: kitPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
+
+        // ✅ ADD LABOR, FOUNDATION, DELIVERY
+        const { total: totalWithExtras, breakdown: extraBreakdown } = this.addServiceCosts(kitPrice, params);
+
         const breakdownLines: string[] = this.buildBreakdownLines(pricing, params, roofPrice);
+        breakdownLines.push(...extraBreakdown); // Add labor, foundation, delivery
 
         return [
             "✅ **Price Quote Generated!**\n",
             this.formatSpecifications(pricing, params, roofName),
-            `\n💰 **ESTIMATED TOTAL PRICE: $${this.formatCurrency(totalPrice)}**\n`,
+            `\n💰 **ESTIMATED TOTAL PRICE: $${this.formatCurrency(totalWithExtras)}**\n`,
             "\n📊 **Price Breakdown:**",
             breakdownLines.join('\n'),
-            "\n\n💡 This is your base quote. Add-ons and customizations can be added for additional cost."
+            "\n💡 Includes kit + installation labor + foundation slab preparation",
+            "\n🔧 Additional upgrades and customizations available"
         ].join('\n');
     }
 
@@ -300,34 +306,33 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private formatSpecifications(pricing: any, params: IPricingParams, roofName: string): string
     {
+        const sqft = params.width * params.length;
         const specs = [
             "📐 **Building Specifications:**",
-            `   • Dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft`
+            `   • Dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft (${sqft} sq ft)`,
         ];
 
-        // ✅ Add building type if available
         if (params.building_type)
         {
             specs.push(`   • Building Type: ${params.building_type}`);
         }
 
         specs.push(`   • Roof Style: ${roofName}`);
-        specs.push(`   • Gauge: ${pricing.gauge ?? params.gauge ?? 14}`);
+        specs.push(`   • Gauge: ${pricing.gauge ?? params.gauge ?? 14}GA`);
 
         if (params.utility_length && params.utility_length > 0)
         {
             specs.push(`   • Utility Length: ${params.utility_length}ft`);
         }
 
-        // ✅ Add is_barn if applicable
         if (params.is_barn)
         {
-            specs.push(`   • Barn: Yes`);
+            specs.push(`   • Barn Style: Yes`);
         }
 
         if (pricing.manufacturer?.length > 0)
         {
-            specs.push(`   • Manufacturer: ${pricing.manufacturer[0].manufacturer_name || 'N/A'}`);
+            specs.push(`   • Manufacturer: ${pricing.manufacturer[0].manufacturer_name || 'Standard'}`);
         }
 
         return specs.join('\n');
@@ -343,45 +348,54 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private buildBreakdownLines(pricing: any, params: IPricingParams, roofPrice: number): string[]
     {
-        const roofName: string = Constants.ROOF_NAMES[params.roof_id] || 'Custom';
-        const lines: string[] = [`   • Base Building with ${roofName} Roof: $${this.formatCurrency(roofPrice)}`];
+        const lines: string[] = [];
+        let debugTotal = 0;
 
-        // ✅ ADD THIS DEBUG LOGGING
-        logger.info("[buildBreakdownLines] ====== COMPONENT DEBUG ======");
-        logger.info("[buildBreakdownLines] Components being processed:", {
-            insulation: pricing.insulation,
-            certificate: pricing.certificate,
-            end_cross_bracing: pricing.end_cross_bracing,
-            side_cross_bracing: pricing.side_cross_bracing,
-            full_length_panel: pricing.full_length_panel,
-            connection_fees: pricing.connection_fees,
-            utility_cost: pricing.utility_cost,
-            additional_features: pricing.additional_features,
-            jtrim: pricing.jtrim
-        });
-        logger.info("[buildBreakdownLines] ====== END DEBUG ======");
+        logger.info("[buildBreakdownLines] ====== BUILDING BREAKDOWN ======");
 
+        // ✅ ADD BASE ROOF PRICE AS FIRST LINE ITEM
+        if (roofPrice > 0)
+        {
+            lines.push(`   • Base Building (${Constants.ROOF_NAMES[params.roof_id] || 'Standard'}): $${this.formatCurrency(roofPrice)}`);
+            debugTotal += roofPrice;
+            logger.info(`[buildBreakdownLines] ✓ Base Building: $${roofPrice} (Total so far: $${debugTotal})`);
+        }
+
+        // ✅ ADD SIDE & END CLOSURES (CRITICAL!)
+        const sideClosureCost = this.calculateSideClosureCosts(pricing, params);
+        if (sideClosureCost > 0)
+        {
+            lines.push(`   • Side & End Closures: $${this.formatCurrency(sideClosureCost)}`);
+            debugTotal += sideClosureCost;
+            logger.info(`[buildBreakdownLines] ✓ Side & End Closures: $${sideClosureCost} (Total so far: $${debugTotal})`);
+        }
+
+        // Add each component with verification
         for (const component of Constants.PRICING_COMPONENTS)
         {
-            const cost: number = component.extractor(pricing);
-            logger.info(`[buildBreakdownLines] Component "${component.name}":`, cost);
+            const cost = component.extractor(pricing);
             if (cost > 0)
             {
                 lines.push(`   • ${component.name}: $${this.formatCurrency(cost)}`);
+                debugTotal += cost;
+                logger.info(`[buildBreakdownLines] ✓ ${component.name}: $${cost} (Total so far: $${debugTotal})`);
             }
         }
 
-        this.addArrayComponentLines(pricing, lines);
-
-        if (pricing.additional_features?.cost_type === '%')
+        // ✅ ADD PERCENTAGE-BASED ADDITIONAL FEATURES
+        if (pricing.additional_features?.cost_type === '%' && pricing.additional_features?.cost > 0)
         {
-            lines.push(`   • ${pricing.additional_features.additional_feature}: +${pricing.additional_features.cost}%`);
+            const percentageIncrease = roofPrice * (pricing.additional_features.cost / 100);
+            if (percentageIncrease > 0)
+            {
+                lines.push(`   • Additional Features (${pricing.additional_features.cost}%): $${this.formatCurrency(percentageIncrease)}`);
+                debugTotal += percentageIncrease;
+                logger.info(`[buildBreakdownLines] ✓ Additional Features (${pricing.additional_features.cost}%): $${percentageIncrease} (Total so far: $${debugTotal})`);
+            }
         }
 
-        if (pricing.utility_cost)
-        {
-            lines.push(`   • Utility Items: $${this.formatCurrency(pricing.utility_cost)}`);
-        }
+        logger.info("[buildBreakdownLines] ====== END BREAKDOWN ======");
+        logger.info("[buildBreakdownLines] Debug total from components: $" + debugTotal);
 
         return lines;
     }
@@ -393,19 +407,19 @@ export class PriceParamsExtractorTool extends BaseTool
      * @returns void
      */
 
-    private addArrayComponentLines(pricing: any, lines: string[]): void
-    {
-        const arrayComponents = [
-            { array: pricing.anchors_cost, label: (item: any) => item.name },
-            { array: pricing.bows, label: () => "Bow" },
-            { array: pricing.addons, label: (item: any) => item.label }
-        ];
-
-        for (const { array, label } of arrayComponents)
-        {
-            array?.forEach((item: any) => {lines.push(`   • ${label(item)}: $${this.formatCurrency(item.cost)}`);});
-        }
-    }
+    // private addArrayComponentLines(pricing: any, lines: string[]): void
+    // {
+    //     const arrayComponents = [
+    //         { array: pricing.anchors_cost, label: (item: any) => item.name },
+    //         { array: pricing.bows, label: () => "Bow" },
+    //         { array: pricing.addons, label: (item: any) => item.label }
+    //     ];
+    //
+    //     for (const { array, label } of arrayComponents)
+    //     {
+    //         array?.forEach((item: any) => {lines.push(`   • ${label(item)}: $${this.formatCurrency(item.cost)}`);});
+    //     }
+    // }
 
     /**
      * Selects the appropriate roof price based on the provided `roofId` and structure pricing data.
@@ -461,44 +475,80 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private calculateTotalPrice(pricing: any, params: IPricingParams): { total: number; roofPrice: number }
     {
-        let selectedRoofPrice: number = 0;
-
-        logger.info("[calculateTotalPrice] ====== PRICE CALCULATION DEBUG ======");
+        logger.info("[calculateTotalPrice] ====== COMPLETE PRICE CALCULATION ======");
         logger.info("[calculateTotalPrice] Roof ID:", params.roof_id);
-        logger.info("[calculateTotalPrice] Available price fields:", {
-            regular: pricing.base_price_regular,
-            box: pricing.base_price_box,
-            vertical: pricing.base_price_vertical
-        });
+        logger.info("[calculateTotalPrice] Pricing object keys:", Object.keys(pricing));
 
-        // ✅ FIX: Select correct roof price based on roof_id
-        selectedRoofPrice = this.selectRoofPrice({
+        // Step 1: Get base roof price
+        const selectedRoofPrice = this.selectRoofPrice({
             regular_cost: pricing.base_price_regular ?? 0,
             box_style_cost: pricing.base_price_box ?? 0,
             vertical_roof_cost: pricing.base_price_vertical ?? 0
         }, params.roof_id);
 
-        logger.info("[calculateTotalPrice] Selected roof price:", selectedRoofPrice);
+        logger.info("[calculateTotalPrice] Selected base roof price: $" + selectedRoofPrice);
 
         let totalPrice: number = selectedRoofPrice;
+        const breakdown: Record<string, number> = { "Base Building": selectedRoofPrice };
+
+        // ✅ STEP 2: Add side & end closure costs
+        const sideClosureCost = this.calculateSideClosureCosts(pricing, params);
+        if (sideClosureCost > 0) {
+            totalPrice += sideClosureCost;
+            breakdown["Side & End Closures"] = sideClosureCost;
+            logger.info(`[calculateTotalPrice] ✓ Side & End Closures: $${sideClosureCost}`);
+        }
+
+        // STEP 3: Add all defined components from Constants.PRICING_COMPONENTS
+        if (!Constants.PRICING_COMPONENTS || Constants.PRICING_COMPONENTS.length === 0) {
+            logger.warn("[calculateTotalPrice] ⚠️ WARNING: Constants.PRICING_COMPONENTS is empty or undefined!");
+        }
 
         for (const component of Constants.PRICING_COMPONENTS)
         {
-            totalPrice += component.extractor(pricing);
+            try {
+                const cost = component.extractor(pricing);
+                if (cost > 0)
+                {
+                    totalPrice += cost;
+                    breakdown[component.name] = cost;
+                    logger.info(`[calculateTotalPrice] ✓ ${component.name}: $${cost}`);
+                } else {
+                    logger.info(`[calculateTotalPrice] ○ ${component.name}: $0 (skipped)`);
+                }
+            } catch (error) {
+                logger.error(`[calculateTotalPrice] ✗ Error extracting ${component.name}:`, error);
+            }
         }
 
-        totalPrice += pricing.anchors_cost?.reduce((sum: number, a: any) => sum + (a.cost ?? 0), 0) ?? 0;
-        totalPrice += pricing.bows?.reduce((sum: number, b: any) => sum + (b.cost ?? 0), 0) ?? 0;
-        totalPrice += pricing.addons?.reduce((sum: number, a: any) => sum + (a.cost ?? 0), 0) ?? 0;
-        totalPrice += pricing.utility_cost ?? 0;
+        // STEP 4: Add utility costs
+        if (pricing.utility_cost && pricing.utility_cost > 0)
+        {
+            totalPrice += pricing.utility_cost;
+            breakdown["Utility Items"] = pricing.utility_cost;
+            logger.info(`[calculateTotalPrice] ✓ Utility Items: $${pricing.utility_cost}`);
+        }
 
+        // STEP 5: Apply percentage-based additional features to BASE PRICE ONLY
         if (pricing.additional_features?.cost_type === '%')
         {
-            totalPrice *= (1 + pricing.additional_features.cost / 100);
+            const percentageIncrease = selectedRoofPrice * (pricing.additional_features.cost / 100);
+            totalPrice += percentageIncrease;
+            breakdown["Additional Features %"] = percentageIncrease;
+            logger.info(`[calculateTotalPrice] ✓ Additional Features (${pricing.additional_features.cost}%): $${percentageIncrease}`);
         }
 
-        logger.info("[calculateTotalPrice] Final total price:", totalPrice);
-        logger.info("[calculateTotalPrice] ====== END DEBUG ======");
+        logger.info("[calculateTotalPrice] ====== COMPONENT DATA INSPECTION ======");
+        logger.info("[calculateTotalPrice] Bows data:", JSON.stringify(pricing.bows, null, 2));
+        logger.info("[calculateTotalPrice] Braces data:", JSON.stringify(pricing.braces, null, 2));
+        logger.info("[calculateTotalPrice] Trusses data:", JSON.stringify(pricing.trusses, null, 2));
+        logger.info("[calculateTotalPrice] Addons data:", JSON.stringify(pricing.addons, null, 2));
+        logger.info("[calculateTotalPrice] Anchors data:", JSON.stringify(pricing.anchors_cost, null, 2));
+        logger.info("[calculateTotalPrice] ====== END INSPECTION ======");
+
+        logger.info("[calculateTotalPrice] FINAL BREAKDOWN:", JSON.stringify(breakdown, null, 2));
+        logger.info("[calculateTotalPrice] TOTAL PRICE: $" + totalPrice);
+        logger.info("[calculateTotalPrice] ====== END CALCULATION ======");
 
         return { total: totalPrice, roofPrice: selectedRoofPrice };
     }
@@ -659,6 +709,102 @@ User input: "${userInput}"`;
                 }
             }
         }
+    }
+
+    private addServiceCosts(kitPrice: number, params: IPricingParams): { total: number; breakdown: string[] }
+    {
+        const sqft = params.width * params.length;
+        const lines: string[] = [];
+
+        logger.info("[addServiceCosts] ====== ADDING SERVICE COSTS ======");
+        logger.info("[addServiceCosts] Kit price: $" + kitPrice);
+        logger.info("[addServiceCosts] Square footage: " + sqft + " sq ft");
+
+        let totalServiceCost = 0;
+
+        // ============================================
+        // 1. INSTALLATION LABOR (50% of kit price)
+        // ============================================
+        const laborCost = kitPrice * 0.50;
+        lines.push(`   • Installation Labor (50% of kit): $${this.formatCurrency(laborCost)}`);
+        totalServiceCost += laborCost;
+        logger.info(`[addServiceCosts] ✓ Labor: $${laborCost}`);
+
+        // ============================================
+        // 2. FOUNDATION/CONCRETE SLAB
+        // ============================================
+        // Standard: $8.50 per sq ft for concrete
+        const foundationCostPerSqFt = 8.50;
+        const foundationCost = sqft * foundationCostPerSqFt;
+        lines.push(`   • Concrete Foundation (${sqft} sq ft @ $${foundationCostPerSqFt}/sq ft): $${this.formatCurrency(foundationCost)}`);
+        totalServiceCost += foundationCost;
+        logger.info(`[addServiceCosts] ✓ Foundation: $${foundationCost}`);
+
+        // ============================================
+        // 3. DELIVERY & SITE PREP
+        // ============================================
+        const deliveryCost = 750; // flat rate
+        lines.push(`   • Delivery & Site Preparation: $${this.formatCurrency(deliveryCost)}`);
+        totalServiceCost += deliveryCost;
+        logger.info(`[addServiceCosts] ✓ Delivery: $${deliveryCost}`);
+
+        // ============================================
+        // 4. CONTINGENCY (5% of subtotal)
+        // ============================================
+        const subtotal = kitPrice + totalServiceCost;
+        const contingency = subtotal * 0.05;
+        lines.push(`   • Contingency & Misc (5%): $${this.formatCurrency(contingency)}`);
+        totalServiceCost += contingency;
+        logger.info(`[addServiceCosts] ✓ Contingency: $${contingency}`);
+
+        const finalTotal = kitPrice + totalServiceCost;
+
+        logger.info("[addServiceCosts] ====== SERVICE COST BREAKDOWN ======");
+        logger.info("[addServiceCosts] Kit price: $" + kitPrice);
+        logger.info("[addServiceCosts] Service costs: $" + totalServiceCost);
+        logger.info("[addServiceCosts] FINAL TOTAL: $" + finalTotal);
+        logger.info("[addServiceCosts] ====== END SERVICE COSTS ======");
+
+        return {
+            total: finalTotal,
+            breakdown: lines
+        };
+    }
+
+    private calculateSideClosureCosts(pricing: any, params: IPricingParams): number
+    {
+        let totalSideCost = 0;
+
+        logger.info("[calculateSideClosureCosts] ====== CALCULATING SIDE/END CLOSURES ======");
+
+        // Full length sides (left + right)
+        if (pricing.full_length_side) {
+            const sideData = Array.isArray(pricing.full_length_side)
+                ? pricing.full_length_side[0]
+                : pricing.full_length_side;
+
+            const sideCloseCost = (sideData?.side_close_cost ?? 0);
+            const legHeightCost = (sideData?.leg_height_cost ?? 0);
+            const costPerSide = sideCloseCost + legHeightCost;
+
+            totalSideCost += costPerSide * 2; // left + right
+            logger.info(`[calculateSideClosureCosts] Side panels: ($${sideCloseCost} + $${legHeightCost}) × 2 sides = $${costPerSide * 2}`);
+        }
+
+        // End closures (front + back)
+        if (pricing.end) {
+            const endData = Array.isArray(pricing.end)
+                ? pricing.end[0]
+                : pricing.end;
+
+            const endCost = (endData?.end_close_cost ?? 0);
+            totalSideCost += endCost * 2; // front + back
+            logger.info(`[calculateSideClosureCosts] End panels: $${endCost} × 2 ends = $${endCost * 2}`);
+        }
+
+        logger.info(`[calculateSideClosureCosts] Total side & end closures: $${totalSideCost}`);
+        logger.info("[calculateSideClosureCosts] ====== END CALCULATION ======");
+        return totalSideCost;
     }
 }
 

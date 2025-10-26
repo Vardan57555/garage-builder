@@ -1,5 +1,5 @@
 import { GuidVersions } from "joi";
-import {PricingComponent, UserFriendlyParams} from "@agents/tools/io/IChat";
+import { UserFriendlyParams} from "@agents/tools/io/IChat";
 import {SessionConfig} from "@utils/session/io/ISession";
 
 /**
@@ -46,10 +46,272 @@ export class Constants
         peak_braces: "Peak Braces",
         end_cross_bracing: "End Cross Bracing"
     };
-    public static readonly PRICING_COMPONENTS: PricingComponent[] = [
-        { name: "End Panels", key: "end", extractor: (p) => p.end?.end_close_cost ?? 0 },
-        { name: "Garage Door", key: "garage_door", extractor: (p) => p.garage_door?.cost ?? 0 },
-    ];
+    public static readonly PRICING_COMPONENTS = [
+        {
+            name: "End Panels",
+            key: "end",
+            extractor: (pricing: any) => {
+                if (!pricing.end) return 0;
+                if (Array.isArray(pricing.end)) {
+                    return pricing.end.reduce((sum: number, item: any) =>
+                        sum + (item.end_close_cost ?? 0), 0
+                    );
+                }
+                return pricing.end.end_close_cost ?? 0;
+            }
+        },
+        {
+            name: "Garage Door",
+            key: "garage_door",
+            extractor: (pricing: any) => {
+                if (!pricing.garage_door) return 0;
+                if (Array.isArray(pricing.garage_door)) {
+                    return pricing.garage_door[0]?.cost ?? 0;
+                }
+                return pricing.garage_door.cost ?? 0;
+            }
+        },
+        {
+            name: "Garage Door Frameout",
+            key: "garage_door_frameout",
+            extractor: (pricing: any) => {
+                if (!pricing.garage_door_frameout) return 0;
+                if (Array.isArray(pricing.garage_door_frameout)) {
+                    return pricing.garage_door_frameout.reduce((sum: number, item: any) =>
+                        sum + (item.dutch_cost ?? 0), 0
+                    );
+                }
+                return pricing.garage_door_frameout.dutch_cost ?? 0;
+            }
+        },
+        {
+            name: "Walkin Door Frameout",
+            key: "walkin_door_frameout",
+            extractor: (pricing: any) => {
+                if (!pricing.walkin_door_frameout) return 0;
+                if (Array.isArray(pricing.walkin_door_frameout)) {
+                    return pricing.walkin_door_frameout.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.walkin_door_frameout.cost ?? 0;
+            }
+        },
+        {
+            name: "Window Frameout",
+            key: "window_frameout",
+            extractor: (pricing: any) => {
+                if (!pricing.window_frameout) return 0;
+                if (Array.isArray(pricing.window_frameout)) {
+                    return pricing.window_frameout.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.window_frameout.cost ?? 0;
+            }
+        },
+        {
+            name: "Insulation",
+            key: "insulation",
+            extractor: (pricing: any) => {
+                if (!pricing.insulation) return 0;
+                if (Array.isArray(pricing.insulation)) {
+                    return pricing.insulation[0]?.cost ?? 0;
+                }
+                return pricing.insulation.cost ?? 0;
+            }
+        },
+        {
+            name: "Certificate",
+            key: "certificate",
+            extractor: (pricing: any) => {
+                if (!pricing.certificate) return 0;
+                if (Array.isArray(pricing.certificate)) {
+                    return pricing.certificate[0]?.cost ?? 0;
+                }
+                return pricing.certificate.cost ?? 0;
+            }
+        },
+        {
+            name: "Full Length Panel",
+            key: "full_length_panel",
+            extractor: (pricing: any) => {
+                if (!pricing.full_length_panel) return 0;
+                if (Array.isArray(pricing.full_length_panel)) {
+                    return pricing.full_length_panel.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.full_length_panel.cost ?? 0;
+            }
+        },
+        {
+            name: "End Cross Bracing",
+            key: "end_cross_bracing",
+            extractor: (pricing: any) => {
+                if (!pricing.end_cross_bracing) return 0;
+                if (Array.isArray(pricing.end_cross_bracing)) {
+                    return pricing.end_cross_bracing.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.end_cross_bracing.cost ?? 0;
+            }
+        },
+        {
+            name: "Side Cross Bracing",
+            key: "side_cross_bracing",
+            extractor: (pricing: any) => {
+                if (!pricing.side_cross_bracing) return 0;
+                if (Array.isArray(pricing.side_cross_bracing)) {
+                    return pricing.side_cross_bracing.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.side_cross_bracing.cost ?? 0;
+            }
+        },
+        {
+            name: "Side Panels (Full Length)",
+            key: "full_length_side",
+            extractor: (pricing: any) => {
+                if (!pricing.full_length_side) return 0;
+                if (Array.isArray(pricing.full_length_side)) {
+                    return pricing.full_length_side.reduce((sum: number, item: any) =>
+                            sum + (
+                                (item.leg_height_cost ?? 0) +
+                                (item.side_close_cost ?? 0)
+                            ), 0
+                    );
+                }
+                return (pricing.full_length_side.leg_height_cost ?? 0) +
+                    (pricing.full_length_side.side_close_cost ?? 0);
+            }
+        },
+        {
+            name: "Roof Pitch",
+            key: "roof_pitch",
+            extractor: (pricing: any) => {
+                if (!pricing.roof_pitch) return 0;
+                if (Array.isArray(pricing.roof_pitch)) {
+                    return pricing.roof_pitch.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.roof_pitch.cost ?? 0;
+            }
+        },
+        {
+            name: "Connection Fees",
+            key: "connection_fees",
+            extractor: (pricing: any) => {
+                if (!pricing.connection_fees) return 0;
+                if (Array.isArray(pricing.connection_fees)) {
+                    return pricing.connection_fees.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? 0), 0
+                    );
+                }
+                return pricing.connection_fees.cost ?? 0;
+            }
+        },
+        {
+            name: "Bows",
+            key: "bows",
+            extractor: (pricing: any) => {
+                if (!pricing.bows) return 0;
+                if (Array.isArray(pricing.bows)) {
+                    return pricing.bows.length > 0
+                        ? (pricing.bows[0].double_leg ?? pricing.bows[0].cost ?? 0)
+                        : 0;
+                }
+                return pricing.bows.double_leg ?? pricing.bows.cost ?? 0;
+            }
+        },
+        {
+            name: "Braces",
+            key: "braces",
+            extractor: (pricing: any) => {
+                if (!pricing.braces) return 0;
+                if (Array.isArray(pricing.braces)) {
+                    return pricing.braces.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? item.bracing_cost ?? item.price ?? 0), 0
+                    );
+                }
+                return pricing.braces.cost ?? pricing.braces.bracing_cost ?? pricing.braces.price ?? 0;
+            }
+        },
+        {
+            name: "Trusses",
+            key: "trusses",
+            extractor: (pricing: any) => {
+                if (!pricing.trusses) return 0;
+                if (Array.isArray(pricing.trusses)) {
+                    return pricing.trusses.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? item.truss_cost ?? item.truss ?? item.price ?? 0), 0
+                    );
+                }
+                return pricing.trusses.cost ?? pricing.trusses.truss_cost ?? pricing.trusses.truss ?? pricing.trusses.price ?? 0;
+            }
+        },
+        {
+            name: "Addons",
+            key: "addons",
+            extractor: (pricing: any) => {
+                if (!pricing.addons) return 0;
+                if (Array.isArray(pricing.addons)) {
+                    return pricing.addons.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? item.addon_cost ?? item.price ?? 0), 0
+                    );
+                }
+                return pricing.addons.cost ?? pricing.addons.addon_cost ?? pricing.addons.price ?? 0;
+            }
+        },
+        {
+            name: "Addons Width",
+            key: "addons_width",
+            extractor: (pricing: any) => {
+                if (!pricing.addons_width) return 0;
+                if (Array.isArray(pricing.addons_width)) {
+                    return pricing.addons_width.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? item.addon_cost ?? item.price ?? 0), 0
+                    );
+                }
+                return pricing.addons_width.cost ?? pricing.addons_width.addon_cost ?? pricing.addons_width.price ?? 0;
+            }
+        },
+        {
+            name: "Anchors",
+            key: "anchors_cost",
+            extractor: (pricing: any) => {
+                if (!pricing.anchors_cost) return 0;
+                if (Array.isArray(pricing.anchors_cost)) {
+                    return pricing.anchors_cost.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? item.anchor_cost ?? item.price ?? 0), 0
+                    );
+                }
+                return pricing.anchors_cost.cost ?? pricing.anchors_cost.anchor_cost ?? pricing.anchors_cost.price ?? 0;
+            }
+        },
+        {
+            name: "Additional Features",
+            key: "additional_features",
+            extractor: (pricing: any) => {
+                if (!pricing.additional_features) return 0;
+
+                if (pricing.additional_features.cost_type === '%') {
+                    return 0; // Don't double-count; this is handled separately
+                }
+
+                if (Array.isArray(pricing.additional_features)) {
+                    return pricing.additional_features.reduce((sum: number, item: any) =>
+                        sum + (item.cost ?? item.price ?? 0), 0
+                    );
+                }
+                return pricing.additional_features.cost ?? pricing.additional_features.price ?? 0;
+            }
+        }
+    ]
+
     public static readonly ROOF_NAMES: Record<number, string> = {
         1: "Vertical",
         2: "Regular",

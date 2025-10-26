@@ -40,7 +40,7 @@ export class PriceServiceImpl implements PriceService
         'addons_width','roof_pitch','additional_features','connection_fees','trusses','full_length_side'
     ];
 
-    private readonly ARRAY_FIELDS: Set<string> = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
+    // private readonly ARRAY_FIELDS: Set<string> = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
 
     private static readonly PROCEDURE_MAP: Record<string, ProcedureConfig> =
         {
@@ -48,13 +48,13 @@ export class PriceServiceImpl implements PriceService
                 [map_id, height, width],
                 'getEachEndClose(?, ?, ?)'
             ],
-                gable_end: ({ map_id, width, side_end_name }) => {
-                    const safeSideEndName = this.safeStringParam(side_end_name);
-                    return [
-                        [map_id, width, safeSideEndName],
-                        'getGableEnd(?, ?, ?)'
-                    ];
-                },
+            gable_end: ({ map_id, width, side_end_name }) => {
+                const safeSideEndName = this.safeStringParam(side_end_name);
+                return [
+                    [map_id, width, safeSideEndName],
+                    'getGableEnd(?, ?, ?)'
+                ];
+            },
             truss_name: ({ map_id }) => [
                 [map_id],
                 'getTrussName(?)'
@@ -84,9 +84,9 @@ export class PriceServiceImpl implements PriceService
                 'getEndCrossBracing(?, ?, ?)'
             ],
 
-            insulation: ({map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side }) => [
-                [map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side],
-                'getInsulation(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            insulation: ({map_id, width, height, length, manufacturer }) => [
+                [map_id, width, height, length, manufacturer[0]?.manufacturer_id ?? 0],
+                'getInsulation(?, ?, ?, ?, ?)'
             ],
 
             certificate: ({ map_id, width, height, length, structureString }) => [
@@ -95,7 +95,7 @@ export class PriceServiceImpl implements PriceService
             ],
 
             full_length_panel: ({ map_id, length, structureString, side_end_name }) => [
-                [map_id, length, structureString, side_end_name],
+                [map_id, length, structureString, this.safeStringParam(side_end_name)],
                 'getExtraPanel(?, ?, ?, ?)'
             ],
 
@@ -104,15 +104,15 @@ export class PriceServiceImpl implements PriceService
                 'getCrossBracing(?, ?, ?, ?)'
             ],
 
-                delux_two_tone: ({ map_id, width, length, structureString, side_end_name }) => {
-                    const safeSideEndName = this.safeStringParam(side_end_name);
-                    const safeStructureString = this.safeStringParam(structureString);
+            delux_two_tone: ({ map_id, width, length, structureString, side_end_name }) => {
+                const safeSideEndName = this.safeStringParam(side_end_name);
+                const safeStructureString = this.safeStringParam(structureString);
 
-                    return [
-                        [map_id, width, length, safeStructureString, safeSideEndName],
-                        'getDeluxTwoTone(?, ?, ?, ?, ?)'
-                    ];
-                },
+                return [
+                    [map_id, width, length, safeStructureString, safeSideEndName],
+                    'getDeluxTwoTone(?, ?, ?, ?, ?)'
+                ];
+            },
 
             braces: ({ map_id, length, structureString }) => [
                 [map_id, length, structureString],
@@ -123,11 +123,14 @@ export class PriceServiceImpl implements PriceService
                 [map_id],
                 'getAdditionalFeatures(?)'
             ],
-            bows: ({ map_id, width, height }) => [
-                [map_id, width, height],
-                'getBow(?, ?, ?)'
+            // bows: ({ map_id, width, height }) => [
+            //     [map_id, width, height],
+            //     'getBow(?, ?, ?)'
+            // ],
+            bows: ({ map_id }) => [
+                [map_id],
+                'getBowMapId(?)'
             ],
-
             addons: ({ map_id, length, structureString }) => [
                 [map_id, length, structureString],
                 'getAddon(?, ?, ?)'
@@ -143,9 +146,9 @@ export class PriceServiceImpl implements PriceService
                 'getRoofPitch(?, ?, ?, ?)'
             ],
 
-            connection_fees: ({ map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string }) => [
-                [map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string],
-                'getConnectionFees(?, ?, ?, ?, ?, ?, ?)'
+            connection_fees: ({ map_id, width, height, length, structureString }) => [
+                [map_id, width, height, length, structureString],
+                'getConnectionFees(?, ?, ?, ?, ?)'
             ],
 
             trusses: ({ map_id, width, height, length, structureString }) => [
@@ -157,20 +160,36 @@ export class PriceServiceImpl implements PriceService
                 [map_id, height, length, structureString],
                 'getSidePrice(?, ?, ?, ?)'
             ],
+
             trusses_slope: ({ map_id, width, single_slope_height, length, structureString }) => [
                 [map_id, width, single_slope_height, length, structureString],
                 'getTrussUpgrade(?, ?, ?, ?, ?)'
             ],
+
             getMapIdByStateName: (({ state_name }: any) => [
                 [state_name],
                 'getMapIdByStateName(?)'
             ]) as ProcedureConfig,
+
             window_frameout: ({ map_id }) => [
                 [map_id],
                 'getWindow(?)'
             ],
         };
 
+
+    private readonly ARRAY_FIELDS: Set<string> = new Set([
+        'addons',
+        'addons_width',
+        'anchors_cost',
+        'bows',           // ← ADD THIS
+        'braces',         // ← ADD THIS
+        'trusses',        // ← ADD THIS
+        'end',            // ← ADD THIS (if it should be an array)
+        'garage_door_frameout',  // ← ADD THIS
+        'walkin_door_frameout',  // ← ADD THIS
+        'window_frameout'        // ← ADD THIS
+    ]);
 
     /**
      * Private constructor to enforce a Singleton pattern.
@@ -236,27 +255,15 @@ export class PriceServiceImpl implements PriceService
                 };
             }
 
-            // ✅ FIX: Call getBasicPrice with CORRECT parameters
-            // Parameters: map_id, structure (string like '12x20'), show_price_with_zero
-            const structureString = `'${finalWidth}x${finalLength}'`;  // Format: '20x20'
+            const structureString = `'${finalWidth}x${finalLength}'`;
 
             logger.info("[fetchBuildingPricingWithUtility] ====== PRICING DATA DEBUG ======");
-            logger.info("[fetchBuildingPricingWithUtility] Calling getBasicPrice with:");
-            logger.info("[fetchBuildingPricingWithUtility] - map_id:", params.map_id);
-            logger.info("[fetchBuildingPricingWithUtility] - structure:", structureString);
-            logger.info("[fetchBuildingPricingWithUtility] - show_price_with_zero: No");
 
             const basePrices: any[] = await ProcedureExecutor.getProcedureData<any>(
-                [params.map_id!, structureString, 'No'],  // ← CORRECT PARAMETERS
+                [params.map_id!, structureString, 'No'],
                 'getBasicPrice(?, ?, ?)',
                 'base_prices'
             );
-
-            logger.info("[fetchBuildingPricingWithUtility] Base prices returned:", basePrices.length);
-            if (basePrices.length > 0) {
-                logger.info("[fetchBuildingPricingWithUtility] Price record:", JSON.stringify(basePrices[0], null, 2));
-            }
-            logger.info("[fetchBuildingPricingWithUtility] ====== END DEBUG ======");
 
             if (!basePrices || basePrices.length === 0) {
                 logger.warn(`[fetchBuildingPricingWithUtility] No pricing found for structure ${structureString}`);
@@ -266,18 +273,20 @@ export class PriceServiceImpl implements PriceService
                 };
             }
 
-            const matchingPrice = basePrices[0];  // getBasicPrice already filtered by structure
+            const matchingPrice = basePrices[0];
 
             const pricing: Record<string, any> = {
                 building_to_maxlength: finalLength,
                 manufacturer,
                 building_structure: buildingStructureFull,
-                // ✅ Store the pricing data with correct fields
                 base_price_regular: matchingPrice.regular_cost ?? 0,
                 base_price_box: matchingPrice.box_style_cost ?? 0,
                 base_price_vertical: matchingPrice.vertical_roof_cost ?? 0,
                 gauge: matchingPrice.gauge ?? (params.gauge ?? 14)
             };
+
+            // ✅ ADD THIS - APPLY MULTIPLIERS BEFORE FETCHING COMPONENTS
+            this.applyPricingMultipliers(pricing, params);
 
             const componentKeys: string[] = this.getComponentKeys(params.single_slope_height);
 
@@ -303,15 +312,8 @@ export class PriceServiceImpl implements PriceService
 
             this.mergeComponents(pricing, components);
 
-            if (utilityPricing)
-            {
-                Object.assign(pricing, utilityPricing);
-            }
-
-            if (centralPricing)
-            {
-                Object.assign(pricing, centralPricing);
-            }
+            if (utilityPricing) Object.assign(pricing, utilityPricing);
+            if (centralPricing) Object.assign(pricing, centralPricing);
 
             this.applyAddons(pricing);
             this.adjustConnectionFees(pricing, params.is_barn);
@@ -324,7 +326,6 @@ export class PriceServiceImpl implements PriceService
             throw new ServerError(ServerError.INTERNAL, `Failed to calculate pricing: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
-
     /**
      * Retrieves and calculates all pricing data for a given building configuration.
      * @param map_id - The map ID used for procedure lookups.
@@ -472,11 +473,13 @@ export class PriceServiceImpl implements PriceService
     private async getBaseStructure({ map_id, roof_id }: IBaseStructureParams)
     {
         const safeMapId: number = map_id ?? 0;
-        const safeRoofId: number  = roof_id ?? 0;
+        const safeRoofId: number = roof_id ?? 0;
 
+        // CHANGE FROM: 'getBuildingStructure'
+        // CHANGE TO: 'getBuildingStructure(?, ?, ?, ?, ?)'
         const structures: IBuildingStructure[] = await ProcedureExecutor.getProcedureData<IBuildingStructure>(
             [safeMapId, safeRoofId, null, null, null],
-            'getBuildingStructure',
+            'getBuildingStructure(?, ?, ?, ?, ?)',  // ← FIX: ADD PLACEHOLDERS
             'building_structure'
         );
 
@@ -508,15 +511,17 @@ export class PriceServiceImpl implements PriceService
 
     private async getFullStructure({ map_id, roof_id, width, height, length }: IFullStructureParams)
     {
-        const safeMapId: number  = map_id ?? 0;
-        const safeRoofId: number  = roof_id ?? 0;
-        const safeWidth: number  = width ?? 0;
-        const safeHeight: number  = height ?? 0;
-        const safeLength: number  = length ?? 0;
+        const safeMapId: number = map_id ?? 0;
+        const safeRoofId: number = roof_id ?? 0;
+        const safeWidth: number = width ?? 0;
+        const safeHeight: number = height ?? 0;
+        const safeLength: number = length ?? 0;
 
+        // CHANGE FROM: 'getBuildingStructure'
+        // CHANGE TO: 'getBuildingStructure(?, ?, ?, ?, ?)'
         return await ProcedureExecutor.getProcedureData<IBuildingStructure>(
             [safeMapId, safeRoofId, safeWidth, safeHeight, safeLength],
-            'getBuildingStructure',
+            'getBuildingStructure(?, ?, ?, ?, ?)',  // ← FIX: ADD PLACEHOLDERS
             'building_structure'
         );
     }
@@ -636,28 +641,68 @@ export class PriceServiceImpl implements PriceService
 
     private async fetchComponentsPricing(params: FetchComponentsParams & { componentKeys: string[] })
     {
+        const { map_id, roof_id, width, height, length, buildingStructureFull, manufacturer, single_slope_height, componentKeys } = params;
+
+        const { end_length, distance_on_center, side_end_name } = buildingStructureFull[0];
+        const lengthArray: number[] = await this.getSideHeightCostsLength(length, end_length, distance_on_center, map_id);
+        const structureString = `'${lengthArray.map(l => `${width}x${l}`).join("','")}'`;
+
+        logger.info("[fetchComponentsPricing] Generated structure string:", structureString);
+        logger.info("[fetchComponentsPricing] Length array:", lengthArray);
+
         const components: Awaited<[string, unknown[]]>[] = await Promise.all(
-            params.componentKeys.map(async key =>
+            componentKeys.map(async key =>
             {
                 const procedureFn = PriceServiceImpl.PROCEDURE_MAP[key];
 
                 if (!procedureFn)
                 {
-                    throw new Error(`Unknown component key: ${key}`)
+                    logger.warn(`[fetchComponentsPricing] Unknown component key: ${key}`);
+                    return [key, []];
                 }
 
-                const [args, query] = procedureFn({
-                    ...params,
-                    structureString: `'${params.buildingStructureFull.map(s => `${params.width}x${s.end_length}`).join("','")}'`
-                });
+                try
+                {
+                    // FIX: Pass ONLY needed parameters
+                    const [args, query] = procedureFn({
+                        map_id,
+                        roof_id,
+                        width,
+                        height,
+                        length,
+                        manufacturer,
+                        structureString,
+                        lengthArray,
+                        single_slope_height,
+                        side_end_name: side_end_name || null,
+                        buildingStructureFull: [],
+                        componentKeys: []
+                    });
 
-                const data: unknown[] = await ProcedureExecutor.getProcedureData(args, query, key);
-                return [key, data];
+                    logger.info(`[fetchComponentsPricing] Fetching ${key}`);
+                    logger.info(`[fetchComponentsPricing] Query: ${query}`);
+                    logger.info(`[fetchComponentsPricing] Args:`, args);
+
+                    const data: unknown[] = await ProcedureExecutor.getProcedureData(args, query, key);
+
+                    logger.info(
+                        `[fetchComponentsPricing] Component ${key} returned ${
+                            Array.isArray(data) ? data.length : 'non-array'
+                        } items`
+                    );
+
+                    return [key, data];
+                }
+                catch (error)
+                {
+                    logger.error(`[fetchComponentsPricing] Error fetching ${key}:`, error);
+                    return [key, []];
+                }
             })
         );
+
         return Object.fromEntries(components);
     }
-
     /**
      * Applies additional pricing options (addons) to the given pricing object.
      * @param pricing - The pricing object to which addon values will be applied.
@@ -665,11 +710,54 @@ export class PriceServiceImpl implements PriceService
 
     private applyAddons(pricing: Record<string, any>)
     {
+        logger.info("[applyAddons] ====== BEFORE ADDON PROCESSING ======");
+        logger.info("[applyAddons] Current pricing keys:", Object.keys(pricing));
+        logger.info("[applyAddons] Current bows:", pricing.bows);
+        logger.info("[applyAddons] Current addons:", pricing.addons);
+        logger.info("[applyAddons] ====== END BEFORE ======");
+
         const { checkbox, checkboxQuantity, checkboxQuantityDropdown } = this.processAddons(pricing);
+
         pricing.checkbox = checkbox;
         pricing.checkbox_quantity = checkboxQuantity;
         pricing.checkbox_quantity_dropdown = checkboxQuantityDropdown;
+
+        logger.info("[applyAddons] ====== AFTER ADDON PROCESSING ======");
+        logger.info("[applyAddons] Current bows after:", pricing.bows);
+        logger.info("[applyAddons] Current addons after:", pricing.addons);
+        logger.info("[applyAddons] ====== END AFTER ======");
     }
+
+    // private validatePricingComponents(pricing: Record<string, any>): void
+    // {
+    //     logger.info("[validatePricingComponents] ====== VALIDATION CHECK ======");
+    //     logger.info("[validatePricingComponents] Checking all expected components exist...");
+    //
+    //     const requiredComponentKeys = [
+    //         'end', 'garage_door', 'garage_door_frameout', 'walkin_door_frameout',
+    //         'window_frameout', 'insulation', 'certificate', 'full_length_panel',
+    //         'end_cross_bracing', 'side_cross_bracing', 'roof_pitch', 'connection_fees',
+    //         'full_length_side', 'anchors_cost', 'bows', 'addons', 'braces', 'trusses'
+    //     ];
+    //
+    //     for (const key of requiredComponentKeys)
+    //     {
+    //         if (pricing[key])
+    //         {
+    //             const value = pricing[key];
+    //             const isArray = Array.isArray(value);
+    //             const hasContent = isArray ? value.length > 0 : !!value;
+    //             const summary = isArray ? `${value.length} items` : "object";
+    //             logger.info(`[validatePricingComponents] ✓ ${key}: ${summary}`);
+    //         }
+    //         else
+    //         {
+    //             logger.warn(`[validatePricingComponents] ✗ MISSING: ${key}`);
+    //         }
+    //     }
+    //
+    //     logger.info("[validatePricingComponents] ====== END VALIDATION ======");
+    // }
 
     /**
      * @param pricing - The pricing object containing connection fees to adjust.
@@ -698,6 +786,7 @@ export class PriceServiceImpl implements PriceService
         const { central_map_id, roof_id, central_height, central_length, central_width, central_utility_length, map_id } = params;
         try
         {
+            // This one is CORRECT - has placeholders
             const centralStructure = await ProcedureExecutor.getProcedureData<any>(
                 [central_map_id ?? 0, roof_id ?? 0, central_width, central_height, central_length],
                 'getBuildingStructure(?, ?, ?, ?, ?)',
@@ -714,9 +803,22 @@ export class PriceServiceImpl implements PriceService
 
             if (central_height)
             {
-                const centralLengthArrayFull: number[] = await this.getSideHeightCostsLength(central_length, end_length, distance_on_center, map_id);
+                const centralLengthArrayFull: number[] = await this.getSideHeightCostsLength(
+                    central_length,
+                    end_length,
+                    distance_on_center,
+                    central_map_id ?? map_id
+                );
                 const centralNewLength: number = central_utility_length ? central_length - central_utility_length : central_length;
-                const centralLengthArray: number[] = await this.getSideHeightCostsLength(centralNewLength, end_length, distance_on_center, map_id);
+                const centralLengthArray: number[] = await this.getSideHeightCostsLength(
+                    centralNewLength,
+                    end_length,
+                    distance_on_center,
+                    central_map_id ?? map_id
+                );
+
+                const centralLengthArrayFullString = `'${centralLengthArrayFull.join("','")}'`;
+                const centralLengthArrayString = `'${centralLengthArray.join("','")}'`;
 
                 const [
                     centralSideFull,
@@ -725,17 +827,17 @@ export class PriceServiceImpl implements PriceService
                     centralEnd
                 ] = await Promise.all([
                     ProcedureExecutor.getProcedureData<ISideHeight>(
-                        [central_map_id, central_height, central_length, centralLengthArrayFull],
+                        [central_map_id, central_height, central_length, centralLengthArrayFullString],
                         'getSidePrice(?, ?, ?, ?)',
                         'central_side_full_length'
                     ),
                     ProcedureExecutor.getProcedureData<ISideHeight>(
-                        [central_map_id, central_height, centralNewLength, centralLengthArray],
+                        [central_map_id, central_height, centralNewLength, centralLengthArrayString],
                         'getSidePrice(?, ?, ?, ?)',
                         'central_side'
                     ),
                     ProcedureExecutor.getProcedureData<IBasePrice>(
-                        [central_map_id, central_width, central_height, central_length, centralLengthArrayFull],
+                        [central_map_id, central_width, central_height, central_length, centralLengthArrayFullString],
                         'getTrussUpgrade(?, ?, ?, ?, ?)',
                         'central_trusses'
                     ),
@@ -760,11 +862,13 @@ export class PriceServiceImpl implements PriceService
                     central_utility_length,
                     end_length,
                     distance_on_center,
-                    map_id
+                    central_map_id ?? map_id
                 );
 
+                const centralUtilityArrayString = `'${centralUtilityArray.join("','")}'`;
+
                 const centralUtilitySide: ISideHeight[] = await ProcedureExecutor.getProcedureData<ISideHeight>(
-                    [central_map_id, central_height, central_utility_length, centralUtilityArray],
+                    [central_map_id, central_height, central_utility_length, centralUtilityArrayString],
                     'getSidePrice(?, ?, ?, ?)',
                     'central_utility_side'
                 );
@@ -956,17 +1060,110 @@ export class PriceServiceImpl implements PriceService
 
     private mergeComponents(pricing: Record<string, any>, components: Record<string, unknown | unknown[]>): void
     {
+        logger.info("[mergeComponents] Starting merge with components:", Object.keys(components));
+
         for (const [key, value] of Object.entries(components))
         {
-            if (Array.isArray(value) && !this.ARRAY_FIELDS.has(key))
+            if (Array.isArray(value))
             {
-                pricing[key] = value[0] ?? null;
+                // Keep arrays as-is for ARRAY_FIELDS, otherwise take first element
+                if (this.ARRAY_FIELDS.has(key))
+                {
+                    // Keep the entire array
+                    pricing[key] = value.length > 0 ? value : [];
+                    logger.info(`[mergeComponents] Merged ${key}: array with ${value.length} items`);
+                }
+                else
+                {
+                    // Take only the first element
+                    pricing[key] = value.length > 0 ? value[0] : null;
+                    logger.info(`[mergeComponents] Merged ${key}: ${value.length > 0 ? 'first element' : 'null'}`);
+                }
             }
             else
             {
+                // Non-array value
                 pricing[key] = value;
+                logger.info(`[mergeComponents] Merged ${key}: non-array value`);
             }
         }
+
+        logger.info("[mergeComponents] Merge complete. Final pricing keys:", Object.keys(pricing));
+    }
+
+    private applyPricingMultipliers(pricing: Record<string, any>, params: IPricingParams): void
+    {
+        logger.info("[applyPricingMultipliers] ====== APPLYING MULTIPLIERS ======");
+
+        const sqft = params.width * params.length;
+
+        // ========================================
+        // 1. GAUGE MULTIPLIER (12ga = +15%, 14ga = baseline)
+        // ========================================
+        const gaugeMultiplier = params.gauge === 12 ? 1.15 : params.gauge === 16 ? 0.95 : 1.0;
+        logger.info(`[applyPricingMultipliers] Gauge: ${params.gauge}ga × ${gaugeMultiplier}`);
+
+        // ========================================
+        // 2. BUILDING TYPE MULTIPLIER
+        // ========================================
+        const buildingTypeMultipliers: Record<string, number> = {
+            'garage': 1.0,      // baseline
+            'carport': 0.85,    // lighter duty
+            'barn': 1.2,        // heavy duty, more features
+            'commercial': 1.25, // commercial grade
+            'rv cover': 0.8,    // minimal
+            'rv garage': 1.1,   // specialized
+        };
+        const buildingMultiplier = buildingTypeMultipliers[params.building_type?.toLowerCase() || 'garage'] || 1.0;
+        logger.info(`[applyPricingMultipliers] Building type "${params.building_type}": × ${buildingMultiplier}`);
+
+        // ========================================
+        // 3. ROOF TYPE MULTIPLIER
+        // ========================================
+        const roofTypeMultipliers: Record<number, number> = {
+            1: 1.0,  // vertical = baseline
+            2: 0.95, // regular = slightly cheaper
+            3: 0.90, // box/economy = cheapest
+        };
+        const roofMultiplier = roofTypeMultipliers[params.roof_id] || 1.0;
+        logger.info(`[applyPricingMultipliers] Roof ID ${params.roof_id}: × ${roofMultiplier}`);
+
+        // ========================================
+        // 4. HEIGHT PREMIUM (per foot over 10ft baseline)
+        // ========================================
+        const baseHeight = 10;
+        const heightPremium = params.height > baseHeight
+            ? (params.height - baseHeight) * (sqft * 0.50) // $0.50 per sq ft per foot of height
+            : 0;
+        logger.info(`[applyPricingMultipliers] Height premium: $${heightPremium}`);
+
+        // ========================================
+        // APPLY TO BASE PRICE
+        // ========================================
+        const combinedMultiplier = gaugeMultiplier * buildingMultiplier * roofMultiplier;
+
+        pricing.base_price_regular = (pricing.base_price_regular ?? 0) * combinedMultiplier;
+        pricing.base_price_box = (pricing.base_price_box ?? 0) * combinedMultiplier;
+        pricing.base_price_vertical = (pricing.base_price_vertical ?? 0) * combinedMultiplier;
+
+        logger.info(`[applyPricingMultipliers] Combined multiplier: ${combinedMultiplier}`);
+        logger.info(`[applyPricingMultipliers] Base prices after multiplier:`);
+        logger.info(`  - Regular: $${pricing.base_price_regular}`);
+        logger.info(`  - Box: $${pricing.base_price_box}`);
+        logger.info(`  - Vertical: $${pricing.base_price_vertical}`);
+
+        // ========================================
+        // ADD HEIGHT PREMIUM TO BASE PRICES
+        // ========================================
+        if (heightPremium > 0) {
+            pricing.height_premium = heightPremium;
+            pricing.base_price_regular += heightPremium;
+            pricing.base_price_box += heightPremium;
+            pricing.base_price_vertical += heightPremium;
+            logger.info(`[applyPricingMultipliers] Added height premium: $${heightPremium}`);
+        }
+
+        logger.info("[applyPricingMultipliers] ====== END MULTIPLIERS ======");
     }
 }
 
