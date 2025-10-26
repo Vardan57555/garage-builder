@@ -112,11 +112,11 @@ export class PriceParamsExtractorTool extends BaseTool
             });
         }
 
-        if (!params.roof_type)
-        {
-            params.roof_type = "regular";
-            logger.info("[validateAndInferMissingParams] Defaulted roof_type to regular");
-        }
+        // if (!params.roof_type)
+        // {
+        //     params.roof_type = "regular";
+        //     logger.info("[validateAndInferMissingParams] Defaulted roof_type to regular");
+        // }
 
         if (!params.state_name)
         {
@@ -588,9 +588,11 @@ RULES:
 
 3. For missing optional fields: Use null, don't ask for them
 
-4. Default values for common fields:
-   - roof_type: "regular" if not specified
-   - height: infer from garage type or default 10 ft
+4. CRITICAL - Roof type handling:
+   - ONLY extract roof_type if user EXPLICITLY mentions it
+   - Do NOT infer or default roof_type to "regular"
+   - If user does NOT mention roof style, return null
+   - Valid values if specified: "regular", "a-frame", "vertical", "box"
 
 5. Extract state if mentioned in input
 
@@ -601,7 +603,7 @@ OUTPUT FORMAT - Return ONLY valid JSON:
   "length": number or null,
   "height": number or null,
   "state_name": "state name or null",
-  "roof_type": "regular|a-frame|vertical or null",
+  "roof_type": null if not mentioned, or "regular"|"a-frame"|"vertical"|"box" if specified,
   "manufacturer_name": "string or null",
   "utility_length": number or null,
   "building_type": "string or null",
@@ -612,8 +614,8 @@ OUTPUT FORMAT - Return ONLY valid JSON:
 ABSOLUTE REQUIREMENTS:
 - Return ONLY JSON, nothing else
 - NEVER ask questions
-- ALWAYS infer missing standard parameters
-- Use null only for truly optional/unknown data
+- ALWAYS infer missing dimensions (width, length, height)
+- Use null for roof_type UNLESS user explicitly specifies it
 - Ensure width, length, height are ALWAYS numbers
 
 User input: "${userInput}"`;

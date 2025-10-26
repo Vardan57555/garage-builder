@@ -496,15 +496,43 @@ or
         const paramUpdate = await this.detectParameterUpdate(input);
         if (paramUpdate)
         {
+            // ✅ Validate state if user is updating state_name
+            if (paramUpdate.field === "state_name")
+            {
+                const validationResult = await this.validateState(paramUpdate.value);
+                if (!validationResult.isValid)
+                {
+                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${this.getValidStatesMessage()}`;
+                    await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                    return errorMessage;
+                }
+                paramUpdate.value = validationResult.normalizedName;
+            }
+
+            // ✅ Validate roof type if user is updating roof_type
+            if (paramUpdate.field === "roof_type")
+            {
+                const validationResult = await this.validateRoofType(paramUpdate.value);
+                if (!validationResult.isValid)
+                {
+                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${this.getValidRoofTypesMessage()}`;
+                    await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                    return errorMessage;
+                }
+                paramUpdate.value = validationResult.normalizedType;
+            }
+
             const updateResult = this.handleParameterUpdate(session, paramUpdate);
 
             if (updateResult.success)
             {
                 const missingFields = this.getMissingFields(session.state.userFriendlyParams);
 
+                // ✅ SIMPLIFIED: Check only missing fields
                 if (missingFields.length === 0)
                 {
-                    const confirmMessage = `Got it! ${updateResult.updatedField}: ${(session.state.userFriendlyParams as any)[updateResult.updatedField!]}ft.\n\n✓ All parameters set! Calculating price...`;
+                    // All required fields complete - calculate price
+                    const confirmMessage = `Got it! ${updateResult.updatedField}: ${(session.state.userFriendlyParams as any)[updateResult.updatedField!]}.\n\n✓ All parameters set! Calculating price...`;
                     await session.memory.chatHistory.addAIChatMessage(confirmMessage);
 
                     const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
@@ -519,6 +547,7 @@ or
                 }
                 else
                 {
+                    // Still missing fields - prompt for next one
                     const nextField: keyof UserFriendlyParams = missingFields[0];
                     session.state.currentField = nextField;
 
@@ -537,12 +566,42 @@ or
             }
         }
 
+        // ============================================
+        // NORMAL EXTRACTION FLOW
+        // ============================================
+
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
         const rawParams: string = await extractor._call(await this.getConversationContext(session));
         logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
 
         const extractedParams: Partial<UserFriendlyParams> = extractor.safeExtractUserFriendlyParams(rawParams);
         logger.info(`[LeadAgent] Session ${sessionId} - Safe extracted user-friendly params:`, extractedParams);
+
+        // ✅ Validate state during initial extraction
+        if (extractedParams.state_name)
+        {
+            const validationResult = await this.validateState(extractedParams.state_name);
+            if (!validationResult.isValid)
+            {
+                const errorMessage = `❌ "${extractedParams.state_name}" is not a valid state.\n\n${this.getValidStatesMessage()}\n\nPlease specify your state.`;
+                await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                return errorMessage;
+            }
+            extractedParams.state_name = validationResult.normalizedName;
+        }
+
+        // ✅ Validate roof type during initial extraction
+        if (extractedParams.roof_type)
+        {
+            const validationResult = await this.validateRoofType(extractedParams.roof_type);
+            if (!validationResult.isValid)
+            {
+                const errorMessage = `❌ "${extractedParams.roof_type}" is not a valid roof type.\n\n${this.getValidRoofTypesMessage()}\n\nPlease specify your roof type.`;
+                await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                return errorMessage;
+            }
+            extractedParams.roof_type = validationResult.normalizedType;
+        }
 
         const filteredExtractedParams: Partial<UserFriendlyParams> = {};
         for (const [key, value] of Object.entries(extractedParams))
@@ -560,6 +619,8 @@ or
         };
 
         const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(session.state.userFriendlyParams);
+
+        // ✅ SIMPLIFIED: Check only missing fields (roof_type will be included if missing)
         if (missingFields.length > 0)
         {
             const nextField: keyof UserFriendlyParams = missingFields[0];
@@ -570,10 +631,12 @@ or
                 session.state.userFriendlyParams
             ) + Constants.FIELD_PROMPTS[nextField];
 
+            logger.info(`[LeadAgent] Missing field: ${nextField}, prompting user`);
             await session.memory.chatHistory.addAIChatMessage(response);
             return response;
         }
 
+        // ✅ All required fields are filled, proceed to calculate price
         const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
 
         if (!technicalParams)
@@ -581,7 +644,7 @@ or
             return "Failed to convert user input to technical parameters.";
         }
 
-        const result: string = await extractor.calculatePriceWithParams(technicalParams);
+        const result: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(technicalParams);
         await session.memory.chatHistory.addAIChatMessage(result);
 
         this.resetSessionState(session);
@@ -636,6 +699,215 @@ or
     {
         this.sessionManager.destroy();
         logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
+    }
+
+    /**
+     * Get list of all valid states for user reference
+     * @returns {string} Formatted string of valid states
+     */
+    private getValidStatesMessage(): string
+    {
+        const validStates = [
+            "Texas", "California", "Florida", "New York", "Pennsylvania",
+            "Illinois", "Ohio", "Georgia", "North Carolina", "Michigan",
+            "New Jersey", "Virginia", "Washington", "Arizona", "Massachusetts",
+            "Tennessee", "Maryland", "Missouri", "Wisconsin", "Colorado",
+            "Minnesota", "South Carolina", "Alabama", "Louisiana", "Kentucky",
+            "Oregon", "Oklahoma", "Connecticut", "Iowa", "Nevada",
+            "Arkansas", "Mississippi", "Kansas", "Utah", "New Mexico",
+            "Nebraska", "Idaho", "Maine", "Montana", "Rhode Island",
+            "Delaware", "South Dakota", "North Dakota", "Alaska", "Hawaii",
+            "Wyoming", "Vermont", "New Hampshire", "West Virginia"
+        ];
+
+        return `Valid states: ${validStates.join(", ")}`;
+    }
+
+    // Add this to LeadAgent class
+
+    /**
+     * Converts state abbreviation to full state name
+     * @param stateInput - Full name or abbreviation (e.g., "TX", "Texas", "tx", "tx and Texas")
+     * @returns {string | null} Full state name or null if invalid
+     */
+    private normalizeStateName(stateInput: string): string | null
+    {
+        const stateAbbreviationMap: Record<string, string> = {
+            "tx": "Texas", "ca": "California", "fl": "Florida", "ny": "New York",
+            "pa": "Pennsylvania", "il": "Illinois", "oh": "Ohio", "ga": "Georgia",
+            "nc": "North Carolina", "mi": "Michigan", "nj": "New Jersey", "va": "Virginia",
+            "wa": "Washington", "az": "Arizona", "ma": "Massachusetts", "tn": "Tennessee",
+            "md": "Maryland", "mo": "Missouri", "wi": "Wisconsin", "co": "Colorado",
+            "mn": "Minnesota", "sc": "South Carolina", "al": "Alabama", "la": "Louisiana",
+            "ky": "Kentucky", "or": "Oregon", "ok": "Oklahoma", "ct": "Connecticut",
+            "ia": "Iowa", "nv": "Nevada", "ar": "Arkansas", "ms": "Mississippi",
+            "ks": "Kansas", "ut": "Utah", "nm": "New Mexico", "ne": "Nebraska",
+            "id": "Idaho", "me": "Maine", "mt": "Montana", "ri": "Rhode Island",
+            "de": "Delaware", "sd": "South Dakota", "nd": "North Dakota", "ak": "Alaska",
+            "hi": "Hawaii", "wy": "Wyoming", "vt": "Vermont", "nh": "New Hampshire",
+            "wv": "West Virginia",
+        };
+
+        const validStates = Object.values(stateAbbreviationMap);
+        const normalized = stateInput.trim().toLowerCase();
+
+        // ✅ Handle both formats: Extract abbreviation and full name
+        // Example: "tx and Texas" or "TX and Texas"
+        const abbreviationMatch = normalized.match(/\b([a-z]{2})\b/);
+        const fullNameMatch = validStates.find(state => normalized.includes(state.toLowerCase()));
+
+        logger.info(`[normalizeStateName] Input: "${stateInput}" | Abbr match: ${abbreviationMatch?.[1]} | Full name match: ${fullNameMatch}`);
+
+        // If abbreviation found, use it (primary)
+        if (abbreviationMatch && stateAbbreviationMap[abbreviationMatch[1]])
+        {
+            const result = stateAbbreviationMap[abbreviationMatch[1]];
+            logger.info(`[normalizeStateName] ✓ Using abbreviation: ${abbreviationMatch[1]} → ${result}`);
+            return result;
+        }
+
+        // If full name found, use it (secondary)
+        if (fullNameMatch)
+        {
+            logger.info(`[normalizeStateName] ✓ Using full name: ${fullNameMatch}`);
+            return fullNameMatch;
+        }
+
+        // Check if input is exactly a full state name
+        const exactMatch = validStates.find(state => state.toLowerCase() === normalized);
+        if (exactMatch)
+        {
+            logger.info(`[normalizeStateName] ✓ Exact match: ${exactMatch}`);
+            return exactMatch;
+        }
+
+        logger.warn(`[normalizeStateName] ✗ Invalid state: "${stateInput}"`);
+        return null;
+    }
+
+    /**
+     * Validates if the provided state name exists in the system
+     * @param stateName - The state name or abbreviation to validate
+     * @returns {Promise<{isValid: boolean, normalizedName?: string}>} Validation result with normalized name
+     */
+    private async validateState(stateName: string): Promise<{isValid: boolean, normalizedName?: string}>
+    {
+        try
+        {
+            const normalizedName = this.normalizeStateName(stateName);
+
+            if (!normalizedName)
+            {
+                return { isValid: false };
+            }
+
+            const mapping: StateMapping | null = await this.mapStateToDB(normalizedName, this.getOrCreateSession("temp"));
+            return {
+                isValid: mapping !== null,
+                normalizedName: normalizedName
+            };
+        }
+        catch (error)
+        {
+            logger.warn("[LeadAgent] State validation failed:", error);
+            return { isValid: false };
+        }
+    }
+
+    /**
+     * Gets list of valid roof types
+     * @returns {string[]} Array of valid roof types
+     */
+    // private getValidRoofTypes(): string[]
+    // {
+    //     return ["regular", "a-frame", "vertical", "box-style"];
+    // }
+
+
+    /**
+     * Normalizes roof type input (handles variations)
+     * @param roofInput - User input for roof type
+     * @returns {string | null} Normalized roof type or null if invalid
+     */
+    private normalizeRoofType(roofInput: string): string | null
+    {
+        const roofAliasMap: Record<string, string> = {
+            "regular": "regular",
+            "standard": "regular",
+            "normal": "regular",
+            "simple": "regular",
+
+            "aframe": "a-frame",
+            "a-frame": "a-frame",
+            "a frame": "a-frame",
+            "pitched": "a-frame",
+            "gabled": "a-frame",
+
+            "vertical": "vertical",
+            "vertical roof": "vertical",
+            "sidewall": "vertical",
+
+            "box": "box-style",
+            "box-style": "box-style",
+            "box style": "box-style",
+            "boxstyle": "box-style",
+        };
+
+        const normalized = roofInput.trim().toLowerCase();
+        const result = roofAliasMap[normalized];
+
+        if (result)
+        {
+            logger.info(`[normalizeRoofType] ✓ Normalized "${roofInput}" → "${result}"`);
+            return result;
+        }
+
+        logger.warn(`[normalizeRoofType] ✗ Invalid roof type: "${roofInput}"`);
+        return null;
+    }
+
+    /**
+     * Validates if the provided roof type is valid
+     * @param roofType - The roof type to validate
+     * @returns {Promise<{isValid: boolean, normalizedType?: string}>} Validation result
+     */
+    private async validateRoofType(roofType: string): Promise<{isValid: boolean, normalizedType?: string}>
+    {
+        try
+        {
+            const normalizedType = this.normalizeRoofType(roofType);
+
+            if (!normalizedType)
+            {
+                return { isValid: false };
+            }
+
+            return {
+                isValid: true,
+                normalizedType: normalizedType
+            };
+        }
+        catch (error)
+        {
+            logger.warn("[LeadAgent] Roof type validation failed:", error);
+            return { isValid: false };
+        }
+    }
+
+    /**
+     * Gets valid roof types message for user display
+     * @returns {string} Formatted string of valid roof types
+     */
+    private getValidRoofTypesMessage(): string
+    {
+        const roofTypes = [
+            "Regular (standard, simple roof)",
+            "A-Frame (pitched/gabled roof)",
+            "Vertical (sidewall roof)",
+            "Box-Style (box style roof)"
+        ];
+
+        return `Valid roof types:\n${roofTypes.map(t => `• ${t}`).join('\n')}`;
     }
 }
 
