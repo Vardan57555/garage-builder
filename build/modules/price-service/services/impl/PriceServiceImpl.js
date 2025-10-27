@@ -19,7 +19,6 @@ class PriceServiceImpl {
         'full_length_panel', 'side_cross_bracing', 'braces', 'bows', 'addons',
         'addons_width', 'roof_pitch', 'additional_features', 'connection_fees', 'trusses', 'full_length_side'
     ];
-    ARRAY_FIELDS = new Set(['addons', 'addons_width', 'anchors_cost', 'bows', 'braces', 'trusses']);
     static PROCEDURE_MAP = {
         end: ({ map_id, width, height }) => [
             [map_id, height, width],
@@ -60,16 +59,16 @@ class PriceServiceImpl {
             [map_id, width, height],
             'getEndCrossBracing(?, ?, ?)'
         ],
-        insulation: ({ map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side }) => [
-            [map_id, both_side, both_ends, roof_only, utility_end, utility_side, utility_roof, utility_opposite_side, pitch_side, pitch_type, slope_side, utility_slope_side],
-            'getInsulation(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        insulation: ({ map_id, width, height, length, manufacturer }) => [
+            [map_id, width, height, length, manufacturer[0]?.manufacturer_id ?? 0],
+            'getInsulation(?, ?, ?, ?, ?)'
         ],
         certificate: ({ map_id, width, height, length, structureString }) => [
             [map_id, width, height, length, structureString],
             'getCertificate(?, ?, ?, ?, ?)'
         ],
         full_length_panel: ({ map_id, length, structureString, side_end_name }) => [
-            [map_id, length, structureString, side_end_name],
+            [map_id, length, structureString, this.safeStringParam(side_end_name)],
             'getExtraPanel(?, ?, ?, ?)'
         ],
         side_cross_bracing: ({ map_id, height, length, structureString }) => [
@@ -92,9 +91,9 @@ class PriceServiceImpl {
             [map_id],
             'getAdditionalFeatures(?)'
         ],
-        bows: ({ map_id, width, height }) => [
-            [map_id, width, height],
-            'getBow(?, ?, ?)'
+        bows: ({ map_id }) => [
+            [map_id],
+            'getBowMapId(?)'
         ],
         addons: ({ map_id, length, structureString }) => [
             [map_id, length, structureString],
@@ -108,9 +107,9 @@ class PriceServiceImpl {
             [map_id, width, length, structureString],
             'getRoofPitch(?, ?, ?, ?)'
         ],
-        connection_fees: ({ map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string }) => [
-            [map_id, width, height, length, structureString, length_without_wrap, length_without_wrap_string],
-            'getConnectionFees(?, ?, ?, ?, ?, ?, ?)'
+        connection_fees: ({ map_id, width, height, length, structureString }) => [
+            [map_id, width, height, length, structureString],
+            'getConnectionFees(?, ?, ?, ?, ?)'
         ],
         trusses: ({ map_id, width, height, length, structureString }) => [
             [map_id, width, height, length, structureString],
@@ -133,6 +132,18 @@ class PriceServiceImpl {
             'getWindow(?)'
         ],
     };
+    ARRAY_FIELDS = new Set([
+        'addons',
+        'addons_width',
+        'anchors_cost',
+        'bows',
+        'braces',
+        'trusses',
+        'end',
+        'garage_door_frameout',
+        'walkin_door_frameout',
+        'window_frameout'
+    ]);
     constructor(enforce) {
         if (enforce !== Enforce) {
             throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceService.getInstance() instead of new.");
@@ -156,11 +167,27 @@ class PriceServiceImpl {
                     message: 'The given dimension is not available for the building'
                 };
             }
+            const structureString = `'${finalWidth}x${finalLength}'`;
+            logger.info("[fetchBuildingPricingWithUtility] ====== PRICING DATA DEBUG ======");
+            const basePrices = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([params.map_id, structureString, 'No'], 'getBasicPrice(?, ?, ?)', 'base_prices');
+            if (!basePrices || basePrices.length === 0) {
+                logger.warn(`[fetchBuildingPricingWithUtility] No pricing found for structure ${structureString}`);
+                return {
+                    status: false,
+                    message: `No pricing available for dimensions ${finalWidth}x${finalLength}ft`
+                };
+            }
+            const matchingPrice = basePrices[0];
             const pricing = {
                 building_to_maxlength: finalLength,
                 manufacturer,
-                building_structure: buildingStructureFull
+                building_structure: buildingStructureFull,
+                base_price_regular: matchingPrice.regular_cost ?? 0,
+                base_price_box: matchingPrice.box_style_cost ?? 0,
+                base_price_vertical: matchingPrice.vertical_roof_cost ?? 0,
+                gauge: matchingPrice.gauge ?? (params.gauge ?? 14)
             };
+            this.applyPricingMultipliers(pricing, params);
             const componentKeys = this.getComponentKeys(params.single_slope_height);
             const [components, utilityPricing, centralPricing] = await Promise.all([
                 this.fetchComponentsPricing({
@@ -182,12 +209,10 @@ class PriceServiceImpl {
                     : Promise.resolve(null)
             ]);
             this.mergeComponents(pricing, components);
-            if (utilityPricing) {
+            if (utilityPricing)
                 Object.assign(pricing, utilityPricing);
-            }
-            if (centralPricing) {
+            if (centralPricing)
                 Object.assign(pricing, centralPricing);
-            }
             this.applyAddons(pricing);
             this.adjustConnectionFees(pricing, params.is_barn);
             return pricing;
@@ -270,7 +295,7 @@ class PriceServiceImpl {
     async getBaseStructure({ map_id, roof_id }) {
         const safeMapId = map_id ?? 0;
         const safeRoofId = roof_id ?? 0;
-        const structures = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([safeMapId, safeRoofId, null, null, null], 'getBuildingStructure', 'building_structure');
+        const structures = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([safeMapId, safeRoofId, null, null, null], 'getBuildingStructure(?, ?, ?, ?, ?)', 'building_structure');
         return structures[0] || { min_width: 12, start_length: 12, min_height: 8 };
     }
     async getManufacturer(map_id) {
@@ -282,7 +307,7 @@ class PriceServiceImpl {
         const safeWidth = width ?? 0;
         const safeHeight = height ?? 0;
         const safeLength = length ?? 0;
-        return await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([safeMapId, safeRoofId, safeWidth, safeHeight, safeLength], 'getBuildingStructure', 'building_structure');
+        return await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([safeMapId, safeRoofId, safeWidth, safeHeight, safeLength], 'getBuildingStructure(?, ?, ?, ?, ?)', 'building_structure');
     }
     getComponentKeys(single_slope_height) {
         return [
@@ -327,25 +352,61 @@ class PriceServiceImpl {
         return { manufacturer, buildingStructureFull };
     }
     async fetchComponentsPricing(params) {
-        const components = await Promise.all(params.componentKeys.map(async (key) => {
+        const { map_id, roof_id, width, height, length, buildingStructureFull, manufacturer, single_slope_height, componentKeys } = params;
+        const { end_length, distance_on_center, side_end_name } = buildingStructureFull[0];
+        const lengthArray = await this.getSideHeightCostsLength(length, end_length, distance_on_center, map_id);
+        const structureString = `'${lengthArray.map(l => `${width}x${l}`).join("','")}'`;
+        logger.info("[fetchComponentsPricing] Generated structure string:", structureString);
+        logger.info("[fetchComponentsPricing] Length array:", lengthArray);
+        const components = await Promise.all(componentKeys.map(async (key) => {
             const procedureFn = PriceServiceImpl.PROCEDURE_MAP[key];
             if (!procedureFn) {
-                throw new Error(`Unknown component key: ${key}`);
+                logger.warn(`[fetchComponentsPricing] Unknown component key: ${key}`);
+                return [key, []];
             }
-            const [args, query] = procedureFn({
-                ...params,
-                structureString: `'${params.buildingStructureFull.map(s => `${params.width}x${s.end_length}`).join("','")}'`
-            });
-            const data = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData(args, query, key);
-            return [key, data];
+            try {
+                const [args, query] = procedureFn({
+                    map_id,
+                    roof_id,
+                    width,
+                    height,
+                    length,
+                    manufacturer,
+                    structureString,
+                    lengthArray,
+                    single_slope_height,
+                    side_end_name: side_end_name || null,
+                    buildingStructureFull: [],
+                    componentKeys: []
+                });
+                logger.info(`[fetchComponentsPricing] Fetching ${key}`);
+                logger.info(`[fetchComponentsPricing] Query: ${query}`);
+                logger.info(`[fetchComponentsPricing] Args:`, args);
+                const data = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData(args, query, key);
+                logger.info(`[fetchComponentsPricing] Component ${key} returned ${Array.isArray(data) ? data.length : 'non-array'} items`);
+                return [key, data];
+            }
+            catch (error) {
+                logger.error(`[fetchComponentsPricing] Error fetching ${key}:`, error);
+                return [key, []];
+            }
         }));
         return Object.fromEntries(components);
     }
     applyAddons(pricing) {
+        logger.info("[applyAddons] ====== BEFORE ADDON PROCESSING ======");
+        logger.info("[applyAddons] Current pricing keys:", Object.keys(pricing));
+        logger.info("[applyAddons] Current bows:", pricing.bows);
+        logger.info("[applyAddons] Current addons:", pricing.addons);
+        logger.info("[applyAddons] ====== END BEFORE ======");
         const { checkbox, checkboxQuantity, checkboxQuantityDropdown } = this.processAddons(pricing);
         pricing.checkbox = checkbox;
         pricing.checkbox_quantity = checkboxQuantity;
         pricing.checkbox_quantity_dropdown = checkboxQuantityDropdown;
+        logger.info("[applyAddons] ====== AFTER ADDON PROCESSING ======");
+        logger.info("[applyAddons] Current bows after:", pricing.bows);
+        logger.info("[applyAddons] Current addons after:", pricing.addons);
+        logger.info("[applyAddons] ====== END AFTER ======");
     }
     adjustConnectionFees(pricing, is_barn) {
         if (!is_barn) {
@@ -363,13 +424,15 @@ class PriceServiceImpl {
             }
             const { end_length, distance_on_center } = centralStructure[0];
             if (central_height) {
-                const centralLengthArrayFull = await this.getSideHeightCostsLength(central_length, end_length, distance_on_center, map_id);
+                const centralLengthArrayFull = await this.getSideHeightCostsLength(central_length, end_length, distance_on_center, central_map_id ?? map_id);
                 const centralNewLength = central_utility_length ? central_length - central_utility_length : central_length;
-                const centralLengthArray = await this.getSideHeightCostsLength(centralNewLength, end_length, distance_on_center, map_id);
+                const centralLengthArray = await this.getSideHeightCostsLength(centralNewLength, end_length, distance_on_center, central_map_id ?? map_id);
+                const centralLengthArrayFullString = `'${centralLengthArrayFull.join("','")}'`;
+                const centralLengthArrayString = `'${centralLengthArray.join("','")}'`;
                 const [centralSideFull, centralSide, centralTrusses, centralEnd] = await Promise.all([
-                    ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, central_length, centralLengthArrayFull], 'getSidePrice(?, ?, ?, ?)', 'central_side_full_length'),
-                    ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, centralNewLength, centralLengthArray], 'getSidePrice(?, ?, ?, ?)', 'central_side'),
-                    ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_width, central_height, central_length, centralLengthArrayFull], 'getTrussUpgrade(?, ?, ?, ?, ?)', 'central_trusses'),
+                    ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, central_length, centralLengthArrayFullString], 'getSidePrice(?, ?, ?, ?)', 'central_side_full_length'),
+                    ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, centralNewLength, centralLengthArrayString], 'getSidePrice(?, ?, ?, ?)', 'central_side'),
+                    ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_width, central_height, central_length, centralLengthArrayFullString], 'getTrussUpgrade(?, ?, ?, ?, ?)', 'central_trusses'),
                     ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, central_width], 'getEachEndClose(?, ?, ?)', 'central_end')
                 ]);
                 Object.assign(pricing, {
@@ -380,8 +443,9 @@ class PriceServiceImpl {
                 });
             }
             if (central_utility_length) {
-                const centralUtilityArray = await this.getSideHeightCostsLength(central_utility_length, end_length, distance_on_center, map_id);
-                const centralUtilitySide = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, central_utility_length, centralUtilityArray], 'getSidePrice(?, ?, ?, ?)', 'central_utility_side');
+                const centralUtilityArray = await this.getSideHeightCostsLength(central_utility_length, end_length, distance_on_center, central_map_id ?? map_id);
+                const centralUtilityArrayString = `'${centralUtilityArray.join("','")}'`;
+                const centralUtilitySide = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData([central_map_id, central_height, central_utility_length, centralUtilityArrayString], 'getSidePrice(?, ?, ?, ?)', 'central_utility_side');
                 centralUtilitySide.forEach((side) => {
                     side['utility_length'] = central_utility_length;
                 });
@@ -482,14 +546,69 @@ class PriceServiceImpl {
         return `'${value}' COLLATE ${collation}`;
     }
     mergeComponents(pricing, components) {
+        logger.info("[mergeComponents] Starting merge with components:", Object.keys(components));
         for (const [key, value] of Object.entries(components)) {
-            if (Array.isArray(value) && !this.ARRAY_FIELDS.has(key)) {
-                pricing[key] = value[0] ?? null;
+            if (Array.isArray(value)) {
+                if (this.ARRAY_FIELDS.has(key)) {
+                    pricing[key] = value.length > 0 ? value : [];
+                    logger.info(`[mergeComponents] Merged ${key}: array with ${value.length} items`);
+                }
+                else {
+                    pricing[key] = value.length > 0 ? value[0] : null;
+                    logger.info(`[mergeComponents] Merged ${key}: ${value.length > 0 ? 'first element' : 'null'}`);
+                }
             }
             else {
                 pricing[key] = value;
+                logger.info(`[mergeComponents] Merged ${key}: non-array value`);
             }
         }
+        logger.info("[mergeComponents] Merge complete. Final pricing keys:", Object.keys(pricing));
+    }
+    applyPricingMultipliers(pricing, params) {
+        logger.info("[applyPricingMultipliers] ====== APPLYING MULTIPLIERS ======");
+        const sqft = params.width * params.length;
+        const gaugeMultiplier = params.gauge === 12 ? 1.15 : params.gauge === 16 ? 0.95 : 1.0;
+        logger.info(`[applyPricingMultipliers] Gauge: ${params.gauge}ga × ${gaugeMultiplier}`);
+        const buildingTypeMultipliers = {
+            'garage': 1.0,
+            'carport': 0.85,
+            'barn': 1.2,
+            'commercial': 1.25,
+            'rv cover': 0.8,
+            'rv garage': 1.1,
+        };
+        const buildingMultiplier = buildingTypeMultipliers[params.building_type?.toLowerCase() || 'garage'] || 1.0;
+        logger.info(`[applyPricingMultipliers] Building type "${params.building_type}": × ${buildingMultiplier}`);
+        const roofTypeMultipliers = {
+            1: 1.0,
+            2: 0.95,
+            3: 0.90,
+        };
+        const roofMultiplier = roofTypeMultipliers[params.roof_id] || 1.0;
+        logger.info(`[applyPricingMultipliers] Roof ID ${params.roof_id}: × ${roofMultiplier}`);
+        const baseHeight = 10;
+        const heightPremium = params.height > baseHeight
+            ? (params.height - baseHeight) * (sqft * 0.50)
+            : 0;
+        logger.info(`[applyPricingMultipliers] Height premium: $${heightPremium}`);
+        const combinedMultiplier = gaugeMultiplier * buildingMultiplier * roofMultiplier;
+        pricing.base_price_regular = (pricing.base_price_regular ?? 0) * combinedMultiplier;
+        pricing.base_price_box = (pricing.base_price_box ?? 0) * combinedMultiplier;
+        pricing.base_price_vertical = (pricing.base_price_vertical ?? 0) * combinedMultiplier;
+        logger.info(`[applyPricingMultipliers] Combined multiplier: ${combinedMultiplier}`);
+        logger.info(`[applyPricingMultipliers] Base prices after multiplier:`);
+        logger.info(`  - Regular: $${pricing.base_price_regular}`);
+        logger.info(`  - Box: $${pricing.base_price_box}`);
+        logger.info(`  - Vertical: $${pricing.base_price_vertical}`);
+        if (heightPremium > 0) {
+            pricing.height_premium = heightPremium;
+            pricing.base_price_regular += heightPremium;
+            pricing.base_price_box += heightPremium;
+            pricing.base_price_vertical += heightPremium;
+            logger.info(`[applyPricingMultipliers] Added height premium: $${heightPremium}`);
+        }
+        logger.info("[applyPricingMultipliers] ====== END MULTIPLIERS ======");
     }
 }
 exports.PriceServiceImpl = PriceServiceImpl;
