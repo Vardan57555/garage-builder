@@ -1,5 +1,5 @@
 import { GuidVersions } from "joi";
-import { UserFriendlyParams} from "@agents/tools/io/IChat";
+import {Dimensions, UserFriendlyParams} from "@agents/tools/io/IChat";
 import {SessionConfig} from "@utils/session/io/ISession";
 
 /**
@@ -321,8 +321,7 @@ export class Constants
         1: 'vertical_roof_cost',
         3: 'box_style_cost'
     };
-    public static readonly NUMERIC_FIELDS: (keyof UserFriendlyParams)[] =
-        ["width", "length", "height", "utility_length", "gauge"];
+
     public static readonly ROOF_TYPE_MAPPING: Record<string, number> = {
         vertical: 1,
         regular: 2,
@@ -393,5 +392,86 @@ export class Constants
         'risk': 9,
         'risk ii': 9,
         '9': 9,
+    };
+
+    public static readonly GARAGE_TYPE_PATTERNS = [
+        [/\b1\s*(?:car|bay)\b|\bone\s*(?:car|bay)\b/i, "1 car garage"],
+        [/\b2\s*(?:car|bay)\b|\btwo\s*(?:car|bay)\b/i, "2 car garage"],
+        [/\b3\s*(?:car|bay)\b|\bthree\s*(?:car|bay)\b/i, "3 car garage"],
+        [/truck\s*garage|garage.*truck|heavy.*truck/i, "truck garage"],
+        [/rv\s*garage|rv\s*(?:carport|shelter)|garage.*rv/i, "RV garage"],
+        [/barn/i, "barn"],
+    ] as const;
+
+
+    public static readonly SERVICE_COSTS = {
+        LABOR_PERCENTAGE: 0.5,
+        FOUNDATION_COST_PER_SQFT: 8.5,
+        DELIVERY_FLAT_RATE: 750,
+        CONTINGENCY_PERCENTAGE: 0.05,
+    } as const;
+
+    public static readonly NUMERIC_FIELDS = ["width", "length", "height", "utility_length", "gauge"] as const;
+
+    public static readonly STANDARD_DIMENSIONS: Record<string, Dimensions> = {
+        "1 car garage": { width: 12, length: 20, height: 10 },
+        "2 car garage": { width: 20, length: 20, height: 10 },
+        "3 car garage": { width: 30, length: 20, height: 10 },
+        "truck garage": { width: 16, length: 24, height: 12 },
+        "rv garage": { width: 14, length: 40, height: 12 },
+        barn: { width: 30, length: 40, height: 14 },
+        garage: { width: 20, length: 20, height: 10 },
+    };
+
+    public static readonly STATE_PATTERNS: Record<string, string> = {
+        "texas|tx": "Texas",
+        "california|ca": "California",
+        "florida|fl": "Florida",
+        "new york|ny": "New York",
+        "pennsylvania|pa": "Pennsylvania",
+        "illinois|il": "Illinois",
+        "ohio|oh": "Ohio",
+        "georgia|ga": "Georgia",
+        "north carolina|nc": "North Carolina",
+        "michigan|mi": "Michigan",
+        "new jersey|nj": "New Jersey",
+        "virginia|va": "Virginia",
+        "washington|wa": "Washington",
+        "arizona|az": "Arizona",
+        "massachusetts|ma": "Massachusetts",
+        "tennessee|tn": "Tennessee",
+        "maryland|md": "Maryland",
+        "missouri|mo": "Missouri",
+        "wisconsin|wi": "Wisconsin",
+        "colorado|co": "Colorado",
+        "minnesota|mn": "Minnesota",
+        "south carolina|sc": "South Carolina",
+        "alabama|al": "Alabama",
+        "louisiana|la": "Louisiana",
+        "kentucky|ky": "Kentucky",
+        "oregon|or": "Oregon",
+        "oklahoma|ok": "Oklahoma",
+        "connecticut|ct": "Connecticut",
+        "iowa|ia": "Iowa",
+        "nevada|nv": "Nevada",
+        "arkansas|ar": "Arkansas",
+        "mississippi|ms": "Mississippi",
+        "kansas|ks": "Kansas",
+        "utah|ut": "Utah",
+        "new mexico|nm": "New Mexico",
+        "nebraska|ne": "Nebraska",
+        "idaho|id": "Idaho",
+        "maine|me": "Maine",
+        "montana|mt": "Montana",
+        "rhode island|ri": "Rhode Island",
+        "delaware|de": "Delaware",
+        "south dakota|sd": "South Dakota",
+        "north dakota|nd": "North Dakota",
+        "alaska|ak": "Alaska",
+        "hawaii|hi": "Hawaii",
+        "wyoming|wy": "Wyoming",
+        "vermont|vt": "Vermont",
+        "new hampshire|nh": "New Hampshire",
+        "west virginia|wv": "West Virginia",
     };
 }
