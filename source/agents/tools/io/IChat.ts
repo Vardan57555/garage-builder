@@ -55,3 +55,19 @@ export interface LeadAgentSessionMetadata extends SessionMetadata {
     stateMapCache: Map<string, StateMapping | null>;
     roofMapCache: Map<string, number>;
 }
+
+export interface Dimensions {
+    width: number;
+    length: number;
+    height: number;
+}
+
+export interface PricingBreakdown {
+    total: number;
+    roofPrice: number;
+}
+
+export interface ServiceCostsResult {
+    total: number;
+    breakdown: string[];
+}
