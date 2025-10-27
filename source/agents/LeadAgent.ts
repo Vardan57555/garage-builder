@@ -17,6 +17,8 @@ import {createLogger} from "@utils/logger/Log";
 import {RedisCacheUtils} from "@utils/cache/RedisCacheUtils";
 import {SessionManager} from "@utils/session/SessionManager";
 import {SessionMetadata} from "@utils/session/io/ISession";
+import {StateDataValidator} from "@agents/validators/StateValidator";
+import {RoofDataValidator} from "@agents/validators/RoofValidator";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -91,7 +93,7 @@ export class LeadAgent
             { regex: /height|length|width|roof|state|gauge/i, weight: 2 }
         ];
 
-        const hasUpdateIntent = updatePatterns.some(p => p.regex.test(input));
+        const hasUpdateIntent: boolean = updatePatterns.some(p => p.regex.test(input));
 
         if (!hasUpdateIntent) return null;
 
@@ -99,14 +101,14 @@ export class LeadAgent
         {
             const prompt = `Given this user message: "${input}"
             
-Determine if they want to UPDATE/CHANGE a parameter and extract:
-1. Which parameter (width, length, height, roof_type, state_name, gauge, building_type)
-2. The new value
-
-Respond in JSON format only:
-{"isUpdate": true/false, "field": "parameter_name", "value": extracted_value}
-or
-{"isUpdate": false}`;
+                Determine if they want to UPDATE/CHANGE a parameter and extract:
+                1. Which parameter (width, length, height, roof_type, state_name, gauge, building_type)
+                2. The new value
+                
+                Respond in JSON format only:
+                {"isUpdate": true/false, "field": "parameter_name", "value": extracted_value}
+                or
+                {"isUpdate": false}`;
 
             const aiMessage: AIMessageChunk = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const response = JSON.parse((aiMessage.content as string).trim());
@@ -130,19 +132,16 @@ or
     /**
      * Handles parameter update and validation
      */
-    private handleParameterUpdate(
-        session: LeadAgentSessionMetadata,
-        update: {field: keyof UserFriendlyParams, value: any}
-    ): {success: boolean, message: string, updatedField?: keyof UserFriendlyParams}
+    private handleParameterUpdate(session: LeadAgentSessionMetadata, update: {field: keyof UserFriendlyParams, value: any}): {success: boolean, message: string, updatedField?: keyof UserFriendlyParams}
     {
         const { field, value } = update;
 
         logger.info(`[LeadAgent] Attempting to update ${field} from ${(session.state.userFriendlyParams as any)[field]} to ${value}`);
 
-        // Validate numeric fields
         if (["width", "length", "height", "gauge", "utility_length"].includes(field))
         {
             const numValue = parseFloat(String(value));
+
             if (isNaN(numValue) || numValue <= 0)
             {
                 logger.warn(`[LeadAgent] Invalid ${field} value: ${value}`);
@@ -380,8 +379,8 @@ or
     {
         try
         {
-            let map_id = 1;
-            let manufacturer_id = 1;
+            let map_id: number = 1;
+            let manufacturer_id: number  = 1;
 
             if (userParams.state_name)
             {
@@ -400,7 +399,7 @@ or
 
             const roof_id: number = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id, session) : 2;
 
-            const technicalParams: IPricingParams = {
+            return {
                 width: userParams.width ?? 0,
                 length: userParams.length ?? 0,
                 height: userParams.height ?? 0,
@@ -412,22 +411,6 @@ or
                 gauge: userParams.gauge ?? 14,
                 is_barn: userParams.is_barn,
             };
-
-            // ← ADD THIS COMPREHENSIVE DEBUG LOGGING
-            logger.info("[LeadAgent] ====== TECHNICAL PARAMS CONVERSION DEBUG ======");
-            logger.info("[LeadAgent] User-friendly params:", JSON.stringify(userParams, null, 2));
-            logger.info("[LeadAgent] State name:", userParams.state_name);
-            logger.info("[LeadAgent] Roof type:", userParams.roof_type);
-            logger.info("[LeadAgent] Building type:", userParams.building_type, "← CRITICAL: This determines pricing!");
-            logger.info("[LeadAgent] Gauge:", userParams.gauge ?? 14);
-            logger.info("[LeadAgent] ----");
-            logger.info("[LeadAgent] Map ID:", map_id, "(resolved from state)");
-            logger.info("[LeadAgent] Roof ID:", roof_id, "(resolved from roof type)");
-            logger.info("[LeadAgent] Manufacturer ID:", manufacturer_id);
-            logger.info("[LeadAgent] Final technical params:", JSON.stringify(technicalParams, null, 2));
-            logger.info("[LeadAgent] ====== END DEBUG ======");
-
-            return technicalParams;
         }
         catch (error)
         {
@@ -447,17 +430,14 @@ or
     }
 
     /**
-     * @param extractedParams - A partial object containing user-friendly building parameters.
+     * @param currentParams - A partial object containing user-friendly building parameters.
      * @returns {string} A formatted string summarizing the provided dimensions, or an empty string if none are found.
      */
 
-    private formatDimensionsResponse(
-        extractedParams: Partial<UserFriendlyParams>,
-        currentParams: Partial<UserFriendlyParams>  // ← ADD THIS
-    ): string
+    private formatDimensionsResponse(currentParams: Partial<UserFriendlyParams>): string
     {
         const dimensions: string = (["width", "length", "height"] as const)
-            .filter((k) => currentParams[k])  // ← Use currentParams (merged state)
+            .filter((k) => currentParams[k])
             .map((k) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${currentParams[k]}ft.`)
             .join(" ");
 
@@ -475,13 +455,14 @@ or
     {
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
 
-        const session = this.getOrCreateSession(sessionId);
+        const session: LeadAgentSessionMetadata = this.getOrCreateSession(sessionId);
 
         await session.memory.chatHistory.addUserMessage(input);
 
         if (!session.state.hasGarageIntent)
         {
             const hasIntent: boolean = await this.detectGarageIntentWithAI(input);
+
             if (!hasIntent)
             {
                 const response: string =
@@ -496,26 +477,28 @@ or
         const paramUpdate = await this.detectParameterUpdate(input);
         if (paramUpdate)
         {
-            // ✅ Validate state if user is updating state_name
             if (paramUpdate.field === "state_name")
             {
-                const validationResult = await this.validateState(paramUpdate.value);
+                const validationResult = await StateDataValidator.validateState(
+                    paramUpdate.value,
+                    async (name: string) => await this.mapStateToDB(name, this.getOrCreateSession("temp"))
+                );
+
                 if (!validationResult.isValid)
                 {
-                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${this.getValidStatesMessage()}`;
+                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`;
                     await session.memory.chatHistory.addAIChatMessage(errorMessage);
                     return errorMessage;
                 }
                 paramUpdate.value = validationResult.normalizedName;
             }
 
-            // ✅ Validate roof type if user is updating roof_type
             if (paramUpdate.field === "roof_type")
             {
-                const validationResult = await this.validateRoofType(paramUpdate.value);
+                const validationResult = await RoofDataValidator.validateRoofType(paramUpdate.value);
                 if (!validationResult.isValid)
                 {
-                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${this.getValidRoofTypesMessage()}`;
+                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`;
                     await session.memory.chatHistory.addAIChatMessage(errorMessage);
                     return errorMessage;
                 }
@@ -526,12 +509,10 @@ or
 
             if (updateResult.success)
             {
-                const missingFields = this.getMissingFields(session.state.userFriendlyParams);
+                const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(session.state.userFriendlyParams);
 
-                // ✅ SIMPLIFIED: Check only missing fields
                 if (missingFields.length === 0)
                 {
-                    // All required fields complete - calculate price
                     const confirmMessage = `Got it! ${updateResult.updatedField}: ${(session.state.userFriendlyParams as any)[updateResult.updatedField!]}.\n\n✓ All parameters set! Calculating price...`;
                     await session.memory.chatHistory.addAIChatMessage(confirmMessage);
 
@@ -539,7 +520,7 @@ or
                     if (technicalParams)
                     {
                         const priceResult: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(technicalParams);
-                        const finalResponse = priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
+                        const finalResponse: string = priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
                         await session.memory.chatHistory.addAIChatMessage(priceResult);
                         this.resetSessionState(session);
                         return finalResponse;
@@ -547,7 +528,6 @@ or
                 }
                 else
                 {
-                    // Still missing fields - prompt for next one
                     const nextField: keyof UserFriendlyParams = missingFields[0];
                     session.state.currentField = nextField;
 
@@ -566,10 +546,6 @@ or
             }
         }
 
-        // ============================================
-        // NORMAL EXTRACTION FLOW
-        // ============================================
-
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
         const rawParams: string = await extractor._call(await this.getConversationContext(session));
         logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
@@ -577,26 +553,28 @@ or
         const extractedParams: Partial<UserFriendlyParams> = extractor.safeExtractUserFriendlyParams(rawParams);
         logger.info(`[LeadAgent] Session ${sessionId} - Safe extracted user-friendly params:`, extractedParams);
 
-        // ✅ Validate state during initial extraction
         if (extractedParams.state_name)
         {
-            const validationResult = await this.validateState(extractedParams.state_name);
+            const validationResult = await StateDataValidator.validateState(
+                extractedParams.state_name,
+                async (name: string) => await this.mapStateToDB(name, this.getOrCreateSession("temp"))
+            );
+
             if (!validationResult.isValid)
             {
-                const errorMessage = `❌ "${extractedParams.state_name}" is not a valid state.\n\n${this.getValidStatesMessage()}\n\nPlease specify your state.`;
+                const errorMessage = `❌ "${extractedParams.state_name}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}\n\nPlease specify your state.`;
                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
                 return errorMessage;
             }
             extractedParams.state_name = validationResult.normalizedName;
         }
 
-        // ✅ Validate roof type during initial extraction
         if (extractedParams.roof_type)
         {
-            const validationResult = await this.validateRoofType(extractedParams.roof_type);
+            const validationResult = await RoofDataValidator.validateRoofType(extractedParams.roof_type);
             if (!validationResult.isValid)
             {
-                const errorMessage = `❌ "${extractedParams.roof_type}" is not a valid roof type.\n\n${this.getValidRoofTypesMessage()}\n\nPlease specify your roof type.`;
+                const errorMessage = `❌ "${extractedParams.roof_type}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}\n\nPlease specify your roof type.`;
                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
                 return errorMessage;
             }
@@ -620,14 +598,12 @@ or
 
         const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(session.state.userFriendlyParams);
 
-        // ✅ SIMPLIFIED: Check only missing fields (roof_type will be included if missing)
         if (missingFields.length > 0)
         {
             const nextField: keyof UserFriendlyParams = missingFields[0];
             session.state.currentField = nextField;
 
             const response: string = this.formatDimensionsResponse(
-                extractedParams,
                 session.state.userFriendlyParams
             ) + Constants.FIELD_PROMPTS[nextField];
 
@@ -636,7 +612,6 @@ or
             return response;
         }
 
-        // ✅ All required fields are filled, proceed to calculate price
         const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(session.state.userFriendlyParams as UserFriendlyParams, session);
 
         if (!technicalParams)
@@ -699,215 +674,6 @@ or
     {
         this.sessionManager.destroy();
         logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
-    }
-
-    /**
-     * Get list of all valid states for user reference
-     * @returns {string} Formatted string of valid states
-     */
-    private getValidStatesMessage(): string
-    {
-        const validStates = [
-            "Texas", "California", "Florida", "New York", "Pennsylvania",
-            "Illinois", "Ohio", "Georgia", "North Carolina", "Michigan",
-            "New Jersey", "Virginia", "Washington", "Arizona", "Massachusetts",
-            "Tennessee", "Maryland", "Missouri", "Wisconsin", "Colorado",
-            "Minnesota", "South Carolina", "Alabama", "Louisiana", "Kentucky",
-            "Oregon", "Oklahoma", "Connecticut", "Iowa", "Nevada",
-            "Arkansas", "Mississippi", "Kansas", "Utah", "New Mexico",
-            "Nebraska", "Idaho", "Maine", "Montana", "Rhode Island",
-            "Delaware", "South Dakota", "North Dakota", "Alaska", "Hawaii",
-            "Wyoming", "Vermont", "New Hampshire", "West Virginia"
-        ];
-
-        return `Valid states: ${validStates.join(", ")}`;
-    }
-
-    // Add this to LeadAgent class
-
-    /**
-     * Converts state abbreviation to full state name
-     * @param stateInput - Full name or abbreviation (e.g., "TX", "Texas", "tx", "tx and Texas")
-     * @returns {string | null} Full state name or null if invalid
-     */
-    private normalizeStateName(stateInput: string): string | null
-    {
-        const stateAbbreviationMap: Record<string, string> = {
-            "tx": "Texas", "ca": "California", "fl": "Florida", "ny": "New York",
-            "pa": "Pennsylvania", "il": "Illinois", "oh": "Ohio", "ga": "Georgia",
-            "nc": "North Carolina", "mi": "Michigan", "nj": "New Jersey", "va": "Virginia",
-            "wa": "Washington", "az": "Arizona", "ma": "Massachusetts", "tn": "Tennessee",
-            "md": "Maryland", "mo": "Missouri", "wi": "Wisconsin", "co": "Colorado",
-            "mn": "Minnesota", "sc": "South Carolina", "al": "Alabama", "la": "Louisiana",
-            "ky": "Kentucky", "or": "Oregon", "ok": "Oklahoma", "ct": "Connecticut",
-            "ia": "Iowa", "nv": "Nevada", "ar": "Arkansas", "ms": "Mississippi",
-            "ks": "Kansas", "ut": "Utah", "nm": "New Mexico", "ne": "Nebraska",
-            "id": "Idaho", "me": "Maine", "mt": "Montana", "ri": "Rhode Island",
-            "de": "Delaware", "sd": "South Dakota", "nd": "North Dakota", "ak": "Alaska",
-            "hi": "Hawaii", "wy": "Wyoming", "vt": "Vermont", "nh": "New Hampshire",
-            "wv": "West Virginia",
-        };
-
-        const validStates = Object.values(stateAbbreviationMap);
-        const normalized = stateInput.trim().toLowerCase();
-
-        // ✅ Handle both formats: Extract abbreviation and full name
-        // Example: "tx and Texas" or "TX and Texas"
-        const abbreviationMatch = normalized.match(/\b([a-z]{2})\b/);
-        const fullNameMatch = validStates.find(state => normalized.includes(state.toLowerCase()));
-
-        logger.info(`[normalizeStateName] Input: "${stateInput}" | Abbr match: ${abbreviationMatch?.[1]} | Full name match: ${fullNameMatch}`);
-
-        // If abbreviation found, use it (primary)
-        if (abbreviationMatch && stateAbbreviationMap[abbreviationMatch[1]])
-        {
-            const result = stateAbbreviationMap[abbreviationMatch[1]];
-            logger.info(`[normalizeStateName] ✓ Using abbreviation: ${abbreviationMatch[1]} → ${result}`);
-            return result;
-        }
-
-        // If full name found, use it (secondary)
-        if (fullNameMatch)
-        {
-            logger.info(`[normalizeStateName] ✓ Using full name: ${fullNameMatch}`);
-            return fullNameMatch;
-        }
-
-        // Check if input is exactly a full state name
-        const exactMatch = validStates.find(state => state.toLowerCase() === normalized);
-        if (exactMatch)
-        {
-            logger.info(`[normalizeStateName] ✓ Exact match: ${exactMatch}`);
-            return exactMatch;
-        }
-
-        logger.warn(`[normalizeStateName] ✗ Invalid state: "${stateInput}"`);
-        return null;
-    }
-
-    /**
-     * Validates if the provided state name exists in the system
-     * @param stateName - The state name or abbreviation to validate
-     * @returns {Promise<{isValid: boolean, normalizedName?: string}>} Validation result with normalized name
-     */
-    private async validateState(stateName: string): Promise<{isValid: boolean, normalizedName?: string}>
-    {
-        try
-        {
-            const normalizedName = this.normalizeStateName(stateName);
-
-            if (!normalizedName)
-            {
-                return { isValid: false };
-            }
-
-            const mapping: StateMapping | null = await this.mapStateToDB(normalizedName, this.getOrCreateSession("temp"));
-            return {
-                isValid: mapping !== null,
-                normalizedName: normalizedName
-            };
-        }
-        catch (error)
-        {
-            logger.warn("[LeadAgent] State validation failed:", error);
-            return { isValid: false };
-        }
-    }
-
-    /**
-     * Gets list of valid roof types
-     * @returns {string[]} Array of valid roof types
-     */
-    // private getValidRoofTypes(): string[]
-    // {
-    //     return ["regular", "a-frame", "vertical", "box-style"];
-    // }
-
-
-    /**
-     * Normalizes roof type input (handles variations)
-     * @param roofInput - User input for roof type
-     * @returns {string | null} Normalized roof type or null if invalid
-     */
-    private normalizeRoofType(roofInput: string): string | null
-    {
-        const roofAliasMap: Record<string, string> = {
-            "regular": "regular",
-            "standard": "regular",
-            "normal": "regular",
-            "simple": "regular",
-
-            "aframe": "a-frame",
-            "a-frame": "a-frame",
-            "a frame": "a-frame",
-            "pitched": "a-frame",
-            "gabled": "a-frame",
-
-            "vertical": "vertical",
-            "vertical roof": "vertical",
-            "sidewall": "vertical",
-
-            "box": "box-style",
-            "box-style": "box-style",
-            "box style": "box-style",
-            "boxstyle": "box-style",
-        };
-
-        const normalized = roofInput.trim().toLowerCase();
-        const result = roofAliasMap[normalized];
-
-        if (result)
-        {
-            logger.info(`[normalizeRoofType] ✓ Normalized "${roofInput}" → "${result}"`);
-            return result;
-        }
-
-        logger.warn(`[normalizeRoofType] ✗ Invalid roof type: "${roofInput}"`);
-        return null;
-    }
-
-    /**
-     * Validates if the provided roof type is valid
-     * @param roofType - The roof type to validate
-     * @returns {Promise<{isValid: boolean, normalizedType?: string}>} Validation result
-     */
-    private async validateRoofType(roofType: string): Promise<{isValid: boolean, normalizedType?: string}>
-    {
-        try
-        {
-            const normalizedType = this.normalizeRoofType(roofType);
-
-            if (!normalizedType)
-            {
-                return { isValid: false };
-            }
-
-            return {
-                isValid: true,
-                normalizedType: normalizedType
-            };
-        }
-        catch (error)
-        {
-            logger.warn("[LeadAgent] Roof type validation failed:", error);
-            return { isValid: false };
-        }
-    }
-
-    /**
-     * Gets valid roof types message for user display
-     * @returns {string} Formatted string of valid roof types
-     */
-    private getValidRoofTypesMessage(): string
-    {
-        const roofTypes = [
-            "Regular (standard, simple roof)",
-            "A-Frame (pitched/gabled roof)",
-            "Vertical (sidewall roof)",
-            "Box-Style (box style roof)"
-        ];
-
-        return `Valid roof types:\n${roofTypes.map(t => `• ${t}`).join('\n')}`;
     }
 }
 
