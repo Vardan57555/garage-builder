@@ -19,6 +19,7 @@ import {SessionManager} from "@utils/session/SessionManager";
 import {SessionMetadata} from "@utils/session/io/ISession";
 import {StateDataValidator} from "@agents/validators/StateValidator";
 import {RoofDataValidator} from "@agents/validators/RoofValidator";
+import {DynamicGarageDimensionCalculator} from "@utils/dimensionCalculator/DimensionCalculator";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -91,24 +92,78 @@ export class LeadAgent
     {
         const lowerInput = input.toLowerCase();
 
-        // FIRST: Try regex-based extraction (faster, more reliable)
-        // Check if this is a multi-parameter update like "width 25 length 25 height 20"
+        // FIRST: Check for car count updates (e.g., "4 cars", "5 cars", "change to 6 cars")
+        const carCountMatch = input.match(/(\d+)\s*cars?/i);
+        if (carCountMatch) {
+            const newCarCount = parseInt(carCountMatch[1], 10);
+            const sessionData = this.sessionManager.getSession((this as any).currentSessionId) as LeadAgentSessionMetadata;
+            const currentParams = sessionData?.state?.userFriendlyParams;
+
+            // Extract current car count from garage_type (e.g., "4-car" → 4)
+            const currentGarageType = currentParams?.garage_type as string;
+            const currentCarCountMatch = currentGarageType?.match(/(\d+)-car/);
+            const currentCarCount = currentCarCountMatch ? parseInt(currentCarCountMatch[1], 10) : null;
+
+            logger.info(`[LeadAgent] Car count check - Current: ${currentCarCount}, New: ${newCarCount}`);
+
+            // If car count changed, trigger an update
+            if (currentCarCount !== null && currentCarCount !== newCarCount) {
+                logger.info(`[LeadAgent] Car count CHANGED from ${currentCarCount} to ${newCarCount} - triggering update`);
+
+                // Return a flag to recalculate all dimensions
+                return {
+                    field: 'garage_type',
+                    value: `${newCarCount}-car`
+                };
+            }
+
+            // If no current car count, this is a new specification
+            if (currentCarCount === null && newCarCount) {
+                logger.info(`[LeadAgent] Initial car count set to ${newCarCount}`);
+                return {
+                    field: 'garage_type',
+                    value: `${newCarCount}-car`
+                };
+            }
+        }
+
+        // SECOND: Try regex-based extraction (faster, more reliable)
         const multiParamResult = this.extractMultipleParametersByRegex(lowerInput);
         if (multiParamResult && multiParamResult.length > 0) {
             logger.info(`[LeadAgent] Regex extracted ${multiParamResult.length} parameters`);
-            // Store all updates in session and return them one by one
+
+            // VALIDATE each extracted parameter before storing
+            for (const param of multiParamResult) {
+                const validationError = await this.validateParameterValue(param.field, param.value);
+                if (validationError) {
+                    logger.warn(`[LeadAgent] Validation failed for ${param.field}: ${validationError}`);
+                    // Store error in a way we can return it
+                    (this as any).validationError = validationError;
+                    return null;
+                }
+            }
+
             (this as any).pendingUpdates = multiParamResult;
             return multiParamResult[0];
         }
 
-        // SECOND: Single parameter update
+        // THIRD: Single parameter update
         const regexResult = this.extractParameterByRegex(lowerInput);
         if (regexResult) {
             logger.info(`[LeadAgent] Regex extracted update: ${regexResult.field} = ${regexResult.value}`);
+
+            // VALIDATE before returning
+            const validationError = await this.validateParameterValue(regexResult.field, regexResult.value);
+            if (validationError) {
+                logger.warn(`[LeadAgent] Validation failed for ${regexResult.field}: ${validationError}`);
+                (this as any).validationError = validationError;
+                return null;
+            }
+
             return regexResult;
         }
 
-        // THIRD: Fall back to AI extraction if regex fails
+        // FOURTH: Fall back to AI extraction if regex fails
         const updatePatterns = [
             { regex: /\b(change|update|correct|fix|actually|wait|let me|make|set)\b/i, weight: 1 },
             { regex: /\b(width|length|height|roof|state|gauge)\b/i, weight: 2 }
@@ -122,21 +177,20 @@ export class LeadAgent
         {
             const prompt = `Given this user message: "${input}"
 
-            Extract the parameter update:
-            1. Which parameter? (width, length, height, roof_type, state_name, gauge, building_type)
-            2. What is the NEW value?
-            
-            Respond ONLY with JSON - no markdown, no explanation:
-            {"isUpdate": true, "field": "width", "value": 25}
-            or
-            {"isUpdate": false}`;
+        Extract the parameter update:
+        1. Which parameter? (width, length, height, roof_type, state_name, gauge, building_type)
+        2. What is the NEW value?
+        
+        Respond ONLY with JSON - no markdown, no explanation:
+        {"isUpdate": true, "field": "width", "value": 25}
+        or
+        {"isUpdate": false}`;
 
             const aiMessage: AIMessageChunk = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const responseText = (aiMessage.content as string).trim();
 
             logger.info(`[LeadAgent] AI update detection response: ${responseText}`);
 
-            // Clean up response
             const cleanedResponse = responseText
                 .replace(/^```json\s*/g, '')
                 .replace(/^```\s*/g, '')
@@ -148,6 +202,15 @@ export class LeadAgent
             if (response.isUpdate && response.field && response.value !== undefined && response.value !== null)
             {
                 logger.info(`[LeadAgent] AI detected update: ${response.field} = ${response.value}`);
+
+                // VALIDATE before returning
+                const validationError = await this.validateParameterValue(response.field, response.value);
+                if (validationError) {
+                    logger.warn(`[LeadAgent] Validation failed for ${response.field}: ${validationError}`);
+                    (this as any).validationError = validationError;
+                    return null;
+                }
+
                 return {
                     field: response.field as keyof UserFriendlyParams,
                     value: response.value
@@ -159,6 +222,52 @@ export class LeadAgent
             logger.warn("[LeadAgent] AI update detection failed:", error);
         }
 
+        return null;
+    }
+
+    /**
+     * NEW: Validates a parameter value before updating
+     * Returns error message if validation fails, null if valid
+     */
+    private async validateParameterValue(field: keyof UserFriendlyParams, value: any): Promise<string | null>
+    {
+        // Validate roof_type
+        if (field === "roof_type") {
+            const validationResult = await RoofDataValidator.validateRoofType(value);
+            if (!validationResult.isValid) {
+                return `❌ "${value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`;
+            }
+        }
+
+        // Validate state_name
+        if (field === "state_name") {
+            const sessionData = this.sessionManager.getSession((this as any).currentSessionId) as LeadAgentSessionMetadata;
+            const validationResult = await StateDataValidator.validateState(
+                value,
+                async (name: string) => await this.mapStateToDB(name, sessionData)
+            );
+            if (!validationResult.isValid) {
+                return `❌ "${value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`;
+            }
+        }
+
+        // Validate numeric fields
+        if (["width", "length", "height", "gauge", "utility_length"].includes(field as string)) {
+            let numValue: number;
+            if (typeof value === 'string') {
+                numValue = parseFloat(value.replace(/[^\d.]/g, ''));
+            } else if (typeof value === 'number') {
+                numValue = value;
+            } else {
+                numValue = NaN;
+            }
+
+            if (isNaN(numValue) || numValue <= 0) {
+                return `❌ Invalid ${field}. Please provide a positive number (e.g., "make ${field} 25").`;
+            }
+        }
+
+        // All validations passed
         return null;
     }
 
@@ -233,11 +342,25 @@ export class LeadAgent
     /**
      * Extract parameter using regex patterns (faster fallback)
      */
+    /**
+     * Extract parameter using regex patterns (faster fallback)
+     * IMPORTANT: Roof type MUST be checked BEFORE state to avoid conflicts
+     */
     private extractParameterByRegex(input: string): {field: keyof UserFriendlyParams, value: any} | null
     {
-        // More comprehensive patterns
+        // Order matters: Check roof FIRST, then other parameters
         const patterns = [
-            // Pattern: "make width 25" or "set width to 25" or "width 25"
+            // Pattern 1: Roof type FIRST - "roof vertical" or "want vertical" or just "vertical"
+            // This includes full roof type names (not abbreviations)
+            {
+                regex: /(?:want|in|make|set|change|update|roof|style)?\s*(?:to\s+)?(vertical|a-frame|a frame|aframe|box|box-style|regular|standard|normal|pitched|gabled|sidewall)/i,
+                parse: (match: RegExpMatchArray) => ({
+                    field: 'roof_type',
+                    value: match[1].toLowerCase()
+                })
+            },
+
+            // Pattern 2: Explicit dimensions - "make width 25" or "set width to 25" or "width 25"
             {
                 regex: /(?:make|set|change|update)?\s*(?:the\s+)?(width|length|height)\s+(?:to\s+)?(\d+)/i,
                 parse: (match: RegExpMatchArray) => ({
@@ -245,7 +368,8 @@ export class LeadAgent
                     value: parseFloat(match[2])
                 })
             },
-            // Pattern: "gauge 16" or "make gauge 16"
+
+            // Pattern 3: Gauge - "gauge 16" or "make gauge 16"
             {
                 regex: /(?:make|set|change|update)?\s*gauge\s+(?:to\s+)?(\d+)/i,
                 parse: (match: RegExpMatchArray) => ({
@@ -253,7 +377,9 @@ export class LeadAgent
                     value: parseFloat(match[1])
                 })
             },
-            // Pattern: "state texas" or "texas" or "in texas"
+
+            // Pattern 4: State - "state texas" or "in texas" (requires "state" or "in" prefix)
+            // This MUST come AFTER roof type to avoid conflicts
             {
                 regex: /(?:state|location|in)\s+([a-z\s]+?)(?:\s*(?:\.|$|,))/i,
                 parse: (match: RegExpMatchArray) => ({
@@ -261,14 +387,6 @@ export class LeadAgent
                     value: match[1].trim()
                 })
             },
-            // Pattern: "roof vertical" or "make roof a-frame"
-            {
-                regex: /(?:make|set|change|update)?\s*(?:roof|style)\s+(?:to\s+)?([\w\-]+)/i,
-                parse: (match: RegExpMatchArray) => ({
-                    field: 'roof_type',
-                    value: match[1].toLowerCase()
-                })
-            }
         ];
 
         for (const pattern of patterns) {
@@ -297,6 +415,49 @@ export class LeadAgent
         const { field, value } = update;
 
         logger.info(`[LeadAgent] Attempting to update ${field} from ${(session.state.userFriendlyParams as any)[field]} to ${value}`);
+
+        // SPECIAL HANDLING: If garage_type changed, recalculate ALL dimensions
+        if (field === 'garage_type') {
+            // Extract number from value (e.g., "5-car" → 5)
+            const carCountMatch = String(value).match(/(\d+)/);
+            const numCars = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
+
+            logger.info(`[LeadAgent] Processing garage_type: ${value}, extracted numCars: ${numCars}`);
+
+            if (numCars && numCars > 0) {
+                const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(`${numCars} cars`);
+                logger.info(`[LeadAgent] Calculation result:`, JSON.stringify(calculation));
+
+                if (calculation.width && calculation.length) {
+                    // CLEAR old dimensions first
+                    (session.state.userFriendlyParams as any).width = undefined;
+                    (session.state.userFriendlyParams as any).length = undefined;
+                    (session.state.userFriendlyParams as any).height = undefined;
+
+                    // THEN set new dimensions
+                    (session.state.userFriendlyParams as any).garage_type = calculation.garageType;
+                    (session.state.userFriendlyParams as any).width = calculation.width;
+                    (session.state.userFriendlyParams as any).length = calculation.length;
+                    (session.state.userFriendlyParams as any).height = calculation.height;
+
+                    logger.info(`[LeadAgent] Recalculated dimensions for ${calculation.garageType}:`,
+                        `${calculation.width}×${calculation.length}×${calculation.height}`);
+                    logger.info(`[LeadAgent] Session params after update:`, JSON.stringify(session.state.userFriendlyParams));
+
+                    return {
+                        success: true,
+                        message: `✓ Updated to ${calculation.numCars}-car garage (${calculation.width}ft × ${calculation.length}ft × ${calculation.height}ft)`,
+                        updatedField: field
+                    };
+                }
+            }
+
+            logger.warn(`[LeadAgent] Failed to calculate dimensions for garage_type: ${value}`);
+            return {
+                success: false,
+                message: `❌ Could not calculate dimensions for ${value}`
+            };
+        }
 
         // Validate and convert numeric fields
         if (["width", "length", "height", "gauge", "utility_length"].includes(field))
@@ -627,6 +788,9 @@ export class LeadAgent
 
     public async run(sessionId: string, input: string): Promise<string>
     {
+        // Store current sessionId for use in detectParameterUpdate
+        (this as any).currentSessionId = sessionId;
+
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
 
         const session: LeadAgentSessionMetadata = this.getOrCreateSession(sessionId);
@@ -650,6 +814,20 @@ export class LeadAgent
 
         // FIRST: Check if user is updating existing parameters (single or multiple)
         const paramUpdate = await this.detectParameterUpdate(input);
+
+        // ✅ ADD THIS VALIDATION CHECK HERE ✅
+        if (paramUpdate === null)
+        {
+            // Check for validation errors from detectParameterUpdate
+            const validationError = (this as any).validationError;
+            if (validationError) {
+                logger.warn(`[LeadAgent] Validation error detected: ${validationError}`);
+                await session.memory.chatHistory.addAIChatMessage(validationError);
+                (this as any).validationError = null; // Clear for next iteration
+                return validationError;
+            }
+        }
+        // ✅ END OF NEW CODE ✅
 
         if (paramUpdate)
         {
@@ -763,6 +941,8 @@ export class LeadAgent
                     await session.memory.chatHistory.addAIChatMessage(updateResult.message);
                     return updateResult.message;
                 }
+
+                logger.info(`[LeadAgent] Single parameter updated:`, JSON.stringify(session.state.userFriendlyParams));
             }
 
             // After all updates, check if all required fields are complete
