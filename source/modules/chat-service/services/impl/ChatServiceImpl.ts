@@ -23,6 +23,13 @@ export class ChatServiceImpl implements ChatService
     private sessionMetadata: Map<string, SessionMetadata> = new Map();
     private clientSessions: Map<string, string> = new Map();
 
+    /**
+     * ✅ NEW: Track which sessions are currently processing requests
+     * Prevents concurrent requests on the same session
+     * @private
+     */
+    private requestLocks: Map<string, { locked: boolean; timestamp: number; timeout: NodeJS.Timeout }> = new Map();
+
     private cleanupInterval: NodeJS.Timeout | null = null;
     private metrics: SessionMetrics = {
         totalCreated: 0,
@@ -46,6 +53,7 @@ export class ChatServiceImpl implements ChatService
         }
 
         this.startSessionCleanup();
+        this.startLockCleanup();  // ✅ NEW: Start lock cleanup interval
     }
 
     /**
@@ -62,6 +70,101 @@ export class ChatServiceImpl implements ChatService
         }
 
         return ChatServiceImpl.instance;
+    }
+
+    /**
+     * ✅ NEW: Acquires a lock for a session
+     * Prevents concurrent requests on the same session
+     *
+     * @param sessionId - The session to lock
+     * @returns {boolean} true if lock acquired, false if already locked
+     */
+    private acquireLock(sessionId: string): boolean
+    {
+        const lockInfo = this.requestLocks.get(sessionId);
+
+        // If already locked, reject
+        if (lockInfo && lockInfo.locked)
+        {
+            logger.warn("[ChatService] Session already processing", {
+                sessionId,
+                lockedSince: new Date(lockInfo.timestamp).toISOString()
+            });
+            return false;
+        }
+
+        // Clear old timeout if exists
+        if (lockInfo?.timeout)
+        {
+            clearTimeout(lockInfo.timeout);
+        }
+
+        // Create timeout to auto-release lock after 90 seconds (safety mechanism)
+        const autoReleaseTimeout = setTimeout(() => {
+            logger.warn("[ChatService] Lock auto-released due to timeout", { sessionId });
+            this.releaseLock(sessionId);
+        }, 90000);  // 90 seconds
+
+        // Acquire lock
+        this.requestLocks.set(sessionId, {
+            locked: true,
+            timestamp: Date.now(),
+            timeout: autoReleaseTimeout
+        });
+
+        logger.info("[ChatService] Lock acquired", { sessionId });
+        return true;
+    }
+
+    /**
+     * ✅ NEW: Releases a lock for a session
+     *
+     * @param sessionId - The session to unlock
+     */
+    private releaseLock(sessionId: string): void
+    {
+        const lockInfo = this.requestLocks.get(sessionId);
+
+        if (lockInfo)
+        {
+            clearTimeout(lockInfo.timeout);
+            this.requestLocks.delete(sessionId);
+            logger.info("[ChatService] Lock released", { sessionId });
+        }
+    }
+
+    /**
+     * ✅ NEW: Cleanup stale locks every 2 minutes
+     * Removes locks that have been held for too long
+     */
+    private startLockCleanup(): void
+    {
+        setInterval(() => {
+            const now = Date.now();
+            let cleanedCount = 0;
+
+            for (const [sessionId, lockInfo] of this.requestLocks.entries())
+            {
+                // If lock held for more than 120 seconds, force release
+                if (now - lockInfo.timestamp > 120000)
+                {
+                    logger.warn("[ChatService] Force releasing stale lock", {
+                        sessionId,
+                        heldFor: now - lockInfo.timestamp
+                    });
+                    this.releaseLock(sessionId);
+                    cleanedCount++;
+                }
+            }
+
+            if (cleanedCount > 0)
+            {
+                logger.info("[ChatService] Lock cleanup complete", {
+                    cleanedCount,
+                    activeLocks: this.requestLocks.size
+                });
+            }
+        }, 120000);  // Run every 2 minutes
     }
 
     /**
@@ -85,23 +188,39 @@ export class ChatServiceImpl implements ChatService
         const clientId: string = this.generateClientIdentifier(clientIp, userAgent);
         const { sessionId } = this.getOrCreateSession(clientId, clientIp, userAgent);
 
+        // ✅ NEW: Try to acquire lock
+        if (!this.acquireLock(sessionId))
+        {
+            throw new ServerError(
+                ServerError.INTERNAL,
+                `Session ${sessionId} is already processing a request. Please wait a moment and try again.`
+            );
+        }
+
         let pricingData;
 
         try
         {
             const agent: LeadAgent = await LeadAgent.getInstance();
             pricingData = await agent.run(sessionId, question);
+
+            return {
+                answer: pricingData,
+                sessionId: sessionId,
+                timestamp: new Date().toISOString()
+            };
         }
         catch (error)
         {
+            logger.error("[ChatService] Error processing request", { sessionId, error: error.message });
             throw new ServerError(ServerError.INTERNAL, `Failed to process request: ${error.message}`);
         }
-
-        return {
-            answer: pricingData,
-            sessionId: sessionId,
-            timestamp: new Date().toISOString()
-        };
+        finally
+        {
+            // ✅ NEW: Always release lock, even on error
+            this.releaseLock(sessionId);
+            logger.info("[ChatService] Request completed and lock released", { sessionId });
+        }
     }
 
     /**
@@ -129,7 +248,10 @@ export class ChatServiceImpl implements ChatService
 
             this.sessionMetadata.delete(sessionId);
             this.clientSessions.delete(metadata.clientIdentifier);
+            this.requestLocks.delete(sessionId);  // ✅ NEW: Clean up any locks
             this.metrics.totalEnded++;
+
+            logger.info("[ChatService] Session ended successfully", { sessionId });
 
             return {success: true, message: `Session ${sessionId} ended successfully`};
         }
@@ -193,6 +315,7 @@ export class ChatServiceImpl implements ChatService
                 if (metadata)
                 {
                     this.sessionMetadata.delete(existingSessionId);
+                    this.requestLocks.delete(existingSessionId);  // ✅ NEW: Clean up any locks
                     this.metrics.totalExpired++;
 
                     logger.info("[ChatService] Expired session cleaned up", { clientId, sessionId: existingSessionId });
@@ -287,6 +410,7 @@ export class ChatServiceImpl implements ChatService
             {
                 this.sessionMetadata.delete(sessionId);
                 this.clientSessions.delete(metadata.clientIdentifier);
+                this.requestLocks.delete(sessionId);  // ✅ NEW: Clean up any locks
                 cleanedCount++;
                 this.metrics.totalExpired++;
             }
@@ -303,6 +427,7 @@ export class ChatServiceImpl implements ChatService
                 expiringSoonCount: warningCount,
                 activeSessions: this.sessionMetadata.size,
                 activeClients: this.clientSessions.size,
+                activeLocks: this.requestLocks.size,  // ✅ NEW: Show active locks
                 metrics: this.metrics
             });
         }

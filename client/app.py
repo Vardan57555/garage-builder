@@ -1,70 +1,153 @@
-"""Streamlit chat UI with proper session management."""
+"""Streamlit chat UI with PROPER tab isolation using query parameters."""
 
 import os
-import time
-import re
 import json
-from typing import Any
+import uuid
+from typing import Any, Optional, Tuple
 
 import httpx
 import streamlit as st
 
-# Backend URLs
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 
-st.set_page_config(page_title="Garage Builder Assistant", page_icon="🤖")
+st.set_page_config(
+    page_title="Garage Builder Assistant",
+    page_icon="🤖",
+    initial_sidebar_state="expanded"
+)
+
+# ✅ CRITICAL FIX: Generate unique tab ID from URL query parameter
+# This ensures each browser tab has a UNIQUE identifier
+def get_or_create_tab_id():
+    """Get tab ID from URL query params, or create new one if missing."""
+    from urllib.parse import urlparse, parse_qs
+    try:
+        # Try to get tabId from URL query parameters
+        query_params = st.query_params
+        if "tabId" in query_params:
+            tab_id = query_params["tabId"]
+            if isinstance(tab_id, list):
+                tab_id = tab_id[0]
+            return tab_id
+    except:
+        pass
+
+    # Generate new tab ID if not in URL
+    new_tab_id = str(uuid.uuid4())
+
+    # ✅ IMPORTANT: Update URL with tabId parameter so it persists
+    st.query_params["tabId"] = new_tab_id
+
+    return new_tab_id
+
+TAB_ID = get_or_create_tab_id()
+
+# ✅ Use TAB_ID directly (not cached) for session state keys
+SESSION_STATE_KEY = f"sessionId_{TAB_ID}"
+MESSAGES_STATE_KEY = f"messages_{TAB_ID}"
 
 
 def format_pricing_response(payload: Any) -> str:
-    """Format backend pricing response into readable message."""
+    """Extract a human-readable message from backend payload fragments."""
 
-    if not payload:
+    if payload is None:
         return "⚠️ Empty response received from pricing service."
+
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        return stripped or "⚠️ Empty response received from pricing service."
+
+    if isinstance(payload, dict):
+        for key in ("message", "text", "summary", "answer", "response", "content"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        data_value = payload.get("data")
+        if isinstance(data_value, str):
+            stripped = data_value.strip()
+            if stripped:
+                return stripped
+        elif data_value is not None:
+            try:
+                return json.dumps(data_value, indent=2, default=str)
+            except TypeError:
+                return str(data_value)
+
+        try:
+            return json.dumps(payload, indent=2, default=str)
+        except TypeError:
+            return str(payload)
+
+    return str(payload)
+
+
+def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
+    """Parse full backend response and return session ID with formatted answer."""
+
+    if payload is None:
+        return None, "⚠️ Empty response received from pricing service."
 
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
         except json.JSONDecodeError:
-            return payload.strip()
+            stripped = payload.strip()
+            return None, stripped or "⚠️ Empty response received from pricing service."
 
     if not isinstance(payload, dict):
-        return f"⚠️ Unexpected response type: {type(payload).__name__}"
+        return None, f"⚠️ Unexpected response type: {type(payload).__name__}"
 
-    data = (
-        payload.get("data")
-        or payload.get("message")
-        or payload.get("answer")
-        or payload.get("result")
-        or payload
-    )
+    if payload.get("success") is False:
+        error_message = format_pricing_response(
+            payload.get("message")
+            or payload.get("error")
+            or payload.get("errors")
+            or payload
+        )
+        return None, f"⚠️ Backend error: {error_message}"
 
-    if isinstance(data, dict):
-        data = data.get("text") or data.get("summary") or str(data)
-    elif not isinstance(data, str):
-        data = str(data)
+    content = payload.get("data") or payload.get("result") or payload
+    session_id: Optional[str] = None
+    answer_source: Any = content
 
-    return data.strip()
+    if isinstance(content, dict):
+        session_id = content.get("sessionId") or content.get("session_id")
+        for key in ("answer", "message", "result", "text"):
+            if key in content and content[key] not in (None, ""):
+                answer_source = content[key]
+                break
+        else:
+            answer_source = content
+
+    return session_id, format_pricing_response(answer_source)
 
 
-# ===== CRITICAL: Initialize or retrieve sessionId from Streamlit session state =====
-if "sessionId" not in st.session_state:
-    st.session_state.sessionId = None  # Will be set after first request
+# ✅ INITIALIZE: Use tab-specific keys (not cached)
+if SESSION_STATE_KEY not in st.session_state:
+    st.session_state[SESSION_STATE_KEY] = None
 
-if "messages" not in st.session_state:
-    st.session_state.messages = [
+if MESSAGES_STATE_KEY not in st.session_state:
+    st.session_state[MESSAGES_STATE_KEY] = [
         {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
     ]
 
 st.title("Garage Builder Chat")
 
+# ✅ DEBUG INFO: Show tab identification
+with st.sidebar:
+    st.header("🔹 Tab Info")
+    st.info(f"**Tab ID:** `{TAB_ID[:16]}...`")
+    st.caption("Each tab has a unique ID. Open a new tab and see a different ID!")
+
 # Display conversation history
-for msg in st.session_state.messages:
+for msg in st.session_state[MESSAGES_STATE_KEY]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 # Get user input
 if prompt := st.chat_input("Type your question…"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state[MESSAGES_STATE_KEY].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
@@ -75,117 +158,72 @@ if prompt := st.chat_input("Type your question…"):
         try:
             timeout = httpx.Timeout(60.0)
             with httpx.Client(timeout=timeout) as client:
-                # ===== CRITICAL: Build request body with sessionId if available =====
-                request_body = {
-                    "question": prompt,
-                }
-                
-                # If we have a sessionId from a previous request, send it back
-                if st.session_state.sessionId:
-                    request_body["sessionId"] = st.session_state.sessionId
-                    print(f"[Streamlit] Reusing sessionId: {st.session_state.sessionId}")
-                else:
-                    print("[Streamlit] First request - will get new sessionId")
+                request_body = {"question": prompt}
 
-                response = client.post(
-                    BACKEND_URL,
-                    json=request_body,
-                )
+                # ✅ CRITICAL: Use tab-specific session ID
+                if st.session_state[SESSION_STATE_KEY]:
+                    request_body["sessionId"] = st.session_state[SESSION_STATE_KEY]
+
+                response = client.post(BACKEND_URL, json=request_body)
                 response.raise_for_status()
 
-                # Handle response
                 try:
-                    job_data = response.json()
-                except Exception:
-                    job_data = response.text
+                    raw_payload = response.json()
+                except ValueError:
+                    raw_payload = response.text
 
-                print(f"[Streamlit] Response: {job_data}")
-
-                # ===== DEBUG: Print full response to see structure =====
-                print(f"[Streamlit DEBUG] Full response: {job_data}")
-                print(f"[Streamlit DEBUG] Response type: {type(job_data)}")
-                
-                # ===== CRITICAL: Extract and save sessionId =====
-                if isinstance(job_data, dict):
-                    print(f"[Streamlit DEBUG] Dict keys: {job_data.keys()}")
-                    
-                    # Save sessionId for next request
-                    if "sessionId" in job_data:
-                        st.session_state.sessionId = job_data["sessionId"]
-                        print(f"[Streamlit] Saved sessionId: {st.session_state.sessionId}")
-                    
-                    # Try different possible answer field names
-                    answer_text = (
-                        job_data.get("answer")
-                        or job_data.get("data", {}).get("answer") if isinstance(job_data.get("data"), dict) else None
-                        or job_data.get("message")
-                        or job_data.get("result")
-                        or ""
-                    )
-                    
-                    print(f"[Streamlit DEBUG] Extracted answer: {answer_text}")
-                    reply = answer_text if answer_text else f"⚠️ Could not extract answer. Response: {job_data}"
-                else:
-                    print(f"[Streamlit DEBUG] Response is not a dict, it's: {job_data}")
-                    reply = str(job_data)
+            session_id, reply = parse_chat_response(raw_payload)
+            if session_id:
+                st.session_state[SESSION_STATE_KEY] = session_id  # ✅ Store in tab-specific key
 
         except Exception as exc:
             reply = f"⚠️ Request failed: {exc}"
-            print(f"[Streamlit] Error: {exc}")
 
         placeholder.markdown(reply)
-        st.session_state.messages.append({"role": "assistant", "content": reply})
-
-
-# Display session info (for debugging)
-with st.sidebar:
-    st.header("Session Info")
-    if st.session_state.sessionId:
-        st.info(f"**Session ID:** `{st.session_state.sessionId}`")
-        st.success("Session is active")
-    else:
-        st.warning("Waiting for first response...")
-    
-    if st.button("Clear Session"):
-        st.session_state.sessionId = None
-        st.session_state.messages = [
-            {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
-        ]
-        st.rerun()
+        st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
 
 
 def end_session(session_id: str) -> bool:
     """Call backend to end a session."""
     if not session_id:
         return False
-    
+
     try:
         with httpx.Client(timeout=10.0) as client:
             response = client.post(
-                f"{BACKEND_URL.replace('/chat', '')}/end",  # Change /chat to /end
+                f"{BACKEND_URL.replace('/chat', '')}/end",
                 json={"sessionId": session_id},
             )
             response.raise_for_status()
-            
-            result = response.json()
-            print(f"[Streamlit] Session ended: {result}")
-            return result.get("success", False)
-    except Exception as exc:
-        print(f"[Streamlit] Error ending session: {exc}")
+
+            try:
+                result = response.json()
+            except ValueError:
+                return False
+
+            if isinstance(result, dict):
+                data = result.get("data") if isinstance(result.get("data"), dict) else None
+                if data and "success" in data:
+                    return bool(data.get("success"))
+                return bool(result.get("success"))
+
+            return False
+    except Exception:
         return False
 
-# Update your "Clear Session" button:
+
 with st.sidebar:
     st.header("Session Info")
-    if st.session_state.sessionId:
-        st.info(f"**Session ID:** `{st.session_state.sessionId}`")
-        st.success("Session is active")
-        
-        # ===== NEW: End session button =====
-        if st.button("🔴 Clear Session"):
-            if end_session(st.session_state.sessionId):
-                st.session_state.sessionId = None
-                st.session_state.messages = [
+
+    # ✅ Use tab-specific session ID
+    if st.session_state[SESSION_STATE_KEY]:
+        st.info(f"**Session ID:** `{st.session_state[SESSION_STATE_KEY][:16]}...`")
+        st.success("✅ Session is active")
+
+        if st.button("🔴 End Session", key="end_session"):
+            if end_session(st.session_state[SESSION_STATE_KEY]):
+                st.session_state[SESSION_STATE_KEY] = None
+                st.session_state[MESSAGES_STATE_KEY] = [
                     {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
                 ]
                 st.success("Session cleared!")
@@ -193,12 +231,11 @@ with st.sidebar:
             else:
                 st.error("Failed to end session")
     else:
-        st.warning("Waiting for first response...")
-    
-    # Also show button to start fresh (without calling backend)
-    if st.button("↻ New Conversation"):
-        st.session_state.sessionId = None
-        st.session_state.messages = [
+        st.warning("⏳ Waiting for first response...")
+
+    if st.button("↻ New Conversation", key="new_conversation"):
+        st.session_state[SESSION_STATE_KEY] = None
+        st.session_state[MESSAGES_STATE_KEY] = [
             {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
         ]
         st.rerun()

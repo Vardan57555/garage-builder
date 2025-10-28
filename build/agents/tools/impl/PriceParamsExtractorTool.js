@@ -8,6 +8,7 @@ const PriceServiceImpl_1 = require("../../../modules/price-service/services/impl
 const messages_1 = require("@langchain/core/messages");
 const Log_1 = require("../../../utils/logger/Log");
 const Constants_1 = require("../../../common/io/Constants");
+const DimensionCalculator_1 = require("../../../utils/dimensionCalculator/DimensionCalculator");
 const logger = (0, Log_1.createLogger)(module);
 class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     static instance;
@@ -263,43 +264,64 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         }
     }
     buildInferencePrompt(userInput) {
+        const calculation = DimensionCalculator_1.DynamicGarageDimensionCalculator.calculateDimensionsFromInput(userInput);
+        let dimensionExplanation = `
+            DIMENSION CALCULATION (Dynamic Formula):
+            - Width formula: (number_of_cars × 6) + 8 feet clearance
+            - Length formula: 15 (car length) + 5 feet clearance = 20 feet
+            - Height: 10 feet (standard) or 12 feet (truck/RV)
+            `;
+        if (calculation.numCars) {
+            dimensionExplanation += `
+            Example for ${calculation.numCars} car(s):
+            - Width: (${calculation.numCars} × 6) + 8 = ${calculation.width} ft
+            - Length: 15 + 5 = ${calculation.length} ft
+            - Height: ${calculation.height} ft
+            `;
+        }
         return `You are a garage/building specification extraction system.
-                CRITICAL: You MUST infer all required data from context. NEVER ask clarifying questions.
-                
-                Task: Extract and intelligently infer building parameters from user input.
-                
-                RULES:
-                1. If user specifies garage type (e.g., "2 car garage"), infer standard dimensions:
-                   - 1 car garage: 12×20×10 ft
-                   - 2 car garage: 20×20×10 ft
-                   - 3 car garage: 30×20×10 ft
-                   - Truck garage: 16×24×12 ft
-                   - RV garage: 14×40×12 ft
-                2. If explicit dimensions given (e.g., "20x30x10"), use those exact numbers
-                3. For missing optional fields: Use null, don't ask for them
-                4. CRITICAL - Roof type handling:
-                   - ONLY extract roof_type if user EXPLICITLY mentions it
-                   - Do NOT infer or default roof_type to "regular"
-                   - If user does NOT mention roof style, return null
-                   - Valid values if specified: "regular", "a-frame", "vertical", "box"
-                5. Extract state if mentioned in input
-                
-                OUTPUT FORMAT - Return ONLY valid JSON:
-                {
-                  "garage_type": "detected type or null",
-                  "width": number or null,
-                  "length": number or null,
-                  "height": number or null,
-                  "state_name": "state name or null",
-                  "roof_type": null if not mentioned, or "regular"|"a-frame"|"vertical"|"box" if specified,
-                  "manufacturer_name": "string or null",
-                  "utility_length": number or null,
-                  "building_type": "string or null",
-                  "gauge": number or null,
-                  "is_barn": boolean or null
-                }
+            CRITICAL: You MUST infer all required data from context. NEVER ask clarifying questions.
+            
+            Task: Extract and intelligently infer building parameters from user input.
+            
+            RULES:
+            1. If user specifies number of cars (e.g., "2 cars", "5 car garage", "10 cars"), calculate dimensions dynamically:
+               ${dimensionExplanation}
+            2. If explicit dimensions given (e.g., "20x30x10"), use those exact numbers INSTEAD of calculated defaults
+            3. Special garage types:
+               - Truck garage: width varies by car count, length: 24 ft, height: 12 ft
+               - RV garage: width: 14 ft, length: 40 ft, height: 12 ft
+            4. For missing optional fields: Use null, don't ask for them
+            5. CRITICAL - Roof type handling:
+               - ONLY extract roof_type if user EXPLICITLY mentions it
+               - Do NOT infer or default roof_type to "regular"
+               - If user does NOT mention roof style, return null
+               - Valid values if specified: "regular", "a-frame", "vertical", "box"
+            6. Extract state if mentioned in input
+            
+            EXAMPLES:
+            - Input: "5 car garage" → {"garage_type": "5-car", "width": 38, "length": 20, "height": 10, ...}
+            - Input: "10 cars" → {"garage_type": "10-car", "width": 68, "length": 20, "height": 10, ...}
+            - Input: "3 cars in texas" → {"garage_type": "3-car", "width": 26, "length": 20, "height": 10, "state_name": "texas", ...}
+            - Input: "20x25x10 garage" → {"width": 20, "length": 25, "height": 10, "garage_type": null, ...}
+            - Input: "truck garage" → {"garage_type": "truck", "width": varies, "length": 24, "height": 12, ...}
+            
+            OUTPUT FORMAT - Return ONLY valid JSON:
+            {
+              "garage_type": "detected type (e.g., '5-car', 'truck', 'rv') or null",
+              "width": number or null,
+              "length": number or null,
+              "height": number or null,
+              "state_name": "state name or null",
+              "roof_type": null if not mentioned, or "regular"|"a-frame"|"vertical"|"box" if specified,
+              "manufacturer_name": "string or null",
+              "utility_length": number or null,
+              "building_type": "string or null",
+              "gauge": number or null,
+              "is_barn": boolean or null
+            }
 
-            User input: "${userInput}"`;
+        User input: "${userInput}"`;
     }
 }
 exports.PriceParamsExtractorTool = PriceParamsExtractorTool;

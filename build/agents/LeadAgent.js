@@ -11,6 +11,9 @@ const Constants_1 = require("../common/io/Constants");
 const Log_1 = require("../utils/logger/Log");
 const RedisCacheUtils_1 = require("../utils/cache/RedisCacheUtils");
 const SessionManager_1 = require("../utils/session/SessionManager");
+const StateValidator_1 = require("./validators/StateValidator");
+const RoofValidator_1 = require("./validators/RoofValidator");
+const DimensionCalculator_1 = require("../utils/dimensionCalculator/DimensionCalculator");
 const logger = (0, Log_1.createLogger)(module);
 class LeadAgent {
     static instance;
@@ -34,27 +37,91 @@ class LeadAgent {
         return LeadAgent.instance;
     }
     async detectParameterUpdate(input) {
+        const lowerInput = input.toLowerCase();
+        const carCountMatch = input.match(/(\d+)\s*cars?/i);
+        if (carCountMatch) {
+            const newCarCount = parseInt(carCountMatch[1], 10);
+            const sessionData = this.sessionManager.getSession(this.currentSessionId);
+            const currentParams = sessionData?.state?.userFriendlyParams;
+            const currentGarageType = currentParams?.garage_type;
+            const currentCarCountMatch = currentGarageType?.match(/(\d+)-car/);
+            const currentCarCount = currentCarCountMatch ? parseInt(currentCarCountMatch[1], 10) : null;
+            logger.info(`[LeadAgent] Car count check - Current: ${currentCarCount}, New: ${newCarCount}`);
+            if (currentCarCount !== null && currentCarCount !== newCarCount) {
+                logger.info(`[LeadAgent] Car count CHANGED from ${currentCarCount} to ${newCarCount} - triggering update`);
+                return {
+                    field: 'garage_type',
+                    value: `${newCarCount}-car`
+                };
+            }
+            if (currentCarCount === null && newCarCount) {
+                logger.info(`[LeadAgent] Initial car count set to ${newCarCount}`);
+                return {
+                    field: 'garage_type',
+                    value: `${newCarCount}-car`
+                };
+            }
+        }
+        const multiParamResult = this.extractMultipleParametersByRegex(lowerInput);
+        if (multiParamResult && multiParamResult.length > 0) {
+            logger.info(`[LeadAgent] Regex extracted ${multiParamResult.length} parameters`);
+            for (const param of multiParamResult) {
+                const validationError = await this.validateParameterValue(param.field, param.value);
+                if (validationError) {
+                    logger.warn(`[LeadAgent] Validation failed for ${param.field}: ${validationError}`);
+                    this.validationError = validationError;
+                    return null;
+                }
+            }
+            this.pendingUpdates = multiParamResult;
+            return multiParamResult[0];
+        }
+        const regexResult = this.extractParameterByRegex(lowerInput);
+        if (regexResult) {
+            logger.info(`[LeadAgent] Regex extracted update: ${regexResult.field} = ${regexResult.value}`);
+            const validationError = await this.validateParameterValue(regexResult.field, regexResult.value);
+            if (validationError) {
+                logger.warn(`[LeadAgent] Validation failed for ${regexResult.field}: ${validationError}`);
+                this.validationError = validationError;
+                return null;
+            }
+            return regexResult;
+        }
         const updatePatterns = [
-            { regex: /change|update|correct|fix|actually|wait|let me/i, weight: 1 },
-            { regex: /height|length|width|roof|state|gauge/i, weight: 2 }
+            { regex: /\b(change|update|correct|fix|actually|wait|let me|make|set)\b/i, weight: 1 },
+            { regex: /\b(width|length|height|roof|state|gauge)\b/i, weight: 2 }
         ];
         const hasUpdateIntent = updatePatterns.some(p => p.regex.test(input));
         if (!hasUpdateIntent)
             return null;
         try {
             const prompt = `Given this user message: "${input}"
-            
-Determine if they want to UPDATE/CHANGE a parameter and extract:
-1. Which parameter (width, length, height, roof_type, state_name, gauge, building_type)
-2. The new value
 
-Respond in JSON format only:
-{"isUpdate": true/false, "field": "parameter_name", "value": extracted_value}
-or
-{"isUpdate": false}`;
+        Extract the parameter update:
+        1. Which parameter? (width, length, height, roof_type, state_name, gauge, building_type)
+        2. What is the NEW value?
+        
+        Respond ONLY with JSON - no markdown, no explanation:
+        {"isUpdate": true, "field": "width", "value": 25}
+        or
+        {"isUpdate": false}`;
             const aiMessage = await SharedLLM_1.sharedLLM.invoke([new messages_1.HumanMessage(prompt)]);
-            const response = JSON.parse(aiMessage.content.trim());
-            if (response.isUpdate && response.field && response.value) {
+            const responseText = aiMessage.content.trim();
+            logger.info(`[LeadAgent] AI update detection response: ${responseText}`);
+            const cleanedResponse = responseText
+                .replace(/^```json\s*/g, '')
+                .replace(/^```\s*/g, '')
+                .replace(/\s*```$/g, '')
+                .trim();
+            const response = JSON.parse(cleanedResponse);
+            if (response.isUpdate && response.field && response.value !== undefined && response.value !== null) {
+                logger.info(`[LeadAgent] AI detected update: ${response.field} = ${response.value}`);
+                const validationError = await this.validateParameterValue(response.field, response.value);
+                if (validationError) {
+                    logger.warn(`[LeadAgent] Validation failed for ${response.field}: ${validationError}`);
+                    this.validationError = validationError;
+                    return null;
+                }
                 return {
                     field: response.field,
                     value: response.value
@@ -62,33 +129,224 @@ or
             }
         }
         catch (error) {
-            logger.warn("[LeadAgent] Update detection failed:", error);
+            logger.warn("[LeadAgent] AI update detection failed:", error);
+        }
+        return null;
+    }
+    async validateParameterValue(field, value) {
+        if (field === "roof_type") {
+            const validationResult = await RoofValidator_1.RoofDataValidator.validateRoofType(value);
+            if (!validationResult.isValid) {
+                return `❌ "${value}" is not a valid roof type.\n\n${RoofValidator_1.RoofDataValidator.getValidRoofTypesMessage()}`;
+            }
+        }
+        if (field === "state_name") {
+            const sessionData = this.sessionManager.getSession(this.currentSessionId);
+            const validationResult = await StateValidator_1.StateDataValidator.validateState(value, async (name) => await this.mapStateToDB(name, sessionData));
+            if (!validationResult.isValid) {
+                return `❌ "${value}" is not a valid state.\n\n${StateValidator_1.StateDataValidator.getValidStatesMessage()}`;
+            }
+        }
+        if (["width", "length", "height", "gauge", "utility_length"].includes(field)) {
+            let numValue;
+            if (typeof value === 'string') {
+                numValue = parseFloat(value.replace(/[^\d.]/g, ''));
+            }
+            else if (typeof value === 'number') {
+                numValue = value;
+            }
+            else {
+                numValue = NaN;
+            }
+            if (isNaN(numValue) || numValue <= 0) {
+                return `❌ Invalid ${field}. Please provide a positive number (e.g., "make ${field} 25").`;
+            }
+        }
+        return null;
+    }
+    extractMultipleParametersByRegex(input) {
+        const updates = [];
+        const lowerInput = input.toLowerCase().trim();
+        logger.info(`[extractMultipleParametersByRegex] Processing input: "${input}"`);
+        logger.info(`[extractMultipleParametersByRegex] Lowercase input: "${lowerInput}"`);
+        const widthMatch = lowerInput.match(/\bwidth\s+(\d+(?:\.\d+)?)\b/);
+        const lengthMatch = lowerInput.match(/\blength\s+(\d+(?:\.\d+)?)\b/);
+        const heightMatch = lowerInput.match(/\bheight\s+(\d+(?:\.\d+)?)\b/);
+        const gaugeMatch = lowerInput.match(/\bgauge\s+(\d+(?:\.\d+)?)\b/);
+        logger.info(`[extractMultipleParametersByRegex] Raw matches - width: ${widthMatch?.[1]}, length: ${lengthMatch?.[1]}, height: ${heightMatch?.[1]}, gauge: ${gaugeMatch?.[1]}`);
+        if (widthMatch) {
+            const value = parseFloat(widthMatch[1]);
+            if (!isNaN(value) && value > 0) {
+                updates.push({ field: 'width', value });
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added width: ${value}`);
+            }
+        }
+        if (lengthMatch) {
+            const value = parseFloat(lengthMatch[1]);
+            if (!isNaN(value) && value > 0) {
+                updates.push({ field: 'length', value });
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added length: ${value}`);
+            }
+        }
+        if (heightMatch) {
+            const value = parseFloat(heightMatch[1]);
+            if (!isNaN(value) && value > 0) {
+                updates.push({ field: 'height', value });
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added height: ${value}`);
+            }
+        }
+        if (gaugeMatch) {
+            const value = parseFloat(gaugeMatch[1]);
+            if (!isNaN(value) && value > 0) {
+                updates.push({ field: 'gauge', value });
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added gauge: ${value}`);
+            }
+        }
+        if (updates.length === 0) {
+            const dimensionMatch = lowerInput.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/);
+            if (dimensionMatch) {
+                updates.push({ field: 'width', value: parseFloat(dimensionMatch[1]) }, { field: 'length', value: parseFloat(dimensionMatch[2]) }, { field: 'height', value: parseFloat(dimensionMatch[3]) });
+                logger.info(`[extractMultipleParametersByRegex] Matched dimensions format: ${dimensionMatch[1]}x${dimensionMatch[2]}x${dimensionMatch[3]}`);
+            }
+        }
+        logger.info(`[extractMultipleParametersByRegex] Total updates found: ${updates.length}`);
+        logger.info(`[extractMultipleParametersByRegex] Final updates:`, JSON.stringify(updates));
+        return updates.length > 0 ? updates : null;
+    }
+    extractParameterByRegex(input) {
+        const patterns = [
+            {
+                regex: /^\s*(vert(?:ical)?|a-?frame|aframe|box|box-?style|regular|standard|normal|pitched|gabled|sidewall)\s*$/i,
+                parse: (match) => {
+                    let value = match[1].toLowerCase();
+                    if (value === 'vert')
+                        value = 'vertical';
+                    if (value === 'verti')
+                        value = 'vertical';
+                    return {
+                        field: 'roof_type',
+                        value: value
+                    };
+                }
+            },
+            {
+                regex: /(?:want|in|make|set|change|update|roof|style|to)\s+(?:to\s+)?(vert(?:ical)?|a-?frame|aframe|box|box-?style|regular|standard|normal|pitched|gabled|sidewall)/i,
+                parse: (match) => {
+                    let value = match[1].toLowerCase();
+                    if (value === 'vert')
+                        value = 'vertical';
+                    if (value === 'verti')
+                        value = 'vertical';
+                    return {
+                        field: 'roof_type',
+                        value: value
+                    };
+                }
+            },
+            {
+                regex: /(?:make|set|change|update)?\s*(?:the\s+)?(width|length|height)\s+(?:to\s+)?(\d+)/i,
+                parse: (match) => ({
+                    field: match[1].toLowerCase(),
+                    value: parseFloat(match[2])
+                })
+            },
+            {
+                regex: /(?:make|set|change|update)?\s*gauge\s+(?:to\s+)?(\d+)/i,
+                parse: (match) => ({
+                    field: 'gauge',
+                    value: parseFloat(match[1])
+                })
+            },
+            {
+                regex: /\b(?:state|location|in)\s+([a-z\s]+?)(?:\s*(?:\.|$|,|and))/i,
+                parse: (match) => ({
+                    field: 'state_name',
+                    value: match[1].trim()
+                })
+            },
+        ];
+        for (const pattern of patterns) {
+            const match = input.match(pattern.regex);
+            if (match) {
+                try {
+                    const result = pattern.parse(match);
+                    if (result && result.value !== null && result.value !== undefined) {
+                        logger.info(`[extractParameterByRegex] Matched ${result.field} = ${result.value}`);
+                        return result;
+                    }
+                }
+                catch (e) {
+                    logger.warn(`[extractParameterByRegex] Parse error:`, e);
+                }
+            }
         }
         return null;
     }
     handleParameterUpdate(session, update) {
         const { field, value } = update;
         logger.info(`[LeadAgent] Attempting to update ${field} from ${session.state.userFriendlyParams[field]} to ${value}`);
+        if (field === 'garage_type') {
+            const carCountMatch = String(value).match(/(\d+)/);
+            const numCars = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
+            logger.info(`[LeadAgent] Processing garage_type: ${value}, extracted numCars: ${numCars}`);
+            if (numCars && numCars > 0) {
+                const calculation = DimensionCalculator_1.DynamicGarageDimensionCalculator.calculateDimensionsFromInput(`${numCars} cars`);
+                logger.info(`[LeadAgent] Calculation result:`, JSON.stringify(calculation));
+                if (calculation.width && calculation.length) {
+                    session.state.userFriendlyParams.width = undefined;
+                    session.state.userFriendlyParams.length = undefined;
+                    session.state.userFriendlyParams.height = undefined;
+                    session.state.userFriendlyParams.garage_type = calculation.garageType;
+                    session.state.userFriendlyParams.width = calculation.width;
+                    session.state.userFriendlyParams.length = calculation.length;
+                    session.state.userFriendlyParams.height = calculation.height;
+                    logger.info(`[LeadAgent] Recalculated dimensions for ${calculation.garageType}:`, `${calculation.width}×${calculation.length}×${calculation.height}`);
+                    logger.info(`[LeadAgent] Session params after update:`, JSON.stringify(session.state.userFriendlyParams));
+                    return {
+                        success: true,
+                        message: `✓ Updated to ${calculation.numCars}-car garage (${calculation.width}ft × ${calculation.length}ft × ${calculation.height}ft)`,
+                        updatedField: field
+                    };
+                }
+            }
+            logger.warn(`[LeadAgent] Failed to calculate dimensions for garage_type: ${value}`);
+            return {
+                success: false,
+                message: `❌ Could not calculate dimensions for ${value}`
+            };
+        }
         if (["width", "length", "height", "gauge", "utility_length"].includes(field)) {
-            const numValue = parseFloat(String(value));
+            let numValue;
+            if (typeof value === 'string') {
+                numValue = parseFloat(value.replace(/[^\d.]/g, ''));
+            }
+            else if (typeof value === 'number') {
+                numValue = value;
+            }
+            else {
+                numValue = NaN;
+            }
             if (isNaN(numValue) || numValue <= 0) {
                 logger.warn(`[LeadAgent] Invalid ${field} value: ${value}`);
                 return {
                     success: false,
-                    message: `Invalid ${field}. Please provide a positive number.`
+                    message: `❌ Invalid ${field}. Please provide a positive number (e.g., "make ${field} 25").`
                 };
             }
             session.state.userFriendlyParams[field] = numValue;
             logger.info(`[LeadAgent] Successfully updated ${field} to ${numValue} (numeric)`);
         }
         else {
-            session.state.userFriendlyParams[field] = value;
+            session.state.userFriendlyParams[field] = String(value).trim();
             logger.info(`[LeadAgent] Successfully updated ${field} to ${value} (string)`);
         }
-        logger.info(`[LeadAgent] Current session params:`, JSON.stringify(session.state.userFriendlyParams));
+        logger.info(`[LeadAgent] Current session params after update:`, JSON.stringify(session.state.userFriendlyParams));
+        const updatedValue = session.state.userFriendlyParams[field];
+        const displayField = field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, ' ');
+        const fieldSuffix = ["width", "length", "height", "gauge", "utility_length"].includes(field) ? "ft." : "";
         return {
             success: true,
-            message: `Updated ${field} to ${value}. ✓`,
+            message: `✓ Updated ${displayField} to ${updatedValue}${fieldSuffix ? ' ' + fieldSuffix : ''}`,
             updatedField: field
         };
     }
@@ -210,7 +468,7 @@ or
                 }
             }
             const roof_id = userParams.roof_type ? await this.mapRoofTypeToDB(userParams.roof_type, map_id, session) : 2;
-            const technicalParams = {
+            return {
                 width: userParams.width ?? 0,
                 length: userParams.length ?? 0,
                 height: userParams.height ?? 0,
@@ -222,19 +480,6 @@ or
                 gauge: userParams.gauge ?? 14,
                 is_barn: userParams.is_barn,
             };
-            logger.info("[LeadAgent] ====== TECHNICAL PARAMS CONVERSION DEBUG ======");
-            logger.info("[LeadAgent] User-friendly params:", JSON.stringify(userParams, null, 2));
-            logger.info("[LeadAgent] State name:", userParams.state_name);
-            logger.info("[LeadAgent] Roof type:", userParams.roof_type);
-            logger.info("[LeadAgent] Building type:", userParams.building_type, "← CRITICAL: This determines pricing!");
-            logger.info("[LeadAgent] Gauge:", userParams.gauge ?? 14);
-            logger.info("[LeadAgent] ----");
-            logger.info("[LeadAgent] Map ID:", map_id, "(resolved from state)");
-            logger.info("[LeadAgent] Roof ID:", roof_id, "(resolved from roof type)");
-            logger.info("[LeadAgent] Manufacturer ID:", manufacturer_id);
-            logger.info("[LeadAgent] Final technical params:", JSON.stringify(technicalParams, null, 2));
-            logger.info("[LeadAgent] ====== END DEBUG ======");
-            return technicalParams;
         }
         catch (error) {
             logger.error("[LeadAgent] Param conversion failed:", error);
@@ -244,7 +489,7 @@ or
     getMissingFields(params) {
         return Constants_1.Constants.REQUIRED_FIELDS.filter((field) => !params[field]);
     }
-    formatDimensionsResponse(extractedParams, currentParams) {
+    formatDimensionsResponse(currentParams) {
         const dimensions = ["width", "length", "height"]
             .filter((k) => currentParams[k])
             .map((k) => `${k.charAt(0).toUpperCase() + k.slice(1)}: ${currentParams[k]}ft.`)
@@ -252,6 +497,7 @@ or
         return dimensions ? `Got it! ${dimensions}\n\n` : "";
     }
     async run(sessionId, input) {
+        this.currentSessionId = sessionId;
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
         const session = this.getOrCreateSession(sessionId);
         await session.memory.chatHistory.addUserMessage(input);
@@ -266,53 +512,109 @@ or
             session.state.hasGarageIntent = true;
         }
         const paramUpdate = await this.detectParameterUpdate(input);
+        if (paramUpdate === null) {
+            const validationError = this.validationError;
+            if (validationError) {
+                logger.warn(`[LeadAgent] Validation error detected: ${validationError}`);
+                await session.memory.chatHistory.addAIChatMessage(validationError);
+                this.validationError = null;
+                return validationError;
+            }
+        }
         if (paramUpdate) {
-            if (paramUpdate.field === "state_name") {
-                const validationResult = await this.validateState(paramUpdate.value);
-                if (!validationResult.isValid) {
-                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${this.getValidStatesMessage()}`;
-                    await session.memory.chatHistory.addAIChatMessage(errorMessage);
-                    return errorMessage;
-                }
-                paramUpdate.value = validationResult.normalizedName;
-            }
-            if (paramUpdate.field === "roof_type") {
-                const validationResult = await this.validateRoofType(paramUpdate.value);
-                if (!validationResult.isValid) {
-                    const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${this.getValidRoofTypesMessage()}`;
-                    await session.memory.chatHistory.addAIChatMessage(errorMessage);
-                    return errorMessage;
-                }
-                paramUpdate.value = validationResult.normalizedType;
-            }
-            const updateResult = this.handleParameterUpdate(session, paramUpdate);
-            if (updateResult.success) {
-                const missingFields = this.getMissingFields(session.state.userFriendlyParams);
-                if (missingFields.length === 0) {
-                    const confirmMessage = `Got it! ${updateResult.updatedField}: ${session.state.userFriendlyParams[updateResult.updatedField]}.\n\n✓ All parameters set! Calculating price...`;
-                    await session.memory.chatHistory.addAIChatMessage(confirmMessage);
-                    const technicalParams = await this.convertToTechnicalParams(session.state.userFriendlyParams, session);
-                    if (technicalParams) {
-                        const priceResult = await PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance().calculatePriceWithParams(technicalParams);
-                        const finalResponse = priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
-                        await session.memory.chatHistory.addAIChatMessage(priceResult);
-                        this.resetSessionState(session);
-                        return finalResponse;
+            const pendingUpdates = this.pendingUpdates || [];
+            let allUpdateResults = [];
+            if (pendingUpdates.length > 0) {
+                logger.info(`[LeadAgent] Processing ${pendingUpdates.length} pending updates`, JSON.stringify(pendingUpdates));
+                for (const update of pendingUpdates) {
+                    logger.info(`[LeadAgent] Validating update: ${update.field} = ${update.value}`);
+                    if (update.field === "state_name") {
+                        const validationResult = await StateValidator_1.StateDataValidator.validateState(update.value, async (name) => await this.mapStateToDB(name, this.getOrCreateSession("temp")));
+                        if (!validationResult.isValid) {
+                            const errorMessage = `❌ "${update.value}" is not a valid state.\n\n${StateValidator_1.StateDataValidator.getValidStatesMessage()}`;
+                            await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                            return errorMessage;
+                        }
+                        update.value = validationResult.normalizedName;
+                    }
+                    if (update.field === "roof_type") {
+                        const validationResult = await RoofValidator_1.RoofDataValidator.validateRoofType(update.value);
+                        if (!validationResult.isValid) {
+                            const errorMessage = `❌ "${update.value}" is not a valid roof type.\n\n${RoofValidator_1.RoofDataValidator.getValidRoofTypesMessage()}`;
+                            await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                            return errorMessage;
+                        }
+                        update.value = validationResult.normalizedType;
+                    }
+                    const updateResult = await this.handleParameterUpdate(session, update);
+                    allUpdateResults.push(updateResult);
+                    logger.info(`[LeadAgent] Update result for ${update.field}:`, updateResult);
+                    if (!updateResult.success) {
+                        await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+                        return updateResult.message;
                     }
                 }
-                else {
-                    const nextField = missingFields[0];
-                    session.state.currentField = nextField;
-                    const updatedValue = session.state.userFriendlyParams[updateResult.updatedField];
-                    const fieldSuffix = ["width", "length", "height", "gauge", "utility_length"].includes(updateResult.updatedField) ? "ft." : "";
-                    const response = `Got it! ${updateResult.updatedField}: ${updatedValue}${fieldSuffix}\n\n${Constants_1.Constants.FIELD_PROMPTS[nextField]}`;
-                    await session.memory.chatHistory.addAIChatMessage(response);
-                    return response;
+                this.pendingUpdates = [];
+                logger.info(`[LeadAgent] Final session params after all updates:`, JSON.stringify(session.state.userFriendlyParams));
+                const allUpdatesMessage = allUpdateResults
+                    .map((result, idx) => {
+                    const update = pendingUpdates[idx];
+                    const val = session.state.userFriendlyParams[update.field];
+                    const suffix = ["width", "length", "height", "gauge"].includes(update.field) ? "ft." : "";
+                    return `${update.field}: ${val}${suffix ? ' ' + suffix : ''}`;
+                })
+                    .join(" | ");
+                const response1 = `✓ Updated: ${allUpdatesMessage}`;
+                await session.memory.chatHistory.addAIChatMessage(response1);
+                logger.info(`[LeadAgent] Multi-param update response: ${response1}`);
+            }
+            else {
+                if (paramUpdate.field === "state_name") {
+                    const validationResult = await StateValidator_1.StateDataValidator.validateState(paramUpdate.value, async (name) => await this.mapStateToDB(name, this.getOrCreateSession("temp")));
+                    if (!validationResult.isValid) {
+                        const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${StateValidator_1.StateDataValidator.getValidStatesMessage()}`;
+                        await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                        return errorMessage;
+                    }
+                    paramUpdate.value = validationResult.normalizedName;
+                }
+                if (paramUpdate.field === "roof_type") {
+                    const validationResult = await RoofValidator_1.RoofDataValidator.validateRoofType(paramUpdate.value);
+                    if (!validationResult.isValid) {
+                        const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${RoofValidator_1.RoofDataValidator.getValidRoofTypesMessage()}`;
+                        await session.memory.chatHistory.addAIChatMessage(errorMessage);
+                        return errorMessage;
+                    }
+                    paramUpdate.value = validationResult.normalizedType;
+                }
+                const updateResult = await this.handleParameterUpdate(session, paramUpdate);
+                allUpdateResults.push(updateResult);
+                if (!updateResult.success) {
+                    await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+                    return updateResult.message;
+                }
+                logger.info(`[LeadAgent] Single parameter updated:`, JSON.stringify(session.state.userFriendlyParams));
+            }
+            const missingFields = this.getMissingFields(session.state.userFriendlyParams);
+            if (missingFields.length === 0) {
+                const confirmMessage = `✓ All parameters set! Calculating price...`;
+                await session.memory.chatHistory.addAIChatMessage(confirmMessage);
+                const technicalParams = await this.convertToTechnicalParams(session.state.userFriendlyParams, session);
+                if (technicalParams) {
+                    const priceResult = await PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance().calculatePriceWithParams(technicalParams);
+                    const finalResponse = priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
+                    await session.memory.chatHistory.addAIChatMessage(priceResult);
+                    this.resetSessionState(session);
+                    return finalResponse;
                 }
             }
             else {
-                await session.memory.chatHistory.addAIChatMessage(updateResult.message);
-                return updateResult.message;
+                const nextField = missingFields[0];
+                session.state.currentField = nextField;
+                const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
+                const response = `${currentParams}\n\n${Constants_1.Constants.FIELD_PROMPTS[nextField]}`;
+                await session.memory.chatHistory.addAIChatMessage(response);
+                return response;
             }
         }
         const extractor = PriceParamsExtractorTool_1.PriceParamsExtractorTool.getInstance();
@@ -321,18 +623,18 @@ or
         const extractedParams = extractor.safeExtractUserFriendlyParams(rawParams);
         logger.info(`[LeadAgent] Session ${sessionId} - Safe extracted user-friendly params:`, extractedParams);
         if (extractedParams.state_name) {
-            const validationResult = await this.validateState(extractedParams.state_name);
+            const validationResult = await StateValidator_1.StateDataValidator.validateState(extractedParams.state_name, async (name) => await this.mapStateToDB(name, this.getOrCreateSession("temp")));
             if (!validationResult.isValid) {
-                const errorMessage = `❌ "${extractedParams.state_name}" is not a valid state.\n\n${this.getValidStatesMessage()}\n\nPlease specify your state.`;
+                const errorMessage = `❌ "${extractedParams.state_name}" is not a valid state.\n\n${StateValidator_1.StateDataValidator.getValidStatesMessage()}\n\nPlease specify your state.`;
                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
                 return errorMessage;
             }
             extractedParams.state_name = validationResult.normalizedName;
         }
         if (extractedParams.roof_type) {
-            const validationResult = await this.validateRoofType(extractedParams.roof_type);
+            const validationResult = await RoofValidator_1.RoofDataValidator.validateRoofType(extractedParams.roof_type);
             if (!validationResult.isValid) {
-                const errorMessage = `❌ "${extractedParams.roof_type}" is not a valid roof type.\n\n${this.getValidRoofTypesMessage()}\n\nPlease specify your roof type.`;
+                const errorMessage = `❌ "${extractedParams.roof_type}" is not a valid roof type.\n\n${RoofValidator_1.RoofDataValidator.getValidRoofTypesMessage()}\n\nPlease specify your roof type.`;
                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
                 return errorMessage;
             }
@@ -352,7 +654,7 @@ or
         if (missingFields.length > 0) {
             const nextField = missingFields[0];
             session.state.currentField = nextField;
-            const response = this.formatDimensionsResponse(extractedParams, session.state.userFriendlyParams) + Constants_1.Constants.FIELD_PROMPTS[nextField];
+            const response = this.formatDimensionsResponse(session.state.userFriendlyParams) + Constants_1.Constants.FIELD_PROMPTS[nextField];
             logger.info(`[LeadAgent] Missing field: ${nextField}, prompting user`);
             await session.memory.chatHistory.addAIChatMessage(response);
             return response;
@@ -383,132 +685,25 @@ or
             logger.warn(`[LeadAgent] Attempted to end non-existent session: ${sessionId}`);
         }
     }
+    formatCurrentParams(params) {
+        const parts = [];
+        if (params.width)
+            parts.push(`Width: ${params.width}ft`);
+        if (params.length)
+            parts.push(`Length: ${params.length}ft`);
+        if (params.height)
+            parts.push(`Height: ${params.height}ft`);
+        if (params.roof_type)
+            parts.push(`Roof: ${params.roof_type}`);
+        if (params.state_name)
+            parts.push(`State: ${params.state_name}`);
+        if (params.gauge)
+            parts.push(`Gauge: ${params.gauge}`);
+        return parts.length > 0 ? `📋 Current parameters: ${parts.join(" | ")}` : "";
+    }
     async reset() {
         this.sessionManager.destroy();
         logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
-    }
-    getValidStatesMessage() {
-        const validStates = [
-            "Texas", "California", "Florida", "New York", "Pennsylvania",
-            "Illinois", "Ohio", "Georgia", "North Carolina", "Michigan",
-            "New Jersey", "Virginia", "Washington", "Arizona", "Massachusetts",
-            "Tennessee", "Maryland", "Missouri", "Wisconsin", "Colorado",
-            "Minnesota", "South Carolina", "Alabama", "Louisiana", "Kentucky",
-            "Oregon", "Oklahoma", "Connecticut", "Iowa", "Nevada",
-            "Arkansas", "Mississippi", "Kansas", "Utah", "New Mexico",
-            "Nebraska", "Idaho", "Maine", "Montana", "Rhode Island",
-            "Delaware", "South Dakota", "North Dakota", "Alaska", "Hawaii",
-            "Wyoming", "Vermont", "New Hampshire", "West Virginia"
-        ];
-        return `Valid states: ${validStates.join(", ")}`;
-    }
-    normalizeStateName(stateInput) {
-        const stateAbbreviationMap = {
-            "tx": "Texas", "ca": "California", "fl": "Florida", "ny": "New York",
-            "pa": "Pennsylvania", "il": "Illinois", "oh": "Ohio", "ga": "Georgia",
-            "nc": "North Carolina", "mi": "Michigan", "nj": "New Jersey", "va": "Virginia",
-            "wa": "Washington", "az": "Arizona", "ma": "Massachusetts", "tn": "Tennessee",
-            "md": "Maryland", "mo": "Missouri", "wi": "Wisconsin", "co": "Colorado",
-            "mn": "Minnesota", "sc": "South Carolina", "al": "Alabama", "la": "Louisiana",
-            "ky": "Kentucky", "or": "Oregon", "ok": "Oklahoma", "ct": "Connecticut",
-            "ia": "Iowa", "nv": "Nevada", "ar": "Arkansas", "ms": "Mississippi",
-            "ks": "Kansas", "ut": "Utah", "nm": "New Mexico", "ne": "Nebraska",
-            "id": "Idaho", "me": "Maine", "mt": "Montana", "ri": "Rhode Island",
-            "de": "Delaware", "sd": "South Dakota", "nd": "North Dakota", "ak": "Alaska",
-            "hi": "Hawaii", "wy": "Wyoming", "vt": "Vermont", "nh": "New Hampshire",
-            "wv": "West Virginia",
-        };
-        const validStates = Object.values(stateAbbreviationMap);
-        const normalized = stateInput.trim().toLowerCase();
-        const abbreviationMatch = normalized.match(/\b([a-z]{2})\b/);
-        const fullNameMatch = validStates.find(state => normalized.includes(state.toLowerCase()));
-        logger.info(`[normalizeStateName] Input: "${stateInput}" | Abbr match: ${abbreviationMatch?.[1]} | Full name match: ${fullNameMatch}`);
-        if (abbreviationMatch && stateAbbreviationMap[abbreviationMatch[1]]) {
-            const result = stateAbbreviationMap[abbreviationMatch[1]];
-            logger.info(`[normalizeStateName] ✓ Using abbreviation: ${abbreviationMatch[1]} → ${result}`);
-            return result;
-        }
-        if (fullNameMatch) {
-            logger.info(`[normalizeStateName] ✓ Using full name: ${fullNameMatch}`);
-            return fullNameMatch;
-        }
-        const exactMatch = validStates.find(state => state.toLowerCase() === normalized);
-        if (exactMatch) {
-            logger.info(`[normalizeStateName] ✓ Exact match: ${exactMatch}`);
-            return exactMatch;
-        }
-        logger.warn(`[normalizeStateName] ✗ Invalid state: "${stateInput}"`);
-        return null;
-    }
-    async validateState(stateName) {
-        try {
-            const normalizedName = this.normalizeStateName(stateName);
-            if (!normalizedName) {
-                return { isValid: false };
-            }
-            const mapping = await this.mapStateToDB(normalizedName, this.getOrCreateSession("temp"));
-            return {
-                isValid: mapping !== null,
-                normalizedName: normalizedName
-            };
-        }
-        catch (error) {
-            logger.warn("[LeadAgent] State validation failed:", error);
-            return { isValid: false };
-        }
-    }
-    normalizeRoofType(roofInput) {
-        const roofAliasMap = {
-            "regular": "regular",
-            "standard": "regular",
-            "normal": "regular",
-            "simple": "regular",
-            "aframe": "a-frame",
-            "a-frame": "a-frame",
-            "a frame": "a-frame",
-            "pitched": "a-frame",
-            "gabled": "a-frame",
-            "vertical": "vertical",
-            "vertical roof": "vertical",
-            "sidewall": "vertical",
-            "box": "box-style",
-            "box-style": "box-style",
-            "box style": "box-style",
-            "boxstyle": "box-style",
-        };
-        const normalized = roofInput.trim().toLowerCase();
-        const result = roofAliasMap[normalized];
-        if (result) {
-            logger.info(`[normalizeRoofType] ✓ Normalized "${roofInput}" → "${result}"`);
-            return result;
-        }
-        logger.warn(`[normalizeRoofType] ✗ Invalid roof type: "${roofInput}"`);
-        return null;
-    }
-    async validateRoofType(roofType) {
-        try {
-            const normalizedType = this.normalizeRoofType(roofType);
-            if (!normalizedType) {
-                return { isValid: false };
-            }
-            return {
-                isValid: true,
-                normalizedType: normalizedType
-            };
-        }
-        catch (error) {
-            logger.warn("[LeadAgent] Roof type validation failed:", error);
-            return { isValid: false };
-        }
-    }
-    getValidRoofTypesMessage() {
-        const roofTypes = [
-            "Regular (standard, simple roof)",
-            "A-Frame (pitched/gabled roof)",
-            "Vertical (sidewall roof)",
-            "Box-Style (box style roof)"
-        ];
-        return `Valid roof types:\n${roofTypes.map(t => `• ${t}`).join('\n')}`;
     }
 }
 exports.LeadAgent = LeadAgent;
