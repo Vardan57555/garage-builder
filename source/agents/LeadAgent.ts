@@ -92,32 +92,27 @@ export class LeadAgent
     {
         const lowerInput = input.toLowerCase();
 
-        // FIRST: Check for car count updates (e.g., "4 cars", "5 cars", "change to 6 cars")
         const carCountMatch = input.match(/(\d+)\s*cars?/i);
         if (carCountMatch) {
             const newCarCount = parseInt(carCountMatch[1], 10);
             const sessionData = this.sessionManager.getSession((this as any).currentSessionId) as LeadAgentSessionMetadata;
             const currentParams = sessionData?.state?.userFriendlyParams;
 
-            // Extract current car count from garage_type (e.g., "4-car" → 4)
             const currentGarageType = currentParams?.garage_type as string;
             const currentCarCountMatch = currentGarageType?.match(/(\d+)-car/);
             const currentCarCount = currentCarCountMatch ? parseInt(currentCarCountMatch[1], 10) : null;
 
             logger.info(`[LeadAgent] Car count check - Current: ${currentCarCount}, New: ${newCarCount}`);
 
-            // If car count changed, trigger an update
             if (currentCarCount !== null && currentCarCount !== newCarCount) {
                 logger.info(`[LeadAgent] Car count CHANGED from ${currentCarCount} to ${newCarCount} - triggering update`);
 
-                // Return a flag to recalculate all dimensions
                 return {
                     field: 'garage_type',
                     value: `${newCarCount}-car`
                 };
             }
 
-            // If no current car count, this is a new specification
             if (currentCarCount === null && newCarCount) {
                 logger.info(`[LeadAgent] Initial car count set to ${newCarCount}`);
                 return {
@@ -127,17 +122,14 @@ export class LeadAgent
             }
         }
 
-        // SECOND: Try regex-based extraction (faster, more reliable)
         const multiParamResult = this.extractMultipleParametersByRegex(lowerInput);
         if (multiParamResult && multiParamResult.length > 0) {
             logger.info(`[LeadAgent] Regex extracted ${multiParamResult.length} parameters`);
 
-            // VALIDATE each extracted parameter before storing
             for (const param of multiParamResult) {
                 const validationError = await this.validateParameterValue(param.field, param.value);
                 if (validationError) {
                     logger.warn(`[LeadAgent] Validation failed for ${param.field}: ${validationError}`);
-                    // Store error in a way we can return it
                     (this as any).validationError = validationError;
                     return null;
                 }
@@ -147,12 +139,10 @@ export class LeadAgent
             return multiParamResult[0];
         }
 
-        // THIRD: Single parameter update
         const regexResult = this.extractParameterByRegex(lowerInput);
         if (regexResult) {
             logger.info(`[LeadAgent] Regex extracted update: ${regexResult.field} = ${regexResult.value}`);
 
-            // VALIDATE before returning
             const validationError = await this.validateParameterValue(regexResult.field, regexResult.value);
             if (validationError) {
                 logger.warn(`[LeadAgent] Validation failed for ${regexResult.field}: ${validationError}`);
@@ -163,7 +153,6 @@ export class LeadAgent
             return regexResult;
         }
 
-        // FOURTH: Fall back to AI extraction if regex fails
         const updatePatterns = [
             { regex: /\b(change|update|correct|fix|actually|wait|let me|make|set)\b/i, weight: 1 },
             { regex: /\b(width|length|height|roof|state|gauge)\b/i, weight: 2 }
@@ -203,7 +192,6 @@ export class LeadAgent
             {
                 logger.info(`[LeadAgent] AI detected update: ${response.field} = ${response.value}`);
 
-                // VALIDATE before returning
                 const validationError = await this.validateParameterValue(response.field, response.value);
                 if (validationError) {
                     logger.warn(`[LeadAgent] Validation failed for ${response.field}: ${validationError}`);
@@ -231,7 +219,6 @@ export class LeadAgent
      */
     private async validateParameterValue(field: keyof UserFriendlyParams, value: any): Promise<string | null>
     {
-        // Validate roof_type
         if (field === "roof_type") {
             const validationResult = await RoofDataValidator.validateRoofType(value);
             if (!validationResult.isValid) {
@@ -239,7 +226,6 @@ export class LeadAgent
             }
         }
 
-        // Validate state_name
         if (field === "state_name") {
             const sessionData = this.sessionManager.getSession((this as any).currentSessionId) as LeadAgentSessionMetadata;
             const validationResult = await StateDataValidator.validateState(
@@ -251,7 +237,6 @@ export class LeadAgent
             }
         }
 
-        // Validate numeric fields
         if (["width", "length", "height", "gauge", "utility_length"].includes(field as string)) {
             let numValue: number;
             if (typeof value === 'string') {
@@ -267,7 +252,6 @@ export class LeadAgent
             }
         }
 
-        // All validations passed
         return null;
     }
 
@@ -283,8 +267,6 @@ export class LeadAgent
         logger.info(`[extractMultipleParametersByRegex] Processing input: "${input}"`);
         logger.info(`[extractMultipleParametersByRegex] Lowercase input: "${lowerInput}"`);
 
-        // Pattern 1: "width 25 length 25 height 20"
-        // Use word boundaries to ensure we match whole words
         const widthMatch = lowerInput.match(/\bwidth\s+(\d+(?:\.\d+)?)\b/);
         const lengthMatch = lowerInput.match(/\blength\s+(\d+(?:\.\d+)?)\b/);
         const heightMatch = lowerInput.match(/\bheight\s+(\d+(?:\.\d+)?)\b/);
@@ -321,7 +303,6 @@ export class LeadAgent
             }
         }
 
-        // Pattern 2: "25x25x20" or "25 x 25 x 20" (width x length x height)
         if (updates.length === 0) {
             const dimensionMatch = lowerInput.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/);
             if (dimensionMatch) {
@@ -348,16 +329,12 @@ export class LeadAgent
      */
     private extractParameterByRegex(input: string): {field: keyof UserFriendlyParams, value: any} | null
     {
-        // Order matters: Check roof FIRST, then other parameters
         const patterns = [
-            // Pattern 1B (FIRST): Catch standalone "vert" or "vertical" at word boundary
-            // This ensures standalone "vert"/"vertical" is caught BEFORE other patterns
             {
                 regex: /^\s*(vert(?:ical)?|a-?frame|aframe|box|box-?style|regular|standard|normal|pitched|gabled|sidewall)\s*$/i,
                 parse: (match: RegExpMatchArray) => {
                     let value = match[1].toLowerCase();
 
-                    // Normalize abbreviations to full names
                     if (value === 'vert') value = 'vertical';
                     if (value === 'verti') value = 'vertical';
 
@@ -368,14 +345,11 @@ export class LeadAgent
                 }
             },
 
-            // Pattern 1: Roof type with prefix context
-            // Handles: "vert", "vertical", "a-frame", "box", etc. with context words
             {
                 regex: /(?:want|in|make|set|change|update|roof|style|to)\s+(?:to\s+)?(vert(?:ical)?|a-?frame|aframe|box|box-?style|regular|standard|normal|pitched|gabled|sidewall)/i,
                 parse: (match: RegExpMatchArray) => {
                     let value = match[1].toLowerCase();
 
-                    // Normalize abbreviations to full names
                     if (value === 'vert') value = 'vertical';
                     if (value === 'verti') value = 'vertical';
 
@@ -386,7 +360,6 @@ export class LeadAgent
                 }
             },
 
-            // Pattern 2: Explicit dimensions - "make width 25" or "set width to 25" or "width 25"
             {
                 regex: /(?:make|set|change|update)?\s*(?:the\s+)?(width|length|height)\s+(?:to\s+)?(\d+)/i,
                 parse: (match: RegExpMatchArray) => ({
@@ -395,7 +368,6 @@ export class LeadAgent
                 })
             },
 
-            // Pattern 3: Gauge - "gauge 16" or "make gauge 16"
             {
                 regex: /(?:make|set|change|update)?\s*gauge\s+(?:to\s+)?(\d+)/i,
                 parse: (match: RegExpMatchArray) => ({
@@ -404,9 +376,6 @@ export class LeadAgent
                 })
             },
 
-            // Pattern 4: State - "state texas" or "in texas"
-            // MUST come AFTER roof type to avoid conflicts
-            // Requires "state" or "in" prefix to avoid matching random words
             {
                 regex: /\b(?:state|location|in)\s+([a-z\s]+?)(?:\s*(?:\.|$|,|and))/i,
                 parse: (match: RegExpMatchArray) => ({
@@ -443,9 +412,7 @@ export class LeadAgent
 
         logger.info(`[LeadAgent] Attempting to update ${field} from ${(session.state.userFriendlyParams as any)[field]} to ${value}`);
 
-        // SPECIAL HANDLING: If garage_type changed, recalculate ALL dimensions
         if (field === 'garage_type') {
-            // Extract number from value (e.g., "5-car" → 5)
             const carCountMatch = String(value).match(/(\d+)/);
             const numCars = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
 
@@ -456,12 +423,10 @@ export class LeadAgent
                 logger.info(`[LeadAgent] Calculation result:`, JSON.stringify(calculation));
 
                 if (calculation.width && calculation.length) {
-                    // CLEAR old dimensions first
                     (session.state.userFriendlyParams as any).width = undefined;
                     (session.state.userFriendlyParams as any).length = undefined;
                     (session.state.userFriendlyParams as any).height = undefined;
 
-                    // THEN set new dimensions
                     (session.state.userFriendlyParams as any).garage_type = calculation.garageType;
                     (session.state.userFriendlyParams as any).width = calculation.width;
                     (session.state.userFriendlyParams as any).length = calculation.length;
@@ -486,7 +451,6 @@ export class LeadAgent
             };
         }
 
-        // Validate and convert numeric fields
         if (["width", "length", "height", "gauge", "utility_length"].includes(field))
         {
             let numValue: number;
@@ -815,7 +779,6 @@ export class LeadAgent
 
     public async run(sessionId: string, input: string): Promise<string>
     {
-        // Store current sessionId for use in detectParameterUpdate
         (this as any).currentSessionId = sessionId;
 
         logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
@@ -839,26 +802,21 @@ export class LeadAgent
             session.state.hasGarageIntent = true;
         }
 
-        // FIRST: Check if user is updating existing parameters (single or multiple)
         const paramUpdate = await this.detectParameterUpdate(input);
 
-        // ✅ ADD THIS VALIDATION CHECK HERE ✅
         if (paramUpdate === null)
         {
-            // Check for validation errors from detectParameterUpdate
             const validationError = (this as any).validationError;
             if (validationError) {
                 logger.warn(`[LeadAgent] Validation error detected: ${validationError}`);
                 await session.memory.chatHistory.addAIChatMessage(validationError);
-                (this as any).validationError = null; // Clear for next iteration
+                (this as any).validationError = null;
                 return validationError;
             }
         }
-        // ✅ END OF NEW CODE ✅
 
         if (paramUpdate)
         {
-            // Handle multiple pending updates if detected
             const pendingUpdates = (this as any).pendingUpdates || [];
             let allUpdateResults: {success: boolean, message: string, updatedField?: keyof UserFriendlyParams}[] = [];
 
@@ -866,12 +824,10 @@ export class LeadAgent
             {
                 logger.info(`[LeadAgent] Processing ${pendingUpdates.length} pending updates`, JSON.stringify(pendingUpdates));
 
-                // Process all updates
                 for (const update of pendingUpdates)
                 {
                     logger.info(`[LeadAgent] Validating update: ${update.field} = ${update.value}`);
 
-                    // Validate the parameter update
                     if (update.field === "state_name")
                     {
                         const validationResult = await StateDataValidator.validateState(
@@ -915,7 +871,6 @@ export class LeadAgent
 
                 logger.info(`[LeadAgent] Final session params after all updates:`, JSON.stringify(session.state.userFriendlyParams));
 
-                // Build response for all updates
                 const allUpdatesMessage = allUpdateResults
                     .map((result, idx) => {
                         const update = pendingUpdates[idx];
@@ -931,7 +886,6 @@ export class LeadAgent
             }
             else
             {
-                // Single parameter update
                 if (paramUpdate.field === "state_name")
                 {
                     const validationResult = await StateDataValidator.validateState(
@@ -972,7 +926,6 @@ export class LeadAgent
                 logger.info(`[LeadAgent] Single parameter updated:`, JSON.stringify(session.state.userFriendlyParams));
             }
 
-            // After all updates, check if all required fields are complete
             const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(session.state.userFriendlyParams);
 
             if (missingFields.length === 0)
@@ -995,7 +948,6 @@ export class LeadAgent
                 const nextField: keyof UserFriendlyParams = missingFields[0];
                 session.state.currentField = nextField;
 
-                // Build response showing current params + what's needed next
                 const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
                 const response: string = `${currentParams}\n\n${Constants.FIELD_PROMPTS[nextField]}`;
 
@@ -1004,7 +956,6 @@ export class LeadAgent
             }
         }
 
-        // SECOND: Extract new parameters from user input
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
         const rawParams: string = await extractor._call(await this.getConversationContext(session));
         logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
@@ -1040,7 +991,6 @@ export class LeadAgent
             extractedParams.roof_type = validationResult.normalizedType;
         }
 
-        // Only add extracted params that don't already exist in session
         const filteredExtractedParams: Partial<UserFriendlyParams> = {};
         for (const [key, value] of Object.entries(extractedParams))
         {
