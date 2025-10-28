@@ -559,17 +559,17 @@ export class PriceParamsExtractorTool extends BaseTool
 
     private buildInferencePrompt(userInput: string): string
     {
-        // Calculate dimensions dynamically
         const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(userInput);
 
-        let dimensionExplanation = `
+        let dimensionExplanation: string = `
             DIMENSION CALCULATION (Dynamic Formula):
             - Width formula: (number_of_cars × 6) + 8 feet clearance
             - Length formula: 15 (car length) + 5 feet clearance = 20 feet
             - Height: 10 feet (standard) or 12 feet (truck/RV)
             `;
 
-        if (calculation.numCars) {
+        if (calculation.numCars)
+        {
             dimensionExplanation += `
             Example for ${calculation.numCars} car(s):
             - Width: (${calculation.numCars} × 6) + 8 = ${calculation.width} ft
