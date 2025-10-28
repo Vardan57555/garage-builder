@@ -12,6 +12,7 @@ class ChatServiceImpl {
     static instance;
     sessionMetadata = new Map();
     clientSessions = new Map();
+    requestLocks = new Map();
     cleanupInterval = null;
     metrics = {
         totalCreated: 0,
@@ -24,12 +25,67 @@ class ChatServiceImpl {
             throw new InstantiationError_1.InstantiationError(InstantiationError_1.InstantiationError.NOT_INSTANTIABLE, "Use ChatService.getInstance() instead of new.");
         }
         this.startSessionCleanup();
+        this.startLockCleanup();
     }
     static getInstance() {
         if (!ChatServiceImpl.instance) {
             ChatServiceImpl.instance = new ChatServiceImpl(Enforce);
         }
         return ChatServiceImpl.instance;
+    }
+    acquireLock(sessionId) {
+        const lockInfo = this.requestLocks.get(sessionId);
+        if (lockInfo && lockInfo.locked) {
+            logger.warn("[ChatService] Session already processing", {
+                sessionId,
+                lockedSince: new Date(lockInfo.timestamp).toISOString()
+            });
+            return false;
+        }
+        if (lockInfo?.timeout) {
+            clearTimeout(lockInfo.timeout);
+        }
+        const autoReleaseTimeout = setTimeout(() => {
+            logger.warn("[ChatService] Lock auto-released due to timeout", { sessionId });
+            this.releaseLock(sessionId);
+        }, 90000);
+        this.requestLocks.set(sessionId, {
+            locked: true,
+            timestamp: Date.now(),
+            timeout: autoReleaseTimeout
+        });
+        logger.info("[ChatService] Lock acquired", { sessionId });
+        return true;
+    }
+    releaseLock(sessionId) {
+        const lockInfo = this.requestLocks.get(sessionId);
+        if (lockInfo) {
+            clearTimeout(lockInfo.timeout);
+            this.requestLocks.delete(sessionId);
+            logger.info("[ChatService] Lock released", { sessionId });
+        }
+    }
+    startLockCleanup() {
+        setInterval(() => {
+            const now = Date.now();
+            let cleanedCount = 0;
+            for (const [sessionId, lockInfo] of this.requestLocks.entries()) {
+                if (now - lockInfo.timestamp > 120000) {
+                    logger.warn("[ChatService] Force releasing stale lock", {
+                        sessionId,
+                        heldFor: now - lockInfo.timestamp
+                    });
+                    this.releaseLock(sessionId);
+                    cleanedCount++;
+                }
+            }
+            if (cleanedCount > 0) {
+                logger.info("[ChatService] Lock cleanup complete", {
+                    cleanedCount,
+                    activeLocks: this.requestLocks.size
+                });
+            }
+        }, 120000);
     }
     async generateAssistantResponse(body, clientIp, userAgent) {
         const { question } = body;
@@ -38,19 +94,27 @@ class ChatServiceImpl {
         }
         const clientId = this.generateClientIdentifier(clientIp, userAgent);
         const { sessionId } = this.getOrCreateSession(clientId, clientIp, userAgent);
+        if (!this.acquireLock(sessionId)) {
+            throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `Session ${sessionId} is already processing a request. Please wait a moment and try again.`);
+        }
         let pricingData;
         try {
             const agent = await LeadAgent_1.LeadAgent.getInstance();
             pricingData = await agent.run(sessionId, question);
+            return {
+                answer: pricingData,
+                sessionId: sessionId,
+                timestamp: new Date().toISOString()
+            };
         }
         catch (error) {
+            logger.error("[ChatService] Error processing request", { sessionId, error: error.message });
             throw new ServerError_1.ServerError(ServerError_1.ServerError.INTERNAL, `Failed to process request: ${error.message}`);
         }
-        return {
-            answer: pricingData,
-            sessionId: sessionId,
-            timestamp: new Date().toISOString()
-        };
+        finally {
+            this.releaseLock(sessionId);
+            logger.info("[ChatService] Request completed and lock released", { sessionId });
+        }
     }
     async endSession(sessionId) {
         const metadata = this.sessionMetadata.get(sessionId);
@@ -63,7 +127,9 @@ class ChatServiceImpl {
             await agent.endSession(sessionId);
             this.sessionMetadata.delete(sessionId);
             this.clientSessions.delete(metadata.clientIdentifier);
+            this.requestLocks.delete(sessionId);
             this.metrics.totalEnded++;
+            logger.info("[ChatService] Session ended successfully", { sessionId });
             return { success: true, message: `Session ${sessionId} ended successfully` };
         }
         catch (error) {
@@ -97,6 +163,7 @@ class ChatServiceImpl {
                 this.clientSessions.delete(clientId);
                 if (metadata) {
                     this.sessionMetadata.delete(existingSessionId);
+                    this.requestLocks.delete(existingSessionId);
                     this.metrics.totalExpired++;
                     logger.info("[ChatService] Expired session cleaned up", { clientId, sessionId: existingSessionId });
                 }
@@ -154,6 +221,7 @@ class ChatServiceImpl {
             if (timeUntilExpiry < 0) {
                 this.sessionMetadata.delete(sessionId);
                 this.clientSessions.delete(metadata.clientIdentifier);
+                this.requestLocks.delete(sessionId);
                 cleanedCount++;
                 this.metrics.totalExpired++;
             }
@@ -167,6 +235,7 @@ class ChatServiceImpl {
                 expiringSoonCount: warningCount,
                 activeSessions: this.sessionMetadata.size,
                 activeClients: this.clientSessions.size,
+                activeLocks: this.requestLocks.size,
                 metrics: this.metrics
             });
         }

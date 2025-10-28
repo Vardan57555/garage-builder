@@ -350,14 +350,40 @@ export class LeadAgent
     {
         // Order matters: Check roof FIRST, then other parameters
         const patterns = [
-            // Pattern 1: Roof type FIRST - "roof vertical" or "want vertical" or just "vertical"
-            // This includes full roof type names (not abbreviations)
+            // Pattern 1B (FIRST): Catch standalone "vert" or "vertical" at word boundary
+            // This ensures standalone "vert"/"vertical" is caught BEFORE other patterns
             {
-                regex: /(?:want|in|make|set|change|update|roof|style)?\s*(?:to\s+)?(vertical|a-frame|a frame|aframe|box|box-style|regular|standard|normal|pitched|gabled|sidewall)/i,
-                parse: (match: RegExpMatchArray) => ({
-                    field: 'roof_type',
-                    value: match[1].toLowerCase()
-                })
+                regex: /^\s*(vert(?:ical)?|a-?frame|aframe|box|box-?style|regular|standard|normal|pitched|gabled|sidewall)\s*$/i,
+                parse: (match: RegExpMatchArray) => {
+                    let value = match[1].toLowerCase();
+
+                    // Normalize abbreviations to full names
+                    if (value === 'vert') value = 'vertical';
+                    if (value === 'verti') value = 'vertical';
+
+                    return {
+                        field: 'roof_type',
+                        value: value
+                    };
+                }
+            },
+
+            // Pattern 1: Roof type with prefix context
+            // Handles: "vert", "vertical", "a-frame", "box", etc. with context words
+            {
+                regex: /(?:want|in|make|set|change|update|roof|style|to)\s+(?:to\s+)?(vert(?:ical)?|a-?frame|aframe|box|box-?style|regular|standard|normal|pitched|gabled|sidewall)/i,
+                parse: (match: RegExpMatchArray) => {
+                    let value = match[1].toLowerCase();
+
+                    // Normalize abbreviations to full names
+                    if (value === 'vert') value = 'vertical';
+                    if (value === 'verti') value = 'vertical';
+
+                    return {
+                        field: 'roof_type',
+                        value: value
+                    };
+                }
             },
 
             // Pattern 2: Explicit dimensions - "make width 25" or "set width to 25" or "width 25"
@@ -378,10 +404,11 @@ export class LeadAgent
                 })
             },
 
-            // Pattern 4: State - "state texas" or "in texas" (requires "state" or "in" prefix)
-            // This MUST come AFTER roof type to avoid conflicts
+            // Pattern 4: State - "state texas" or "in texas"
+            // MUST come AFTER roof type to avoid conflicts
+            // Requires "state" or "in" prefix to avoid matching random words
             {
-                regex: /(?:state|location|in)\s+([a-z\s]+?)(?:\s*(?:\.|$|,))/i,
+                regex: /\b(?:state|location|in)\s+([a-z\s]+?)(?:\s*(?:\.|$|,|and))/i,
                 parse: (match: RegExpMatchArray) => ({
                     field: 'state_name',
                     value: match[1].trim()
