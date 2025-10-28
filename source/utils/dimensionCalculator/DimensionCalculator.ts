@@ -17,7 +17,8 @@ export class DynamicGarageDimensionCalculator
      * Formula: (number_of_cars * car_width) + buffer
      * Example: 2 cars = (2 * 6) + 8 = 20 ft
      */
-    private static calculateWidth(numCars: number): number {
+    private static calculateWidth(numCars: number): number
+    {
         const buffer = 8;
         return numCars * this.CAR_WIDTH + buffer;
     }
