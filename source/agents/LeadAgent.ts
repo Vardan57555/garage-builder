@@ -819,10 +819,18 @@ or
         return parts.length > 0 ? `📋 Current parameters: ${parts.join(" | ")}` : "";
     }
 
-    private resetSessionState(session: LeadAgentSessionMetadata): void {
-        session.state.userFriendlyParams = {};
-        session.state.hasGarageIntent = false;
-        session.state.currentField = undefined;
+    private resetSessionState(session: LeadAgentSessionMetadata, fullReset: boolean = false): void {
+        if (fullReset) {
+            // Only reset when user explicitly starts over
+            session.state.userFriendlyParams = {};
+            session.state.hasGarageIntent = false;
+            session.state.currentField = undefined;
+            session.state.priceCalculated = false;
+        } else {
+            // Partial reset: keep parameters, just clear current field
+            session.state.currentField = undefined;
+            session.state.priceCalculated = true;
+        }
     }
 
     /**
@@ -841,6 +849,85 @@ or
         const session: LeadAgentSessionMetadata = this.getOrCreateSession(sessionId);
         await session.memory.chatHistory.addUserMessage(input);
 
+        // ✅ AFTER PRICE: Check if price was already calculated
+        if (session.state.priceCalculated) {
+            logger.info(`[LeadAgent] Post-price phase - User trying to update`);
+
+            // Check if user wants to completely reset
+            if (this.detectResetIntent(input)) {
+                logger.info(`[LeadAgent] User requested full reset`);
+                this.resetSessionState(session, true);
+                session.state.hasGarageIntent = false;
+                const response: string =
+                    "Got it! Let's start fresh.\n" +
+                    "Tell me about your new building - dimensions or building type?";
+                await session.memory.chatHistory.addAIChatMessage(response);
+                return response;
+            }
+
+            // Try to detect what parameter user wants to change
+            const paramUpdate = await this.detectParameterUpdate(input);
+
+            if (paramUpdate === null) {
+                if (this.validationError) {
+                    logger.warn(`[LeadAgent] Validation error: ${this.validationError}`);
+                    const error = this.validationError;
+                    this.validationError = null;
+                    await session.memory.chatHistory.addAIChatMessage(error);
+                    return error;
+                }
+
+                // User said something but we couldn't detect an update
+                // Show current params and ask what they want to change
+                const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
+                const response =
+                    `${currentParams}\n\n` +
+                    "What would you like to change? (e.g., 'change width to 30', 'make roof box', 'different state')\n" +
+                    "Or type 'new quote' to start over.";
+                await session.memory.chatHistory.addAIChatMessage(response);
+                return response;
+            }
+
+            // ✅ Update the parameter and recalculate price
+            const updateResult = await this.handleParameterUpdateAfterPrice(session, paramUpdate);
+
+            if (!updateResult.success) {
+                await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+                return updateResult.message;
+            }
+
+            // Show update confirmation
+            await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+            logger.info(`[LeadAgent] Parameter updated: ${paramUpdate.field} = ${paramUpdate.value}`);
+
+            // Recalculate price with updated parameters
+            const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(
+                session.state.userFriendlyParams as UserFriendlyParams,
+                session
+            );
+
+            if (!technicalParams) {
+                return "Failed to recalculate price.";
+            }
+
+            const newPrice: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(
+                technicalParams
+            );
+
+            const response =
+                newPrice +
+                "\n\n" +
+                `${this.formatCurrentParams(session.state.userFriendlyParams)}\n` +
+                "Want to change anything else?";
+
+            await session.memory.chatHistory.addAIChatMessage(newPrice);
+            return response;
+        }
+
+        // ============================================================
+        // INITIAL QUOTE FLOW (Before first price calculation)
+        // ============================================================
+
         // Step 1: Check if user has garage intent
         if (!session.state.hasGarageIntent) {
             const hasIntent: boolean = await this.detectGarageIntentWithAI(input);
@@ -855,7 +942,7 @@ or
             session.state.hasGarageIntent = true;
         }
 
-        // ✅ NEW STEP: Extract building_type from initial input if not already set
+        // Step 2: Extract building_type if mentioned
         if (!session.state.userFriendlyParams.building_type) {
             const detectedBuildingType = await this.detectBuildingTypeFromInitialInput(input);
             if (detectedBuildingType) {
@@ -867,19 +954,20 @@ or
             }
         }
 
-        // Step 2: Check for parameter updates
+        // Step 3: Check for parameter updates during initial flow
         const paramUpdate = await this.detectParameterUpdate(input);
 
         if (paramUpdate === null) {
             if (this.validationError) {
-                logger.warn(`[LeadAgent] Validation error detected: ${this.validationError}`);
-                await session.memory.chatHistory.addAIChatMessage(this.validationError);
+                logger.warn(`[LeadAgent] Validation error: ${this.validationError}`);
+                const error = this.validationError;
                 this.validationError = null;
-                return this.validationError;
+                await session.memory.chatHistory.addAIChatMessage(error);
+                return error;
             }
         }
 
-        // Step 3: Process parameter updates
+        // Step 4: Process parameter updates during initial flow
         if (paramUpdate) {
             const updateResults = await this.processParameterUpdates(session, paramUpdate);
             if (updateResults) {
@@ -887,7 +975,7 @@ or
             }
         }
 
-        // Step 4: Extract parameters from conversation context
+        // Step 5: Extract parameters from conversation context
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
         const rawParams: string = await extractor._call(await this.getConversationContext(session));
         logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
@@ -920,11 +1008,10 @@ or
             extractedParams.roof_type = validationResult.normalizedType;
         }
 
-        // ✅ IMPORTANT: Don't override building_type if already detected
+        // Keep building_type if already detected
         if (extractedParams.building_type && !session.state.userFriendlyParams.building_type) {
             extractedParams.building_type = extractedParams.building_type;
         } else if (session.state.userFriendlyParams.building_type) {
-            // Keep the one we detected earlier
             extractedParams.building_type = session.state.userFriendlyParams.building_type;
         }
 
@@ -945,7 +1032,7 @@ or
             ...filteredExtractedParams,
         };
 
-        // Step 5: Check for missing fields
+        // Step 6: Check for missing fields
         const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(
             session.state.userFriendlyParams
         );
@@ -954,82 +1041,127 @@ or
             const nextField: keyof UserFriendlyParams = missingFields[0];
             session.state.currentField = nextField;
 
-            // ✅ SKIP building_type prompt if already filled
+            // Skip building_type if already filled
             if (nextField === "building_type" && session.state.userFriendlyParams.building_type) {
-                logger.info("[LeadAgent] Building type already set, skipping prompt");
-                // Don't return here, continue to next missing field
+                logger.info("[LeadAgent] Building type already set, skipping");
                 const updatedMissingFields = this.getMissingFields(session.state.userFriendlyParams);
 
                 if (updatedMissingFields.length === 0) {
                     // All params filled, calculate price
-                    const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(
-                        session.state.userFriendlyParams as UserFriendlyParams,
-                        session
-                    );
-
-                    if (technicalParams) {
-                        const result: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(
-                            technicalParams
-                        );
-                        await session.memory.chatHistory.addAIChatMessage(result);
-                        this.resetSessionState(session);
-                        return result + "\n\nNeed another quote? Just describe what you're looking for!";
-                    }
+                    return await this.calculateAndReturnPrice(session);
                 } else {
                     // Ask for next field
                     const nextMissingField = updatedMissingFields[0];
-                    let promptMessage = "";
-
-                    if (nextMissingField === "roof_type") {
-                        promptMessage = this.getRoofTypePrompt();
-                    } else if (nextMissingField === "building_type") {
-                        promptMessage = this.getBuildingTypePrompt();
-                    } else {
-                        const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
-                        promptMessage = `${currentParams}\n\n${Constants.FIELD_PROMPTS[nextMissingField]}`;
-                    }
-
-                    logger.info(`[LeadAgent] Missing field: ${nextMissingField}, prompting user`);
-                    await session.memory.chatHistory.addAIChatMessage(promptMessage);
-                    return promptMessage;
+                    return await this.askForField(session, nextMissingField);
                 }
             }
 
-            // ✅ Ask for missing field (will skip if building_type)
-            let promptMessage = "";
-
-            if (nextField === "roof_type") {
-                promptMessage = this.getRoofTypePrompt();
-            } else if (nextField === "building_type") {
-                promptMessage = this.getBuildingTypePrompt();
-            } else {
-                const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
-                promptMessage = `${currentParams}\n\n${Constants.FIELD_PROMPTS[nextField]}`;
-            }
-
-            logger.info(`[LeadAgent] Missing field: ${nextField}, prompting user`);
-            await session.memory.chatHistory.addAIChatMessage(promptMessage);
-            return promptMessage;
+            // Ask for missing field
+            return await this.askForField(session, nextField);
         }
 
-        // Step 6: Calculate price
+        // Step 7: All fields provided - Calculate price
+        return await this.calculateAndReturnPrice(session);
+    }
+
+    private async handleParameterUpdateAfterPrice(
+        session: LeadAgentSessionMetadata,
+        paramUpdate: ParameterUpdate
+    ): Promise<UpdateResult> {
+        // Validate the update value
+        const validationError = await this.validateParameterValue(paramUpdate.field, paramUpdate.value);
+        if (validationError) {
+            logger.warn(`[LeadAgent] Validation failed for ${paramUpdate.field}: ${validationError}`);
+            return {
+                success: false,
+                message: validationError
+            };
+        }
+
+        // For roof_type, use ChoiceHandler if not a clear choice
+        if (paramUpdate.field === "roof_type") {
+            if (!this.isClearRoofChoice(String(paramUpdate.value))) {
+                const choice = await this.handleRoofTypeSelection(String(paramUpdate.value));
+                paramUpdate.value = choice.selected;
+                logger.info(`[LeadAgent] ChoiceHandler selected roof: ${choice.selected}`);
+            }
+
+            const validationResult = await RoofDataValidator.validateRoofType(paramUpdate.value);
+            if (!validationResult.isValid) {
+                return {
+                    success: false,
+                    message: `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`
+                };
+            }
+            paramUpdate.value = validationResult.normalizedType;
+        }
+
+        // For state_name, validate it
+        if (paramUpdate.field === "state_name") {
+            const validationResult = await StateDataValidator.validateState(
+                paramUpdate.value,
+                async (name: string) => await this.mapStateToDB(name, session)
+            );
+
+            if (!validationResult.isValid) {
+                return {
+                    success: false,
+                    message: `❌ "${paramUpdate.value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`
+                };
+            }
+            paramUpdate.value = validationResult.normalizedName;
+        }
+
+        // Apply the update
+        return this.handleParameterUpdate(session, paramUpdate);
+    }
+
+    private async calculateAndReturnPrice(session: LeadAgentSessionMetadata): Promise<string> {
         const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(
             session.state.userFriendlyParams as UserFriendlyParams,
             session
         );
 
         if (!technicalParams) {
-            return "Failed to convert user input to technical parameters.";
+            return "Failed to convert parameters to technical format.";
         }
 
         const result: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(
             technicalParams
         );
+
         await session.memory.chatHistory.addAIChatMessage(result);
 
-        this.resetSessionState(session);
+        // ✅ Mark price as calculated so next input goes to update flow
+        session.state.priceCalculated = true;
+        session.state.currentField = undefined;
 
-        return result + "\n\nNeed another quote? Just describe what you're looking for!";
+        const response =
+            result +
+            "\n\n" +
+            `${this.formatCurrentParams(session.state.userFriendlyParams)}\n` +
+            "Want to change anything? (e.g., 'change width to 30', 'make roof box')";
+
+        return response;
+    }
+
+
+    private async askForField(session: LeadAgentSessionMetadata, field: keyof UserFriendlyParams): Promise<string> {
+        let promptMessage = "";
+
+        if (field === "roof_type") {
+            promptMessage = this.getRoofTypePrompt();
+        } else if (field === "building_type") {
+            promptMessage = this.getBuildingTypePrompt();
+        } else {
+            const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
+            promptMessage = `${currentParams}\n\n${Constants.FIELD_PROMPTS[field]}`;
+        }
+
+        session.state.currentField = field;
+        await session.memory.chatHistory.addAIChatMessage(promptMessage);
+        logger.info(`[LeadAgent] Asking for field: ${field}`);
+        return promptMessage;
     }
 
     /**
@@ -1051,16 +1183,10 @@ or
             for (const update of pendingUpdates) {
                 logger.info(`[LeadAgent] Validating update: ${update.field} = ${update.value}`);
 
-                // ✅ SPECIAL CASE: Check if this is a roof_type choice response
+                // Handle roof_type choice
                 if (update.field === "roof_type") {
-                    // First, check if it's a clear direct choice (e.g., "vertical", "1", "2")
-                    if (this.isClearRoofChoice(String(update.value))) {
-                        // Direct match found, use it
-                        logger.info(`[LeadAgent] Direct roof choice matched: ${update.value}`);
-                    } else {
-                        // Use ChoiceHandler for ambiguous responses (e.g., "any", "whatever")
+                    if (!this.isClearRoofChoice(String(update.value))) {
                         const choice = await this.handleRoofTypeSelection(String(update.value));
-                        logger.info(`[LeadAgent] ChoiceHandler selected: ${choice.selected} (confidence: ${choice.confidence})`);
                         update.value = choice.selected;
                     }
 
@@ -1073,7 +1199,7 @@ or
                     update.value = validationResult.normalizedType;
                 }
 
-                // ✅ SPECIAL CASE: Check if this is a state_name choice response
+                // Handle state_name
                 if (update.field === "state_name") {
                     const validationResult = await StateDataValidator.validateState(
                         update.value,
@@ -1109,49 +1235,16 @@ or
 
             const missingFields = this.getMissingFields(session.state.userFriendlyParams);
             if (missingFields.length === 0) {
-                const confirmMessage = `✓ All parameters set! Calculating price...`;
-                await session.memory.chatHistory.addAIChatMessage(confirmMessage);
-
-                const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(
-                    session.state.userFriendlyParams as UserFriendlyParams,
-                    session
-                );
-                if (technicalParams) {
-                    const priceResult: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(
-                        technicalParams
-                    );
-                    const finalResponse: string =
-                        priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
-                    await session.memory.chatHistory.addAIChatMessage(priceResult);
-                    this.resetSessionState(session);
-                    return finalResponse;
-                }
+                return await this.calculateAndReturnPrice(session);
             } else {
                 const nextField: keyof UserFriendlyParams = missingFields[0];
-                session.state.currentField = nextField;
-
-                let nextResponse = "";
-                if (nextField === "roof_type") {
-                    nextResponse = this.getRoofTypePrompt();
-                } else if (nextField === "building_type") {
-                    nextResponse = this.getBuildingTypePrompt();
-                } else {
-                    const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
-                    nextResponse = `${currentParams}\n\n${Constants.FIELD_PROMPTS[nextField]}`;
-                }
-
-                await session.memory.chatHistory.addAIChatMessage(nextResponse);
-                return nextResponse;
+                return await this.askForField(session, nextField);
             }
         } else {
             // Single parameter update
-            // ✅ SPECIAL CASE: Handle roof_type choice
             if (paramUpdate.field === "roof_type") {
-                if (this.isClearRoofChoice(String(paramUpdate.value))) {
-                    logger.info(`[LeadAgent] Direct roof choice matched: ${paramUpdate.value}`);
-                } else {
+                if (!this.isClearRoofChoice(String(paramUpdate.value))) {
                     const choice = await this.handleRoofTypeSelection(String(paramUpdate.value));
-                    logger.info(`[LeadAgent] ChoiceHandler selected: ${choice.selected}`);
                     paramUpdate.value = choice.selected;
                 }
 
@@ -1191,39 +1284,10 @@ or
 
             const missingFields = this.getMissingFields(session.state.userFriendlyParams);
             if (missingFields.length === 0) {
-                const confirmMessage = `✓ All parameters set! Calculating price...`;
-                await session.memory.chatHistory.addAIChatMessage(confirmMessage);
-
-                const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(
-                    session.state.userFriendlyParams as UserFriendlyParams,
-                    session
-                );
-                if (technicalParams) {
-                    const priceResult: string = await PriceParamsExtractorTool.getInstance().calculatePriceWithParams(
-                        technicalParams
-                    );
-                    const finalResponse: string =
-                        priceResult + "\n\nNeed another quote? Just describe what you're looking for!";
-                    await session.memory.chatHistory.addAIChatMessage(priceResult);
-                    this.resetSessionState(session);
-                    return finalResponse;
-                }
+                return await this.calculateAndReturnPrice(session);
             } else {
                 const nextField: keyof UserFriendlyParams = missingFields[0];
-                session.state.currentField = nextField;
-
-                let response = "";
-                if (nextField === "roof_type") {
-                    response = this.getRoofTypePrompt();
-                } else if (nextField === "building_type") {
-                    response = this.getBuildingTypePrompt();
-                } else {
-                    const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
-                    response = `${currentParams}\n\n${Constants.FIELD_PROMPTS[nextField]}`;
-                }
-
-                await session.memory.chatHistory.addAIChatMessage(response);
-                return response;
+                return await this.askForField(session, nextField);
             }
         }
 
@@ -1279,6 +1343,130 @@ or
             return null;
         }
     }
+
+    private detectResetIntent(input: string): boolean {
+        const resetPatterns = [
+            /\b(start over|new quote|reset|clear|fresh start|begin again)\b/i,
+            /\b(quit|exit|done with this)\b/i,
+        ];
+        return resetPatterns.some((p) => p.test(input));
+    }
+
+    // private async processParameterUpdatesPostPrice(
+    //     session: LeadAgentSessionMetadata,
+    //     paramUpdate: ParameterUpdate
+    // ): Promise<string | null> {
+    //     const pendingUpdates = this.pendingUpdates;
+    //     let allUpdateResults: UpdateResult[] = [];
+    //
+    //     if (pendingUpdates.length > 0) {
+    //         logger.info(`[LeadAgent] Processing ${pendingUpdates.length} pending post-price updates`);
+    //
+    //         for (const update of pendingUpdates) {
+    //             logger.info(`[LeadAgent] Validating post-price update: ${update.field} = ${update.value}`);
+    //
+    //             // ✅ SPECIAL CASE: Check if this is a roof_type choice response
+    //             if (update.field === "roof_type") {
+    //                 if (this.isClearRoofChoice(String(update.value))) {
+    //                     logger.info(`[LeadAgent] Direct roof choice matched: ${update.value}`);
+    //                 } else {
+    //                     const choice = await this.handleRoofTypeSelection(String(update.value));
+    //                     logger.info(`[LeadAgent] ChoiceHandler selected: ${choice.selected}`);
+    //                     update.value = choice.selected;
+    //                 }
+    //
+    //                 const validationResult = await RoofDataValidator.validateRoofType(update.value);
+    //                 if (!validationResult.isValid) {
+    //                     const errorMessage = `❌ "${update.value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`;
+    //                     await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                     return errorMessage;
+    //                 }
+    //                 update.value = validationResult.normalizedType;
+    //             }
+    //
+    //             // ✅ SPECIAL CASE: Check if this is a state_name response
+    //             if (update.field === "state_name") {
+    //                 const validationResult = await StateDataValidator.validateState(
+    //                     update.value,
+    //                     async (name: string) => await this.mapStateToDB(name, session)
+    //                 );
+    //
+    //                 if (!validationResult.isValid) {
+    //                     const errorMessage = `❌ "${update.value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`;
+    //                     await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                     return errorMessage;
+    //                 }
+    //                 update.value = validationResult.normalizedName;
+    //             }
+    //
+    //             const updateResult = await this.handleParameterUpdate(session, update);
+    //             allUpdateResults.push(updateResult);
+    //
+    //             if (!updateResult.success) {
+    //                 await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+    //                 return updateResult.message;
+    //             }
+    //         }
+    //
+    //         this.pendingUpdates = [];
+    //
+    //         const allUpdatesMessage = allUpdateResults
+    //             .map((result) => result.message)
+    //             .join(" | ");
+    //
+    //         const response = `✓ Updated: ${allUpdatesMessage}`;
+    //         await session.memory.chatHistory.addAIChatMessage(response);
+    //         logger.info(`[LeadAgent] Multi-param post-price update response: ${response}`);
+    //
+    //         return response; // ✅ Return here - don't ask for missing fields
+    //     } else {
+    //         // Single parameter update
+    //         if (paramUpdate.field === "roof_type") {
+    //             if (this.isClearRoofChoice(String(paramUpdate.value))) {
+    //                 logger.info(`[LeadAgent] Direct roof choice matched: ${paramUpdate.value}`);
+    //             } else {
+    //                 const choice = await this.handleRoofTypeSelection(String(paramUpdate.value));
+    //                 logger.info(`[LeadAgent] ChoiceHandler selected: ${choice.selected}`);
+    //                 paramUpdate.value = choice.selected;
+    //             }
+    //
+    //             const validationResult = await RoofDataValidator.validateRoofType(paramUpdate.value);
+    //             if (!validationResult.isValid) {
+    //                 const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`;
+    //                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                 return errorMessage;
+    //             }
+    //             paramUpdate.value = validationResult.normalizedType;
+    //         }
+    //
+    //         if (paramUpdate.field === "state_name") {
+    //             const validationResult = await StateDataValidator.validateState(
+    //                 paramUpdate.value,
+    //                 async (name: string) => await this.mapStateToDB(name, session)
+    //             );
+    //
+    //             if (!validationResult.isValid) {
+    //                 const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`;
+    //                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                 return errorMessage;
+    //             }
+    //             paramUpdate.value = validationResult.normalizedName;
+    //         }
+    //
+    //         const updateResult = await this.handleParameterUpdate(session, paramUpdate);
+    //         allUpdateResults.push(updateResult);
+    //
+    //         if (!updateResult.success) {
+    //             await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+    //             return updateResult.message;
+    //         }
+    //
+    //         await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+    //         logger.info(`[LeadAgent] Single post-price parameter updated:`, JSON.stringify(session.state.userFriendlyParams));
+    //
+    //         return updateResult.message; // ✅ Return here - don't ask for missing fields
+    //     }
+    // }
 }
 
 function Enforce(): void {}

@@ -51,6 +51,7 @@ export interface LeadAgentSessionMetadata extends SessionMetadata {
         userFriendlyParams: Partial<UserFriendlyParams>;
         hasGarageIntent: boolean;
         currentField?: keyof UserFriendlyParams;
+        priceCalculated?: boolean;
     };
     stateMapCache: Map<string, StateMapping | null>;
     roofMapCache: Map<string, number>;
