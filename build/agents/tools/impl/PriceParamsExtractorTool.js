@@ -28,18 +28,16 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     }
     async _call(userInput) {
         try {
-            logger.info({ inputLength: userInput.length }, "[PriceParamsExtractorTool] Processing input");
+            logger.info(`[PriceParamsExtractorTool] Processing input ${userInput.length}`);
             const prompt = this.buildInferencePrompt(userInput);
-            logger.debug({ promptLength: prompt.length }, "[PriceParamsExtractorTool] Prompt built, calling LLM");
+            logger.debug(`[PriceParamsExtractorTool] Prompt built, calling LLM ${prompt.length}`);
             const response = await SharedLLM_1.sharedLLM.invoke([new messages_1.HumanMessage(prompt)]);
             const extracted = this.safeExtractUserFriendlyParams(response);
-            logger.info({ extractedKeys: Object.keys(extracted) }, "[PriceParamsExtractorTool] Extracted params");
             const validated = this.validateAndInferMissingParams(extracted, userInput);
-            logger.info({ validatedKeys: Object.keys(validated) }, "[PriceParamsExtractorTool] Validated and inferred params");
             return JSON.stringify(validated);
         }
         catch (error) {
-            logger.error({ err: error }, "[PriceParamsExtractorTool] _call failed");
+            logger.error(`[PriceParamsExtractorTool] _call failed ${error}`);
             return JSON.stringify({});
         }
     }
@@ -57,20 +55,19 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
                 return "⚠️ Pricing service returned empty result.";
             }
             if (!result.status && result.message) {
-                logger.warn({ message: result.message }, "[PriceParamsExtractorTool] Pricing service error");
+                logger.warn(`[PriceParamsExtractorTool] Pricing service error ${result.message}`);
                 return `⚠️ ${result.message}`;
             }
             logger.info("[PriceParamsExtractorTool] Price calculated successfully");
             return this.formatPricingResult(result, params);
         }
         catch (error) {
-            logger.error({ err: error }, "[PriceParamsExtractorTool] calculatePriceWithParams failed");
+            logger.error(`[PriceParamsExtractorTool] calculatePriceWithParams failed ${error.message}`);
             return "⚠️ Failed to calculate price with the given parameters.";
         }
     }
     validateAndInferMissingParams(params, userInput) {
         const input = userInput.toLowerCase();
-        logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Input params");
         if (!this.hasDimensions(params)) {
             const garageType = params.garage_type || this.detectGarageType(input);
             const standardDims = this.getStandardDimensions(garageType);
