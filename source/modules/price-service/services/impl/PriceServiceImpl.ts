@@ -647,8 +647,8 @@ export class PriceServiceImpl implements PriceService
         const lengthArray: number[] = await this.getSideHeightCostsLength(length, end_length, distance_on_center, map_id);
         const structureString = `'${lengthArray.map(l => `${width}x${l}`).join("','")}'`;
 
-        logger.info("[fetchComponentsPricing] Generated structure string:", structureString);
-        logger.info("[fetchComponentsPricing] Length array:", lengthArray);
+        logger.info(`[fetchComponentsPricing] Generated structure string: ${structureString}`);
+        logger.info(`[fetchComponentsPricing] Length array: ${lengthArray}`);
 
         const components: Awaited<[string, unknown[]]>[] = await Promise.all(
             componentKeys.map(async key =>
@@ -685,17 +685,11 @@ export class PriceServiceImpl implements PriceService
 
                     const data: unknown[] = await ProcedureExecutor.getProcedureData(args, query, key);
 
-                    logger.info(
-                        `[fetchComponentsPricing] Component ${key} returned ${
-                            Array.isArray(data) ? data.length : 'non-array'
-                        } items`
-                    );
-
                     return [key, data];
                 }
                 catch (error)
                 {
-                    logger.error(`[fetchComponentsPricing] Error fetching ${key}:`, error);
+                    logger.error(`[fetchComponentsPricing] Error fetching ${key}: ${error.message}`);
                     return [key, []];
                 }
             })
@@ -711,9 +705,8 @@ export class PriceServiceImpl implements PriceService
     private applyAddons(pricing: Record<string, any>)
     {
         logger.info("[applyAddons] ====== BEFORE ADDON PROCESSING ======");
-        logger.info("[applyAddons] Current pricing keys:", Object.keys(pricing));
-        logger.info("[applyAddons] Current bows:", pricing.bows);
-        logger.info("[applyAddons] Current addons:", pricing.addons);
+        logger.info(`[applyAddons] Current bows: ${pricing.bows}`,);
+        logger.info(`[applyAddons] Current addons: ${pricing.addons}`);
         logger.info("[applyAddons] ====== END BEFORE ======");
 
         const { checkbox, checkboxQuantity, checkboxQuantityDropdown } = this.processAddons(pricing);
@@ -723,8 +716,8 @@ export class PriceServiceImpl implements PriceService
         pricing.checkbox_quantity_dropdown = checkboxQuantityDropdown;
 
         logger.info("[applyAddons] ====== AFTER ADDON PROCESSING ======");
-        logger.info("[applyAddons] Current bows after:", pricing.bows);
-        logger.info("[applyAddons] Current addons after:", pricing.addons);
+        logger.info(`[applyAddons] Current bows after: ${pricing.bows}`);
+        logger.info(`[applyAddons] Current addons after: ${pricing.addons}`);
         logger.info("[applyAddons] ====== END AFTER ======");
     }
 
@@ -1060,8 +1053,6 @@ export class PriceServiceImpl implements PriceService
 
     private mergeComponents(pricing: Record<string, any>, components: Record<string, unknown | unknown[]>): void
     {
-        logger.info("[mergeComponents] Starting merge with components:", Object.keys(components));
-
         for (const [key, value] of Object.entries(components))
         {
             if (Array.isArray(value))
@@ -1087,8 +1078,6 @@ export class PriceServiceImpl implements PriceService
                 logger.info(`[mergeComponents] Merged ${key}: non-array value`);
             }
         }
-
-        logger.info("[mergeComponents] Merge complete. Final pricing keys:", Object.keys(pricing));
     }
 
     private applyPricingMultipliers(pricing: Record<string, any>, params: IPricingParams): void

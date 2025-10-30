@@ -24,6 +24,20 @@ import {ChoiceResult, GenericChoiceManager} from "@agents/tools/impl/ChoiceHandl
 
 const logger: pino.Logger = createLogger(module);
 
+interface AIIntentResult {
+    hasIntent: boolean;
+    buildingType?: string;
+    numCars?: number;
+    width?: number;
+    length?: number;
+    height?: number;
+    roofType?: string;
+    state?: string;
+    gauge?: number;
+    confidence: number;
+    reasoning?: string;
+}
+
 /**
  * Interface for parameter update operations
  */
@@ -125,21 +139,21 @@ export class LeadAgent {
         );
     }
 
-    private async detectGarageIntentWithAI(input: string): Promise<boolean> {
-        try {
-            const prompt: string = Constants.INTENT_PROMPT.replace("{input}", input);
-            logger.debug({ promptLength: prompt.length }, "[LeadAgent] Intent detection prompt sent");
-
-            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
-            const upperResponse: string = response.trim().toUpperCase();
-
-            logger.info({ response: upperResponse }, "[LeadAgent] Intent detection response");
-            return upperResponse.includes("YES");
-        } catch (error) {
-            logger.warn({ err: error }, "[LeadAgent] AI intent detection failed, using fallback");
-            return this.detectGarageIntentFallback(input);
-        }
-    }
+    // private async detectGarageIntentWithAI(input: string): Promise<boolean> {
+    //     try {
+    //         const prompt: string = Constants.INTENT_PROMPT.replace("{input}", input);
+    //         logger.debug({ promptLength: prompt.length }, "[LeadAgent] Intent detection prompt sent");
+    //
+    //         const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
+    //         const upperResponse: string = response.trim().toUpperCase();
+    //
+    //         logger.info({ response: upperResponse }, "[LeadAgent] Intent detection response");
+    //         return upperResponse.includes("YES");
+    //     } catch (error) {
+    //         logger.warn({ err: error }, "[LeadAgent] AI intent detection failed, using fallback");
+    //         return this.detectGarageIntentFallback(input);
+    //     }
+    // }
 
     private detectGarageIntentFallback(input: string): boolean {
         const lowerInput: string = input.toLowerCase();
@@ -869,27 +883,35 @@ or
             return response;
         }
 
+        // NEW: Use AI-powered intent detection instead of simple keyword matching
         if (!session.state.hasGarageIntent) {
-            const hasIntent: boolean = await this.detectGarageIntentWithAI(input);
+            logger.info("[LeadAgent] Checking intent with AI (handles typos)");
 
-            if (!hasIntent) {
+            const aiResult = await this.detectIntentAndParametersWithAI(input);
+
+            if (!aiResult.hasIntent || aiResult.confidence < 0.6) {
                 const response: string =
                     "Hello! I can help you get a price quote for a garage or metal building.\n" +
                     "Please tell me what type of building or provide dimensions (width, length, height in feet).";
                 await session.memory.chatHistory.addAIChatMessage(response);
                 return response;
             }
-            session.state.hasGarageIntent = true;
-        }
 
-        if (!session.state.userFriendlyParams.building_type) {
-            const detectedBuildingType = await this.detectBuildingTypeFromInitialInput(input);
-            if (detectedBuildingType) {
-                (session.state.userFriendlyParams as any).building_type = detectedBuildingType;
-                logger.info({ buildingType: detectedBuildingType }, "[LeadAgent] Pre-filled building_type");
-                await session.memory.chatHistory.addAIChatMessage(
-                    `✓ Got it - you're looking for a ${detectedBuildingType}!`
-                );
+            session.state.hasGarageIntent = true;
+
+            // NEW: Apply all parameters extracted by AI
+            this.applyAIExtractedParameters(session, aiResult);
+
+            logger.info({
+                confidence: aiResult.confidence,
+                reasoning: aiResult.reasoning,
+                extractedParams: Object.keys(session.state.userFriendlyParams)
+            }, "[LeadAgent] AI detected intent and extracted parameters");
+
+            // If AI extracted dimensions from "2 casrs" typo, acknowledge it
+            if (aiResult.numCars) {
+                const ackMessage = `✓ Got it - you're looking for a ${aiResult.numCars}-car garage!`;
+                await session.memory.chatHistory.addAIChatMessage(ackMessage);
             }
         }
 
@@ -1219,31 +1241,31 @@ or
         logger.info("[LeadAgent] All sessions cleared and cleanup stopped");
     }
 
-    private async detectBuildingTypeFromInitialInput(input: string): Promise<string | null> {
-        try {
-            const lowerInput = input.toLowerCase();
-
-            const buildingPatterns = [
-                { pattern: /\bgarage\b/i, type: "garage" },
-                { pattern: /\bshed\b/i, type: "shed" },
-                { pattern: /\bbarn\b/i, type: "barn" },
-                { pattern: /\bmetallic? building\b/i, type: "garage" },
-                { pattern: /\bstructure\b/i, type: "garage" },
-            ];
-
-            for (const { pattern, type } of buildingPatterns) {
-                if (pattern.test(lowerInput)) {
-                    logger.info({ type }, "[LeadAgent] Detected building type from input");
-                    return type;
-                }
-            }
-
-            return null;
-        } catch (error) {
-            logger.warn({ err: error }, "[LeadAgent] Error detecting building type");
-            return null;
-        }
-    }
+    // private async detectBuildingTypeFromInitialInput(input: string): Promise<string | null> {
+    //     try {
+    //         const lowerInput = input.toLowerCase();
+    //
+    //         const buildingPatterns = [
+    //             { pattern: /\bgarage\b/i, type: "garage" },
+    //             { pattern: /\bshed\b/i, type: "shed" },
+    //             { pattern: /\bbarn\b/i, type: "barn" },
+    //             { pattern: /\bmetallic? building\b/i, type: "garage" },
+    //             { pattern: /\bstructure\b/i, type: "garage" },
+    //         ];
+    //
+    //         for (const { pattern, type } of buildingPatterns) {
+    //             if (pattern.test(lowerInput)) {
+    //                 logger.info({ type }, "[LeadAgent] Detected building type from input");
+    //                 return type;
+    //             }
+    //         }
+    //
+    //         return null;
+    //     } catch (error) {
+    //         logger.warn({ err: error }, "[LeadAgent] Error detecting building type");
+    //         return null;
+    //     }
+    // }
 
     private detectResetIntent(input: string): boolean {
         const resetPatterns = [
@@ -1252,6 +1274,133 @@ or
         ];
         return resetPatterns.some((p) => p.test(input));
     }
+
+    private async detectIntentAndParametersWithAI(input: string): Promise<AIIntentResult> {
+        try {
+            const prompt = `You are an expert at understanding user requests for building quotes, even with typos or unclear wording.
+
+Analyze this user message: "${input}"
+
+Determine:
+1. Does the user want a quote for a garage, shed, barn, or metal building? (even with typos)
+2. If yes, extract ANY parameters mentioned (even with typos):
+   - Building type (garage, shed, barn)
+   - Number of cars (if mentioned, e.g., "2 casrs" = 2 cars)
+   - Dimensions: width, length, height (in feet)
+   - Roof type (vertical, regular/pitched, box)
+   - State/location
+   - Gauge (metal thickness)
+
+IMPORTANT: Be forgiving of typos. Examples:
+- "casrs" → "cars"
+- "garae" → "garage"
+- "20x30x12" → width:20, length:30, height:12
+
+Respond ONLY with JSON (no markdown, no explanation):
+{
+  "hasIntent": true/false,
+  "buildingType": "garage" | "shed" | "barn" | null,
+  "numCars": 2 | null,
+  "width": 20 | null,
+  "length": 30 | null,
+  "height": 12 | null,
+  "roofType": "vertical" | "regular" | "box" | null,
+  "state": "texas" | null,
+  "gauge": 14 | null,
+  "confidence": 0.95,
+  "reasoning": "User wants a 2-car garage (detected 'casrs' as typo for 'cars')"
+}`;
+
+            logger.debug("[LeadAgent] Sending AI intent detection prompt");
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+            // Clean response
+            const cleanedResponse = response
+                .replace(/^```json\s*/g, "")
+                .replace(/^```\s*/g, "")
+                .replace(/\s*```$/g, "")
+                .trim();
+
+            const result: AIIntentResult = JSON.parse(cleanedResponse);
+
+            logger.info({
+                hasIntent: result.hasIntent,
+                confidence: result.confidence,
+                extracted: {
+                    buildingType: result.buildingType,
+                    numCars: result.numCars,
+                    dimensions: result.width ? `${result.width}x${result.length}x${result.height}` : null
+                }
+            }, "[LeadAgent] AI intent detection result");
+
+            return result;
+        } catch (error) {
+            logger.warn({ err: error }, "[LeadAgent] AI intent detection failed, using fallback");
+            return {
+                hasIntent: this.detectGarageIntentFallback(input),
+                confidence: 0.5
+            };
+        }
+    }
+
+    private applyAIExtractedParameters(
+        session: LeadAgentSessionMetadata,
+        aiResult: AIIntentResult
+    ): void {
+        if (aiResult.buildingType) {
+            (session.state.userFriendlyParams as any).building_type = aiResult.buildingType;
+            logger.info({ buildingType: aiResult.buildingType }, "[LeadAgent] Applied AI-extracted building_type");
+        }
+
+        if (aiResult.numCars && aiResult.numCars > 0) {
+            const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(
+                `${aiResult.numCars} cars`
+            );
+
+            if (calculation.width && calculation.length) {
+                (session.state.userFriendlyParams as any).width = calculation.width;
+                (session.state.userFriendlyParams as any).length = calculation.length;
+                (session.state.userFriendlyParams as any).height = calculation.height;
+                (session.state.userFriendlyParams as any).garage_type = calculation.garageType;
+
+                logger.info({
+                    numCars: aiResult.numCars,
+                    dimensions: `${calculation.width}x${calculation.length}x${calculation.height}`
+                }, "[LeadAgent] Applied AI-extracted car count with dimensions");
+            }
+        }
+
+        if (aiResult.width && !session.state.userFriendlyParams.width) {
+            (session.state.userFriendlyParams as any).width = aiResult.width;
+            logger.info({ width: aiResult.width }, "[LeadAgent] Applied AI-extracted width");
+        }
+
+        if (aiResult.length && !session.state.userFriendlyParams.length) {
+            (session.state.userFriendlyParams as any).length = aiResult.length;
+            logger.info({ length: aiResult.length }, "[LeadAgent] Applied AI-extracted length");
+        }
+
+        if (aiResult.height && !session.state.userFriendlyParams.height) {
+            (session.state.userFriendlyParams as any).height = aiResult.height;
+            logger.info({ height: aiResult.height }, "[LeadAgent] Applied AI-extracted height");
+        }
+
+        if (aiResult.roofType && !session.state.userFriendlyParams.roof_type) {
+            (session.state.userFriendlyParams as any).roof_type = aiResult.roofType;
+            logger.info({ roofType: aiResult.roofType }, "[LeadAgent] Applied AI-extracted roof_type");
+        }
+
+        if (aiResult.state && !session.state.userFriendlyParams.state_name) {
+            (session.state.userFriendlyParams as any).state_name = aiResult.state;
+            logger.info({ state: aiResult.state }, "[LeadAgent] Applied AI-extracted state");
+        }
+
+        if (aiResult.gauge && !session.state.userFriendlyParams.gauge) {
+            (session.state.userFriendlyParams as any).gauge = aiResult.gauge;
+            logger.info({ gauge: aiResult.gauge }, "[LeadAgent] Applied AI-extracted gauge");
+        }
+    }
 }
 
 function Enforce(): void {}
+
