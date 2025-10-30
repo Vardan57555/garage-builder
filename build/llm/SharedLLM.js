@@ -1,23 +1,192 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sharedLLM = void 0;
+exports.initializeSharedLLM = initializeSharedLLM;
 const ollama_1 = require("@langchain/ollama");
 const messages_1 = require("@langchain/core/messages");
 const Log_1 = require("../utils/logger/Log");
 const logger = (0, Log_1.createLogger)(module);
-exports.sharedLLM = new ollama_1.ChatOllama({
-    model: "llama3.2:latest",
-    temperature: 0.2,
-    streaming: false,
-    baseUrl: "http://ollama:11434"
-});
+class SharedLLMManager {
+    static instance;
+    llmClient = null;
+    isInitialized = false;
+    isInitializing = false;
+    config;
+    constructor(config) {
+        this.config = config;
+    }
+    static getInstance(config) {
+        if (!SharedLLMManager.instance) {
+            SharedLLMManager.instance = new SharedLLMManager(config || SharedLLMManager.getDefaultConfig());
+        }
+        return SharedLLMManager.instance;
+    }
+    static getDefaultConfig() {
+        return {
+            model: process.env.OLLAMA_MODEL || "llama3.2:latest",
+            temperature: parseFloat(process.env.OLLAMA_TEMPERATURE || "0.2"),
+            baseUrl: process.env.OLLAMA_BASE_URL || "http://ollama:11434",
+            streaming: process.env.OLLAMA_STREAMING === "true" ? true : false,
+            timeout: parseInt(process.env.OLLAMA_TIMEOUT || "30000"),
+        };
+    }
+    async initializeLLM() {
+        if (this.isInitialized || this.isInitializing) {
+            return;
+        }
+        this.isInitializing = true;
+        try {
+            logger.info({
+                model: this.config.model,
+                temperature: this.config.temperature,
+                baseUrl: this.config.baseUrl,
+            }, "[SharedLLM] Initializing with config");
+            this.llmClient = new ollama_1.ChatOllama({
+                model: this.config.model,
+                temperature: this.config.temperature,
+                streaming: this.config.streaming,
+                baseUrl: this.config.baseUrl,
+            });
+            await this.healthCheck();
+            this.isInitialized = true;
+            logger.info("[SharedLLM] Model initialized successfully");
+        }
+        catch (error) {
+            this.isInitialized = false;
+            logger.warn({
+                err: error instanceof Error ? error : new Error(String(error))
+            }, "[SharedLLM] Initialization failed (Ollama may not be running)");
+            throw error;
+        }
+        finally {
+            this.isInitializing = false;
+        }
+    }
+    async healthCheck() {
+        if (!this.llmClient) {
+            throw new Error("LLM client not initialized");
+        }
+        try {
+            await this.llmClient.invoke([new messages_1.HumanMessage("ping")]);
+            logger.debug("[SharedLLM] Health check passed");
+        }
+        catch (error) {
+            logger.warn({ err: error }, "[SharedLLM] Health check failed");
+            throw error;
+        }
+    }
+    extractStringContent(response) {
+        try {
+            if (typeof response.content === "string") {
+                return response.content;
+            }
+            if (Array.isArray(response.content)) {
+                return response.content
+                    .map((item) => {
+                    if (typeof item === "string") {
+                        return item;
+                    }
+                    if (item && typeof item === "object" && "text" in item) {
+                        return item.text;
+                    }
+                    if (item && typeof item === "object") {
+                        return JSON.stringify(item);
+                    }
+                    return String(item);
+                })
+                    .join("");
+            }
+            if (response.content && typeof response.content === "object") {
+                if ("text" in response.content) {
+                    return response.content.text;
+                }
+                return JSON.stringify(response.content);
+            }
+            return String(response.content);
+        }
+        catch (error) {
+            logger.warn({ err: error }, "[SharedLLM] Error extracting content");
+            return JSON.stringify(response.content || "");
+        }
+    }
+    async invoke(messages, options) {
+        const maxRetries = options?.retries || 3;
+        if (!this.isInitialized && !this.isInitializing) {
+            try {
+                await this.initializeLLM();
+            }
+            catch (error) {
+                logger.error({ err: error }, "[SharedLLM] Auto-initialization failed");
+                throw error;
+            }
+        }
+        while (this.isInitializing) {
+            await this.delay(100);
+        }
+        if (!this.llmClient) {
+            throw new Error("LLM client not available");
+        }
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                logger.debug({ attempt, maxRetries }, "[SharedLLM] Invoking LLM");
+                const response = await this.llmClient.invoke(messages);
+                const content = this.extractStringContent(response);
+                logger.debug("[SharedLLM] Response received successfully");
+                return content;
+            }
+            catch (error) {
+                lastError = error;
+                logger.warn({
+                    attempt,
+                    maxRetries,
+                    err: lastError
+                }, "[SharedLLM] Attempt failed");
+                if (attempt < maxRetries) {
+                    const delayMs = Math.pow(2, attempt - 1) * 1000;
+                    logger.info({ delayMs }, "[SharedLLM] Retrying after delay");
+                    await this.delay(delayMs);
+                }
+            }
+        }
+        throw lastError || new Error("LLM invocation failed after all retries");
+    }
+    isReady() {
+        return this.isInitialized && this.llmClient !== null;
+    }
+    getStatus() {
+        return {
+            initialized: this.isInitialized,
+            initializing: this.isInitializing,
+        };
+    }
+    shutdown() {
+        this.llmClient = null;
+        this.isInitialized = false;
+        logger.info("[SharedLLM] Shutdown complete");
+    }
+    delay(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+}
+exports.sharedLLM = SharedLLMManager.getInstance();
+async function initializeSharedLLM(config) {
+    try {
+        logger.info("[SharedLLM] Starting preload");
+        await exports.sharedLLM.invoke([new messages_1.HumanMessage("ping")]);
+        logger.info("[SharedLLM] Model preloaded successfully");
+    }
+    catch (error) {
+        logger.warn({ err: error }, "[SharedLLM] Preload failed (Ollama may not be running yet). Model will load on first request");
+    }
+}
 (async () => {
     try {
         await exports.sharedLLM.invoke([new messages_1.HumanMessage("ping")]);
-        logger.info("✅ Model preloaded");
+        logger.info("[SharedLLM] Model preloaded");
     }
     catch (err) {
-        logger.warn("⚠️ Ollama preload failed (maybe not running yet). The model will load on first request.");
+        logger.warn({ err }, "[SharedLLM] Preload failed (maybe not running yet). Model will load on first request");
     }
 })();
 //# sourceMappingURL=SharedLLM.js.map

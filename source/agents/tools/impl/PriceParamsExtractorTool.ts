@@ -17,17 +17,6 @@ import { DynamicGarageDimensionCalculator } from "@utils/dimensionCalculator/Dim
 
 const logger: pino.Logger = createLogger(module);
 
-
-/**
- * PriceParamsExtractorTool
- * Handles parameter extraction and price calculation
- *
- * KEY IMPROVEMENTS:
- * - Uses improved sharedLLM with auto-retry
- * - Better error handling and validation
- * - Cleaner separation of concerns
- * - Type-safe pricing calculations
- */
 export class PriceParamsExtractorTool extends BaseTool {
     private static instance: PriceParamsExtractorTool;
     readonly name = "priceParamsExtractor";
@@ -52,40 +41,36 @@ export class PriceParamsExtractorTool extends BaseTool {
         return PriceParamsExtractorTool.instance;
     }
 
-    /**
-     * STEP 1: Call LLM to extract parameters from user input
-     * Uses improved sharedLLM with automatic retry logic
-     */
     public async _call(userInput: string): Promise<string> {
         try {
-            logger.info("[PriceParamsExtractorTool] Processing input:", userInput);
+            logger.info({ inputLength: userInput.length }, "[PriceParamsExtractorTool] Processing input");
 
             const prompt = this.buildInferencePrompt(userInput);
-            logger.debug("[PriceParamsExtractorTool] Prompt built, calling LLM...");
+            logger.debug({ promptLength: prompt.length }, "[PriceParamsExtractorTool] Prompt built, calling LLM");
 
-            // Uses sharedLLM manager which handles retries automatically
             const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
             const extracted = this.safeExtractUserFriendlyParams(response);
-            logger.info("[PriceParamsExtractorTool] Extracted params:", extracted);
+            logger.info({ extractedKeys: Object.keys(extracted) }, "[PriceParamsExtractorTool] Extracted params");
 
             const validated = this.validateAndInferMissingParams(extracted, userInput);
-            logger.info("[PriceParamsExtractorTool] Validated and inferred params:", validated);
+            logger.info({ validatedKeys: Object.keys(validated) }, "[PriceParamsExtractorTool] Validated and inferred params");
 
             return JSON.stringify(validated);
         } catch (error) {
-            logger.error("[PriceParamsExtractorTool] _call failed:", error);
+            logger.error({ err: error }, "[PriceParamsExtractorTool] _call failed");
             return JSON.stringify({});
         }
     }
 
-    /**
-     * STEP 2: Calculate price based on pricing parameters
-     * Handles service failures gracefully
-     */
     public async calculatePriceWithParams(params: IPricingParams): Promise<string> {
         try {
-            logger.info("[PriceParamsExtractorTool] Calculating price with params:", params);
+            logger.info({
+                width: params.width,
+                length: params.length,
+                height: params.height,
+                roofId: params.roof_id
+            }, "[PriceParamsExtractorTool] Calculating price with params");
 
             const result = await PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(
                 params
@@ -97,87 +82,79 @@ export class PriceParamsExtractorTool extends BaseTool {
             }
 
             if (!result.status && result.message) {
-                logger.warn("[PriceParamsExtractorTool] Pricing service error:", result.message);
+                logger.warn({ message: result.message }, "[PriceParamsExtractorTool] Pricing service error");
                 return `⚠️ ${result.message}`;
             }
 
             logger.info("[PriceParamsExtractorTool] Price calculated successfully");
             return this.formatPricingResult(result, params);
         } catch (error) {
-            logger.error("[PriceParamsExtractorTool] calculatePriceWithParams failed:", error);
+            logger.error({ err: error }, "[PriceParamsExtractorTool] calculatePriceWithParams failed");
             return "⚠️ Failed to calculate price with the given parameters.";
         }
     }
 
-    /**
-     * STEP 3: Validate extracted parameters and infer missing ones
-     * Intelligently fills in missing data from context
-     */
     private validateAndInferMissingParams(
         params: Partial<UserFriendlyParams>,
         userInput: string
     ): Partial<UserFriendlyParams> {
         const input: string = userInput.toLowerCase();
 
-        logger.debug("[validateAndInferMissingParams] Input params:", params);
+        logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Input params");
 
-        // Infer dimensions if missing
         if (!this.hasDimensions(params)) {
             const garageType: string = params.garage_type || this.detectGarageType(input);
             const standardDims = this.getStandardDimensions(garageType);
 
-            logger.info(
-                `[validateAndInferMissingParams] Missing dimensions, inferred from type "${garageType}":`,
-                standardDims
-            );
+            logger.info({
+                garageType,
+                width: standardDims.width,
+                length: standardDims.length,
+                height: standardDims.height
+            }, "[validateAndInferMissingParams] Missing dimensions, inferred from type");
 
             Object.assign(params, standardDims);
             params.garage_type = garageType;
         }
 
-        // Infer state if missing
         if (!params.state_name) {
             const extractedState = this.extractState(input);
             if (extractedState) {
-                logger.info(`[validateAndInferMissingParams] Inferred state: ${extractedState}`);
+                logger.info({ state: extractedState }, "[validateAndInferMissingParams] Inferred state");
                 params.state_name = extractedState;
             }
         }
 
-        logger.debug("[validateAndInferMissingParams] Final params:", params);
+        logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Final params");
         return params;
     }
 
-    /**
-     * Check if all three dimensions are present
-     */
     private hasDimensions(params: Partial<UserFriendlyParams>): boolean {
         const hasDims = !!(params.width && params.length && params.height);
-        logger.debug(`[hasDimensions] Check: width=${params.width}, length=${params.length}, height=${params.height} => ${hasDims}`);
+        logger.debug({
+            width: params.width,
+            length: params.length,
+            height: params.height,
+            hasDimensions: hasDims
+        }, "[hasDimensions] Dimension check");
         return hasDims;
     }
 
-    /**
-     * Detect garage type from input text
-     */
     private detectGarageType(input: string): string {
         for (const [pattern, type] of Constants.GARAGE_TYPE_PATTERNS) {
             if (pattern.test(input)) {
-                logger.debug(`[detectGarageType] Matched pattern for type: ${type}`);
+                logger.debug({ type }, "[detectGarageType] Matched pattern");
                 return type;
             }
         }
-        logger.debug("[detectGarageType] No pattern matched, defaulting to 'garage'");
+        logger.debug("[detectGarageType] No pattern matched, defaulting to garage");
         return "garage";
     }
 
-    /**
-     * Extract state name from input text
-     */
     private extractState(input: string): string | null {
         for (const [pattern, stateName] of Object.entries(Constants.STATE_PATTERNS)) {
             if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input)) {
-                logger.debug(`[extractState] Matched state: ${stateName}`);
+                logger.debug({ stateName }, "[extractState] Matched state");
                 return stateName;
             }
         }
@@ -185,11 +162,8 @@ export class PriceParamsExtractorTool extends BaseTool {
         return null;
     }
 
-    /**
-     * STEP 4: Format complete pricing result
-     */
     private formatPricingResult(pricing: any, params: IPricingParams): string {
-        logger.info("[formatPricingResult] Formatting price quote...");
+        logger.info("[formatPricingResult] Formatting price quote");
 
         const { total: kitPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
         const { total: finalTotal, breakdown: serviceBreakdown } = this.addServiceCosts(
@@ -212,9 +186,6 @@ export class PriceParamsExtractorTool extends BaseTool {
         return quote;
     }
 
-    /**
-     * Build final quote string
-     */
     private formatQuote(specs: string, total: number, breakdown: string[]): string {
         return [
             "✅ **Price Quote Generated!**\n",
@@ -227,9 +198,6 @@ export class PriceParamsExtractorTool extends BaseTool {
         ].join("\n");
     }
 
-    /**
-     * Format building specifications for display
-     */
     private formatSpecifications(pricing: any, params: IPricingParams): string {
         const sqft: number = params.width * params.length;
         const roofName: string = Constants.ROOF_NAMES[params.roof_id] || "Custom";
@@ -241,7 +209,6 @@ export class PriceParamsExtractorTool extends BaseTool {
             `   • Gauge: ${pricing.gauge ?? params.gauge ?? 14}GA`,
         ];
 
-        // Add optional fields
         if (params.building_type) {
             specs.push(`   • Building Type: ${params.building_type}`);
         }
@@ -261,9 +228,6 @@ export class PriceParamsExtractorTool extends BaseTool {
         return specs.join("\n");
     }
 
-    /**
-     * Build detailed breakdown lines for pricing
-     */
     private buildBreakdownLines(
         pricing: any,
         params: IPricingParams,
@@ -271,7 +235,6 @@ export class PriceParamsExtractorTool extends BaseTool {
     ): string[] {
         const lines: string[] = [];
 
-        // Base building cost
         if (roofPrice > 0) {
             const roofName = Constants.ROOF_NAMES[params.roof_id] || "Standard";
             lines.push(
@@ -279,13 +242,11 @@ export class PriceParamsExtractorTool extends BaseTool {
             );
         }
 
-        // Side closures
         const sideClosureCost: number = this.calculateSideClosureCosts(pricing, params);
         if (sideClosureCost > 0) {
             lines.push(`   • Side & End Closures: $${this.formatCurrency(sideClosureCost)}`);
         }
 
-        // Other components
         for (const component of Constants.PRICING_COMPONENTS) {
             const cost: number = this.safeExtract(component.extractor, pricing);
 
@@ -294,7 +255,6 @@ export class PriceParamsExtractorTool extends BaseTool {
             }
         }
 
-        // Additional features (percentage-based)
         if (pricing.additional_features?.cost_type === "%") {
             const percentageIncrease: number =
                 roofPrice * ((pricing.additional_features.cost ?? 0) / 100);
@@ -309,9 +269,6 @@ export class PriceParamsExtractorTool extends BaseTool {
         return lines;
     }
 
-    /**
-     * Calculate total kit price before service costs
-     */
     private calculateTotalPrice(pricing: any, params: IPricingParams): PricingBreakdown {
         const roofPrice: number = this.selectRoofPrice(params.roof_id, pricing);
         let total: number = roofPrice;
@@ -328,13 +285,10 @@ export class PriceParamsExtractorTool extends BaseTool {
             total += roofPrice * ((pricing.additional_features.cost ?? 0) / 100);
         }
 
-        logger.debug("[calculateTotalPrice] Calculated total:", { total, roofPrice });
+        logger.debug({ total, roofPrice }, "[calculateTotalPrice] Calculated total");
         return { total, roofPrice };
     }
 
-    /**
-     * Select appropriate roof price based on roof type
-     */
     private selectRoofPrice(roofId: number, pricing: any): number {
         const fieldMap: Record<number, string> = {
             1: "base_price_vertical",
@@ -345,17 +299,13 @@ export class PriceParamsExtractorTool extends BaseTool {
         const field: string = fieldMap[roofId] ?? "base_price_regular";
         const price = pricing[field] ?? pricing.base_price_regular ?? 0;
 
-        logger.debug(`[selectRoofPrice] Roof ID ${roofId} => field ${field} => $${price}`);
+        logger.debug({ roofId, field, price }, "[selectRoofPrice] Selected roof price");
         return price;
     }
 
-    /**
-     * Calculate side and end closure costs
-     */
     private calculateSideClosureCosts(pricing: any, _params: IPricingParams): number {
         let totalCost: number = 0;
 
-        // Side closures (two sides)
         if (pricing.full_length_side) {
             const sideData = Array.isArray(pricing.full_length_side)
                 ? pricing.full_length_side[0]
@@ -365,25 +315,21 @@ export class PriceParamsExtractorTool extends BaseTool {
                 (sideData?.side_close_cost ?? 0) + (sideData?.leg_height_cost ?? 0);
             totalCost += costPerSide * 2;
 
-            logger.debug("[calculateSideClosureCosts] Side cost:", { costPerSide, total: costPerSide * 2 });
+            logger.debug({ costPerSide, total: costPerSide * 2 }, "[calculateSideClosureCosts] Side cost");
         }
 
-        // End closures (two ends)
         if (pricing.end) {
             const endData = Array.isArray(pricing.end) ? pricing.end[0] : pricing.end;
             const endCost = (endData?.end_close_cost ?? 0) * 2;
             totalCost += endCost;
 
-            logger.debug("[calculateSideClosureCosts] End cost:", { endCost });
+            logger.debug({ endCost }, "[calculateSideClosureCosts] End cost");
         }
 
-        logger.debug("[calculateSideClosureCosts] Total closure cost:", totalCost);
+        logger.debug({ totalCost }, "[calculateSideClosureCosts] Total closure cost");
         return totalCost;
     }
 
-    /**
-     * Add service costs (labor, foundation, delivery, contingency)
-     */
     private addServiceCosts(kitPrice: number, params: IPricingParams): ServiceCostsResult {
         const sqft: number = params.width * params.length;
         const {
@@ -399,12 +345,13 @@ export class PriceParamsExtractorTool extends BaseTool {
         const contingency: number =
             (kitPrice + laborCost + foundationCost + deliveryCost) * CONTINGENCY_PERCENTAGE;
 
-        logger.debug("[addServiceCosts] Service costs breakdown:", {
-            labor: laborCost,
-            foundation: foundationCost,
-            delivery: deliveryCost,
-            contingency: contingency,
-        });
+        logger.debug({
+            laborCost,
+            foundationCost,
+            deliveryCost,
+            contingency,
+            sqft
+        }, "[addServiceCosts] Service costs breakdown");
 
         const breakdown: string[] = [
             `   • Installation Labor (50% of kit): $${this.formatCurrency(laborCost)}`,
@@ -418,32 +365,26 @@ export class PriceParamsExtractorTool extends BaseTool {
         return { total, breakdown };
     }
 
-    /**
-     * STEP 5: Extract and clean JSON from LLM response
-     */
     public safeExtractUserFriendlyParams(rawOutput: string): Partial<UserFriendlyParams> {
         try {
-            logger.debug("[safeExtractUserFriendlyParams] Raw output:", rawOutput);
+            logger.debug({ outputLength: rawOutput.length }, "[safeExtractUserFriendlyParams] Raw output received");
 
             const json: string = this.extractJsonFromText(rawOutput);
             const params: Partial<UserFriendlyParams> = JSON.parse(json);
 
-            logger.debug("[safeExtractUserFriendlyParams] Parsed JSON:", params);
+            logger.debug({ keys: Object.keys(params) }, "[safeExtractUserFriendlyParams] Parsed JSON");
 
             this.removeNullValues(params);
             this.normalizeNumericFields(params);
 
-            logger.debug("[safeExtractUserFriendlyParams] Final cleaned params:", params);
+            logger.debug({ keys: Object.keys(params) }, "[safeExtractUserFriendlyParams] Final cleaned params");
             return params;
         } catch (error) {
-            logger.warn("[safeExtractUserFriendlyParams] Failed to extract JSON:", error);
+            logger.warn({ err: error }, "[safeExtractUserFriendlyParams] Failed to extract JSON");
             return {};
         }
     }
 
-    /**
-     * Extract JSON object from potentially markdown-wrapped text
-     */
     private extractJsonFromText(text: string): string {
         const cleaned: string = text
             .replace(/```json\s*/g, "")
@@ -463,9 +404,6 @@ export class PriceParamsExtractorTool extends BaseTool {
             .replace(/,\s*[}\]]/g, (match) => match.slice(-1));
     }
 
-    /**
-     * Remove null values from parameters object
-     */
     private removeNullValues(params: Partial<UserFriendlyParams>): void {
         const keysToDelete: (keyof UserFriendlyParams)[] = [];
 
@@ -479,12 +417,9 @@ export class PriceParamsExtractorTool extends BaseTool {
             delete params[key];
         });
 
-        logger.debug("[removeNullValues] Removed keys:", keysToDelete);
+        logger.debug({ count: keysToDelete.length }, "[removeNullValues] Removed null keys");
     }
 
-    /**
-     * Normalize numeric fields from strings to numbers
-     */
     private normalizeNumericFields(params: Partial<UserFriendlyParams>): void {
         for (const field of Constants.NUMERIC_FIELDS) {
             const value: string | number | boolean = params[field as keyof UserFriendlyParams];
@@ -494,50 +429,38 @@ export class PriceParamsExtractorTool extends BaseTool {
 
                 if (isNaN(num)) {
                     delete params[field as keyof UserFriendlyParams];
-                    logger.debug(`[normalizeNumericFields] Deleted invalid field: ${field}`);
+                    logger.debug({ field }, "[normalizeNumericFields] Deleted invalid field");
                 } else {
                     (params as Record<string, any>)[field] = num;
-                    logger.debug(`[normalizeNumericFields] Normalized ${field}: ${value} => ${num}`);
+                    logger.debug({ field, original: value, normalized: num }, "[normalizeNumericFields] Normalized field");
                 }
             }
         }
     }
 
-    /**
-     * Get standard dimensions for a garage type
-     */
     private getStandardDimensions(garageType: string): Partial<UserFriendlyParams> {
         const dims: Dimensions =
             Constants.STANDARD_DIMENSIONS[garageType] || Constants.STANDARD_DIMENSIONS.garage;
 
-        logger.debug(`[getStandardDimensions] Type: ${garageType} => `, dims);
+        logger.debug({ garageType, width: dims.width, length: dims.length, height: dims.height }, "[getStandardDimensions] Retrieved standard dimensions");
 
         return { width: dims.width, length: dims.length, height: dims.height };
     }
 
-    /**
-     * Format number as currency string
-     */
     private formatCurrency(value: number): string {
         return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     }
 
-    /**
-     * Safely extract numeric value from pricing object
-     */
     private safeExtract(extractor: (pricing: any) => number, pricing: any): number {
         try {
             const result = extractor(pricing) ?? 0;
             return result;
         } catch (error) {
-            logger.error("[safeExtract] Extraction failed:", error);
+            logger.error({ err: error }, "[safeExtract] Extraction failed");
             return 0;
         }
     }
 
-    /**
-     * Build the LLM prompt for parameter extraction
-     */
     private buildInferencePrompt(userInput: string): string {
         const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(userInput);
 
