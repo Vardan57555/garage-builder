@@ -27,14 +27,26 @@ const transport = pino_1.default.transport({
     }
 });
 function logFactory(loggerName) {
-    const isProduction = false && node_process_1.default.env.NODE_ENV === Constants_1.Constants.ENVIRONMENTS.PRODUCTION;
+    const isProduction = false;
     return (0, pino_1.default)({
         name: loggerName,
         formatters: {
-            level: (level) => ({ level })
+            level: (level) => ({ level }),
+            bindings: (bindings) => ({ app: bindings.name })
         },
         base: undefined,
-        timestamp: pino_1.default.stdTimeFunctions.isoTime
+        timestamp: pino_1.default.stdTimeFunctions.isoTime,
+        serializers: {
+            err: pino_1.default.stdSerializers.err,
+            data: (data) => {
+                try {
+                    return typeof data === 'string' ? data : JSON.parse(JSON.stringify(data));
+                }
+                catch (e) {
+                    return String(data);
+                }
+            }
+        }
     }, isProduction ? transport : undefined);
 }
 function createLogger(name) {
@@ -52,7 +64,7 @@ function createLogger(name) {
 const logger = logFactory("unhandled");
 node_process_1.default.on("uncaughtException", (err) => {
     if (err && err.stack) {
-        logger.error(err, err.message);
+        logger.error({ err }, err.message);
     }
     else {
         logger.error("uncaughtException, no stack trace available");
@@ -60,7 +72,7 @@ node_process_1.default.on("uncaughtException", (err) => {
 });
 node_process_1.default.on("unhandledRejection", (err) => {
     if (err && err.stack) {
-        logger.error(err, err.message);
+        logger.error({ err }, err.message);
     }
     else {
         logger.error("unhandledRejection, no stack trace available");

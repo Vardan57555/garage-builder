@@ -28,80 +28,95 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     }
     async _call(userInput) {
         try {
-            logger.info("[PriceParamsExtractorTool] Processing input:", userInput);
+            logger.info({ inputLength: userInput.length }, "[PriceParamsExtractorTool] Processing input");
             const prompt = this.buildInferencePrompt(userInput);
-            logger.debug("[PriceParamsExtractorTool] Prompt built, calling LLM...");
+            logger.debug({ promptLength: prompt.length }, "[PriceParamsExtractorTool] Prompt built, calling LLM");
             const response = await SharedLLM_1.sharedLLM.invoke([new messages_1.HumanMessage(prompt)]);
             const extracted = this.safeExtractUserFriendlyParams(response);
-            logger.info("[PriceParamsExtractorTool] Extracted params:", extracted);
+            logger.info({ extractedKeys: Object.keys(extracted) }, "[PriceParamsExtractorTool] Extracted params");
             const validated = this.validateAndInferMissingParams(extracted, userInput);
-            logger.info("[PriceParamsExtractorTool] Validated and inferred params:", validated);
+            logger.info({ validatedKeys: Object.keys(validated) }, "[PriceParamsExtractorTool] Validated and inferred params");
             return JSON.stringify(validated);
         }
         catch (error) {
-            logger.error("[PriceParamsExtractorTool] _call failed:", error);
+            logger.error({ err: error }, "[PriceParamsExtractorTool] _call failed");
             return JSON.stringify({});
         }
     }
     async calculatePriceWithParams(params) {
         try {
-            logger.info("[PriceParamsExtractorTool] Calculating price with params:", params);
+            logger.info({
+                width: params.width,
+                length: params.length,
+                height: params.height,
+                roofId: params.roof_id
+            }, "[PriceParamsExtractorTool] Calculating price with params");
             const result = await PriceServiceImpl_1.PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(params);
             if (!result) {
                 logger.warn("[PriceParamsExtractorTool] Empty result from pricing service");
                 return "⚠️ Pricing service returned empty result.";
             }
             if (!result.status && result.message) {
-                logger.warn("[PriceParamsExtractorTool] Pricing service error:", result.message);
+                logger.warn({ message: result.message }, "[PriceParamsExtractorTool] Pricing service error");
                 return `⚠️ ${result.message}`;
             }
             logger.info("[PriceParamsExtractorTool] Price calculated successfully");
             return this.formatPricingResult(result, params);
         }
         catch (error) {
-            logger.error("[PriceParamsExtractorTool] calculatePriceWithParams failed:", error);
+            logger.error({ err: error }, "[PriceParamsExtractorTool] calculatePriceWithParams failed");
             return "⚠️ Failed to calculate price with the given parameters.";
         }
     }
     validateAndInferMissingParams(params, userInput) {
         const input = userInput.toLowerCase();
-        logger.debug("[validateAndInferMissingParams] Input params:", params);
+        logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Input params");
         if (!this.hasDimensions(params)) {
             const garageType = params.garage_type || this.detectGarageType(input);
             const standardDims = this.getStandardDimensions(garageType);
-            logger.info(`[validateAndInferMissingParams] Missing dimensions, inferred from type "${garageType}":`, standardDims);
+            logger.info({
+                garageType,
+                width: standardDims.width,
+                length: standardDims.length,
+                height: standardDims.height
+            }, "[validateAndInferMissingParams] Missing dimensions, inferred from type");
             Object.assign(params, standardDims);
             params.garage_type = garageType;
         }
         if (!params.state_name) {
             const extractedState = this.extractState(input);
             if (extractedState) {
-                logger.info(`[validateAndInferMissingParams] Inferred state: ${extractedState}`);
+                logger.info({ state: extractedState }, "[validateAndInferMissingParams] Inferred state");
                 params.state_name = extractedState;
             }
         }
-        logger.debug("[validateAndInferMissingParams] Final params:", params);
+        logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Final params");
         return params;
     }
     hasDimensions(params) {
         const hasDims = !!(params.width && params.length && params.height);
-        logger.debug(`[hasDimensions] Check: width=${params.width}, length=${params.length}, height=${params.height} => ${hasDims}`);
+        logger.debug({
+            width: params.width,
+            length: params.length,
+            height: params.height,
+            hasDimensions: hasDims
+        }, "[hasDimensions] Dimension check");
         return hasDims;
     }
     detectGarageType(input) {
         for (const [pattern, type] of Constants_1.Constants.GARAGE_TYPE_PATTERNS) {
             if (pattern.test(input)) {
-                logger.debug(`[detectGarageType] Matched pattern for type: ${type}`);
+                logger.debug({ type }, "[detectGarageType] Matched pattern");
                 return type;
             }
         }
-        logger.debug("[detectGarageType] No pattern matched, defaulting to 'garage'");
+        logger.debug("[detectGarageType] No pattern matched, defaulting to garage");
         return "garage";
     }
     extractState(input) {
         for (const [pattern, stateName] of Object.entries(Constants_1.Constants.STATE_PATTERNS)) {
             if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input)) {
-                logger.debug(`[extractState] Matched state: ${stateName}`);
+                logger.debug({ stateName }, "[extractState] Matched state");
                 return stateName;
             }
         }
@@ -109,7 +124,7 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         return null;
     }
     formatPricingResult(pricing, params) {
-        logger.info("[formatPricingResult] Formatting price quote...");
+        logger.info("[formatPricingResult] Formatting price quote");
         const { total: kitPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
         const { total: finalTotal, breakdown: serviceBreakdown } = this.addServiceCosts(kitPrice, params);
         const breakdownLines = [
@@ -189,7 +204,7 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         if (pricing.additional_features?.cost_type === "%") {
             total += roofPrice * ((pricing.additional_features.cost ?? 0) / 100);
         }
-        logger.debug("[calculateTotalPrice] Calculated total:", { total, roofPrice });
+        logger.debug({ total, roofPrice }, "[calculateTotalPrice] Calculated total");
         return { total, roofPrice };
     }
     selectRoofPrice(roofId, pricing) {
@@ -200,7 +215,7 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         };
         const field = fieldMap[roofId] ?? "base_price_regular";
         const price = pricing[field] ?? pricing.base_price_regular ?? 0;
-        logger.debug(`[selectRoofPrice] Roof ID ${roofId} => field ${field} => $${price}`);
+        logger.debug({ roofId, field, price }, "[selectRoofPrice] Selected roof price");
         return price;
     }
     calculateSideClosureCosts(pricing, _params) {
@@ -211,15 +226,15 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
                 : pricing.full_length_side;
             const costPerSide = (sideData?.side_close_cost ?? 0) + (sideData?.leg_height_cost ?? 0);
             totalCost += costPerSide * 2;
-            logger.debug("[calculateSideClosureCosts] Side cost:", { costPerSide, total: costPerSide * 2 });
+            logger.debug({ costPerSide, total: costPerSide * 2 }, "[calculateSideClosureCosts] Side cost");
         }
         if (pricing.end) {
             const endData = Array.isArray(pricing.end) ? pricing.end[0] : pricing.end;
             const endCost = (endData?.end_close_cost ?? 0) * 2;
             totalCost += endCost;
-            logger.debug("[calculateSideClosureCosts] End cost:", { endCost });
+            logger.debug({ endCost }, "[calculateSideClosureCosts] End cost");
         }
-        logger.debug("[calculateSideClosureCosts] Total closure cost:", totalCost);
+        logger.debug({ totalCost }, "[calculateSideClosureCosts] Total closure cost");
         return totalCost;
     }
     addServiceCosts(kitPrice, params) {
@@ -229,12 +244,13 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         const foundationCost = sqft * FOUNDATION_COST_PER_SQFT;
         const deliveryCost = DELIVERY_FLAT_RATE;
         const contingency = (kitPrice + laborCost + foundationCost + deliveryCost) * CONTINGENCY_PERCENTAGE;
-        logger.debug("[addServiceCosts] Service costs breakdown:", {
-            labor: laborCost,
-            foundation: foundationCost,
-            delivery: deliveryCost,
-            contingency: contingency,
-        });
+        logger.debug({
+            laborCost,
+            foundationCost,
+            deliveryCost,
+            contingency,
+            sqft
+        }, "[addServiceCosts] Service costs breakdown");
         const breakdown = [
             `   • Installation Labor (50% of kit): $${this.formatCurrency(laborCost)}`,
             `   • Concrete Foundation (${sqft} sq ft @ $${FOUNDATION_COST_PER_SQFT}/sq ft): $${this.formatCurrency(foundationCost)}`,
@@ -246,17 +262,17 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     }
     safeExtractUserFriendlyParams(rawOutput) {
         try {
-            logger.debug("[safeExtractUserFriendlyParams] Raw output:", rawOutput);
+            logger.debug({ outputLength: rawOutput.length }, "[safeExtractUserFriendlyParams] Raw output received");
             const json = this.extractJsonFromText(rawOutput);
             const params = JSON.parse(json);
-            logger.debug("[safeExtractUserFriendlyParams] Parsed JSON:", params);
+            logger.debug({ keys: Object.keys(params) }, "[safeExtractUserFriendlyParams] Parsed JSON");
             this.removeNullValues(params);
             this.normalizeNumericFields(params);
-            logger.debug("[safeExtractUserFriendlyParams] Final cleaned params:", params);
+            logger.debug({ keys: Object.keys(params) }, "[safeExtractUserFriendlyParams] Final cleaned params");
             return params;
         }
         catch (error) {
-            logger.warn("[safeExtractUserFriendlyParams] Failed to extract JSON:", error);
+            logger.warn({ err: error }, "[safeExtractUserFriendlyParams] Failed to extract JSON");
             return {};
         }
     }
@@ -285,7 +301,7 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         keysToDelete.forEach((key) => {
             delete params[key];
         });
-        logger.debug("[removeNullValues] Removed keys:", keysToDelete);
+        logger.debug({ count: keysToDelete.length }, "[removeNullValues] Removed null keys");
     }
     normalizeNumericFields(params) {
         for (const field of Constants_1.Constants.NUMERIC_FIELDS) {
@@ -294,18 +310,18 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
                 const num = parseFloat(value.replace(/[^\d.]/g, ""));
                 if (isNaN(num)) {
                     delete params[field];
-                    logger.debug(`[normalizeNumericFields] Deleted invalid field: ${field}`);
+                    logger.debug({ field }, "[normalizeNumericFields] Deleted invalid field");
                 }
                 else {
                     params[field] = num;
-                    logger.debug(`[normalizeNumericFields] Normalized ${field}: ${value} => ${num}`);
+                    logger.debug({ field, original: value, normalized: num }, "[normalizeNumericFields] Normalized field");
                 }
             }
         }
     }
     getStandardDimensions(garageType) {
         const dims = Constants_1.Constants.STANDARD_DIMENSIONS[garageType] || Constants_1.Constants.STANDARD_DIMENSIONS.garage;
-        logger.debug(`[getStandardDimensions] Type: ${garageType} => `, dims);
+        logger.debug({ garageType, width: dims.width, length: dims.length, height: dims.height }, "[getStandardDimensions] Retrieved standard dimensions");
         return { width: dims.width, length: dims.length, height: dims.height };
     }
     formatCurrency(value) {
@@ -317,7 +333,7 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
             return result;
         }
         catch (error) {
-            logger.error("[safeExtract] Extraction failed:", error);
+            logger.error({ err: error }, "[safeExtract] Extraction failed");
             return 0;
         }
     }

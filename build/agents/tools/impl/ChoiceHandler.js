@@ -10,11 +10,11 @@ class ChoiceHandler {
     logger = logger;
     async parseUserChoiceWithAI(userInput, options, context = "") {
         try {
-            this.logger.info("[ChoiceHandler] Parsing user choice:", {
+            this.logger.info({
                 userInput,
-                options: options.map(o => o.value),
+                optionCount: options.length,
                 context
-            });
+            }, "[ChoiceHandler] Parsing user choice");
             const numberMatch = userInput.match(/^\d+$/);
             if (numberMatch) {
                 const index = parseInt(userInput) - 1;
@@ -40,7 +40,7 @@ class ChoiceHandler {
             return await this.chooseWithAI(userInput, options, context);
         }
         catch (error) {
-            this.logger.error("[ChoiceHandler] Error parsing choice:", error);
+            this.logger.error({ err: error }, "[ChoiceHandler] Error parsing choice");
             return {
                 selected: options[0].value,
                 confidence: "low",
@@ -75,7 +75,7 @@ Respond ONLY with valid JSON (no markdown):
   "reasoning": "brief explanation"
 }`;
             const response = await SharedLLM_1.sharedLLM.invoke([new messages_1.HumanMessage(prompt)]);
-            this.logger.debug("[ChoiceHandler] AI response:", response);
+            this.logger.debug({ responseLength: response.length }, "[ChoiceHandler] AI response received");
             const cleaned = response
                 .replace(/```json\s*/g, "")
                 .replace(/```\s*/g, "")
@@ -87,18 +87,21 @@ Respond ONLY with valid JSON (no markdown):
             const result = JSON.parse(jsonMatch[0]);
             const isValid = options.some(opt => opt.value === result.selected);
             if (!isValid) {
-                this.logger.warn("[ChoiceHandler] AI selected invalid option:", result.selected);
+                this.logger.warn({ selected: result.selected }, "[ChoiceHandler] AI selected invalid option");
                 return {
                     selected: options[0].value,
                     confidence: "low",
-                    reasoning: `AI selected invalid option, using default`
+                    reasoning: "AI selected invalid option, using default"
                 };
             }
-            this.logger.info("[ChoiceHandler] AI choice made:", result);
+            this.logger.info({
+                selected: result.selected,
+                confidence: result.confidence
+            }, "[ChoiceHandler] AI choice made");
             return result;
         }
         catch (error) {
-            this.logger.error("[ChoiceHandler] AI choice failed:", error);
+            this.logger.error({ err: error }, "[ChoiceHandler] AI choice failed");
             return {
                 selected: options[0].value,
                 confidence: "low",
@@ -204,7 +207,7 @@ class GenericChoiceManager {
     }
     registerOptions(field, options) {
         this.fieldOptions.set(field, options);
-        logger.info(`[GenericChoiceManager] Registered options for field: ${field}`);
+        logger.info({ field, optionCount: options.length }, "[GenericChoiceManager] Registered options for field");
     }
 }
 exports.GenericChoiceManager = GenericChoiceManager;

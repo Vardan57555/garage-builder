@@ -5,52 +5,33 @@ import { createLogger } from "@utils/logger/Log";
 
 const logger: pino.Logger = createLogger(module);
 
-/**
- * Structured choice option
- */
 export interface ChoiceOption {
     value: string;
     label: string;
     description?: string;
 }
 
-/**
- * User choice result
- */
 export interface ChoiceResult {
     selected: string;
     confidence: "high" | "medium" | "low";
     reasoning: string;
 }
 
-/**
- * Choice handler for structured selections
- * Uses LangChain with Zod schema for type-safe outputs
- */
 export class ChoiceHandler {
     private logger: pino.Logger = logger;
 
-    /**
-     * Parse user response and map to valid choice
-     *
-     * EXAMPLE:
-     * Options: ["vertical", "regular", "box"]
-     * User says: "any"
-     * Result: Asks LLM to pick one, or picks randomly
-     */
     public async parseUserChoiceWithAI(
         userInput: string,
         options: ChoiceOption[],
         context: string = ""
     ): Promise<ChoiceResult> {
         try {
-            this.logger.info("[ChoiceHandler] Parsing user choice:", {
+            this.logger.info({
                 userInput,
-                options: options.map(o => o.value),
+                optionCount: options.length,
                 context
-            });
+            }, "[ChoiceHandler] Parsing user choice");
 
-            // If user input is a number, try direct mapping
             const numberMatch = userInput.match(/^\d+$/);
             if (numberMatch) {
                 const index = parseInt(userInput) - 1;
@@ -63,7 +44,6 @@ export class ChoiceHandler {
                 }
             }
 
-            // If user input matches an option directly
             const lowerInput = userInput.toLowerCase().trim();
             const directMatch = options.find(opt =>
                 opt.value.toLowerCase() === lowerInput ||
@@ -79,11 +59,9 @@ export class ChoiceHandler {
                 };
             }
 
-            // Use AI for fuzzy matching or ambiguous responses
             return await this.chooseWithAI(userInput, options, context);
         } catch (error) {
-            this.logger.error("[ChoiceHandler] Error parsing choice:", error);
-            // Fallback: pick first option
+            this.logger.error({ err: error }, "[ChoiceHandler] Error parsing choice");
             return {
                 selected: options[0].value,
                 confidence: "low",
@@ -92,10 +70,6 @@ export class ChoiceHandler {
         }
     }
 
-    /**
-     * Use AI to intelligently choose from options
-     * Handles vague responses like "any", "whatever", "I don't know"
-     */
     private async chooseWithAI(
         userInput: string,
         options: ChoiceOption[],
@@ -130,9 +104,8 @@ Respond ONLY with valid JSON (no markdown):
 
             const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
-            this.logger.debug("[ChoiceHandler] AI response:", response);
+            this.logger.debug({ responseLength: response.length }, "[ChoiceHandler] AI response received");
 
-            // Parse JSON response
             const cleaned = response
                 .replace(/```json\s*/g, "")
                 .replace(/```\s*/g, "")
@@ -145,22 +118,24 @@ Respond ONLY with valid JSON (no markdown):
 
             const result = JSON.parse(jsonMatch[0]);
 
-            // Validate that selected value exists
             const isValid = options.some(opt => opt.value === result.selected);
             if (!isValid) {
-                this.logger.warn("[ChoiceHandler] AI selected invalid option:", result.selected);
+                this.logger.warn({ selected: result.selected }, "[ChoiceHandler] AI selected invalid option");
                 return {
                     selected: options[0].value,
                     confidence: "low",
-                    reasoning: `AI selected invalid option, using default`
+                    reasoning: "AI selected invalid option, using default"
                 };
             }
 
-            this.logger.info("[ChoiceHandler] AI choice made:", result);
+            this.logger.info({
+                selected: result.selected,
+                confidence: result.confidence
+            }, "[ChoiceHandler] AI choice made");
+
             return result as ChoiceResult;
         } catch (error) {
-            this.logger.error("[ChoiceHandler] AI choice failed:", error);
-            // Fallback
+            this.logger.error({ err: error }, "[ChoiceHandler] AI choice failed");
             return {
                 selected: options[0].value,
                 confidence: "low",
@@ -169,30 +144,21 @@ Respond ONLY with valid JSON (no markdown):
         }
     }
 
-    /**
-     * Validate if user input is one of the valid choices
-     * Returns true if clear selection, false if ambiguous
-     */
     public isValidDirectChoice(userInput: string, options: ChoiceOption[]): boolean {
         const lowerInput = userInput.toLowerCase().trim();
 
-        // Check for number (1, 2, 3, etc.)
         const numberMatch = userInput.match(/^\d+$/);
         if (numberMatch) {
             const index = parseInt(userInput) - 1;
             return index >= 0 && index < options.length;
         }
 
-        // Check if matches any option value or label
         return options.some(opt =>
             opt.value.toLowerCase() === lowerInput ||
             opt.label.toLowerCase() === lowerInput
         );
     }
 
-    /**
-     * Format choice options for display
-     */
     public formatOptionsForDisplay(options: ChoiceOption[], showNumbers = true): string {
         return options
             .map((opt, idx) => {
@@ -204,11 +170,6 @@ Respond ONLY with valid JSON (no markdown):
     }
 }
 
-/**
- * EXAMPLE INTEGRATION IN LeadAgent
- *
- * For roof type selection:
- */
 export class RoofTypeChoiceHandler {
     private choiceHandler: ChoiceHandler = new ChoiceHandler();
 
@@ -230,13 +191,6 @@ export class RoofTypeChoiceHandler {
         }
     ];
 
-    /**
-     * Handle user choice for roof type
-     *
-     * USAGE:
-     * const result = await handler.handleRoofChoice("any");
-     * // Returns: { selected: "regular", confidence: "medium", reasoning: "..." }
-     */
     public async handleRoofChoice(userInput: string): Promise<ChoiceResult> {
         const roofContext = "The user is being asked to choose a roof style for their garage";
 
@@ -247,34 +201,21 @@ export class RoofTypeChoiceHandler {
         );
     }
 
-    /**
-     * Check if user provided a valid roof type
-     */
     public isValidRoofChoice(userInput: string): boolean {
         return this.choiceHandler.isValidDirectChoice(userInput, this.roofOptions);
     }
 
-    /**
-     * Get formatted prompt with options
-     */
     public getChoicePrompt(): string {
         return `Which roof style would you prefer?\n${this.choiceHandler.formatOptionsForDisplay(this.roofOptions)}`;
     }
 }
 
-/**
- * INTEGRATION IN LeadAgent.run()
- *
- * Example of how to use this:
- */
 export async function exampleIntegration() {
     const handler = new RoofTypeChoiceHandler();
 
-    // When asking for roof choice
     const prompt = handler.getChoicePrompt();
     console.log(prompt);
 
-    // When user responds with "any"
     const userResponse = "any";
     const choice = await handler.handleRoofChoice(userResponse);
 
@@ -283,10 +224,6 @@ export async function exampleIntegration() {
     console.log(`Reason: ${choice.reasoning}`);
 }
 
-/**
- * GENERIC Choice Manager for any field
- * Supports multiple field types (roof, state, building type, etc.)
- */
 export class GenericChoiceManager {
     private choiceHandler: ChoiceHandler = new ChoiceHandler();
 
@@ -308,9 +245,6 @@ export class GenericChoiceManager {
         ]]
     ]);
 
-    /**
-     * Handle choice for any field
-     */
     public async handleChoice(
         field: string,
         userInput: string,
@@ -329,9 +263,6 @@ export class GenericChoiceManager {
         );
     }
 
-    /**
-     * Get choice prompt for a field
-     */
     public getPrompt(field: string, customOptions?: ChoiceOption[]): string {
         const options = customOptions || this.fieldOptions.get(field);
         if (!options) {
@@ -342,11 +273,8 @@ export class GenericChoiceManager {
         return `Which ${fieldLabel} would you prefer?\n${this.choiceHandler.formatOptionsForDisplay(options)}`;
     }
 
-    /**
-     * Register custom options for a field
-     */
     public registerOptions(field: string, options: ChoiceOption[]): void {
         this.fieldOptions.set(field, options);
-        logger.info(`[GenericChoiceManager] Registered options for field: ${field}`);
+        logger.info({ field, optionCount: options.length }, "[GenericChoiceManager] Registered options for field");
     }
 }

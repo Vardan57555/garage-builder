@@ -32,15 +32,28 @@ const transport = pino.transport<LokiOptions>({
  */
 function logFactory(loggerName: string): pino.Logger
 {
-    const isProduction: boolean = false && process.env.NODE_ENV === Constants.ENVIRONMENTS.PRODUCTION;
+    const isProduction: boolean = false;
 
     return pino({
         name: loggerName,
         formatters: {
-            level: (level) => ({ level })
+            level: (level) => ({ level }),
+            bindings: (bindings) => ({ app: bindings.name })
         },
         base: undefined,
-        timestamp: pino.stdTimeFunctions.isoTime
+        timestamp: pino.stdTimeFunctions.isoTime,
+        serializers: {
+            // Properly serialize errors
+            err: pino.stdSerializers.err,
+            // Safely serialize any object passed as second arg
+            data: (data) => {
+                try {
+                    return typeof data === 'string' ? data : JSON.parse(JSON.stringify(data));
+                } catch (e) {
+                    return String(data);
+                }
+            }
+        }
     }, isProduction ? transport : undefined);
 }
 
@@ -80,7 +93,7 @@ process.on("uncaughtException", (err: Error) =>
 {
     if (err && err.stack)
     {
-        logger.error(err, err.message);
+        logger.error({ err }, err.message);
     }
     else
     {
@@ -97,7 +110,7 @@ process.on("unhandledRejection", (err: Error) =>
 {
     if (err && err.stack)
     {
-        logger.error(err, err.message);
+        logger.error({ err }, err.message);
     }
     else
     {
