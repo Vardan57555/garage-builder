@@ -76,12 +76,6 @@ class SharedLLMManager {
         this.isInitializing = true;
 
         try {
-            logger.info({
-                model: this.config.model,
-                temperature: this.config.temperature,
-                baseUrl: this.config.baseUrl,
-            }, "[SharedLLM] Initializing with config");
-
             this.llmClient = new ChatOllama({
                 model: this.config.model,
                 temperature: this.config.temperature,
@@ -94,9 +88,10 @@ class SharedLLMManager {
             logger.info("[SharedLLM] Model initialized successfully");
         } catch (error) {
             this.isInitialized = false;
-            logger.warn({
-                err: error instanceof Error ? error : new Error(String(error))
-            }, "[SharedLLM] Initialization failed (Ollama may not be running)");
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn(
+                `[SharedLLM] Initialization failed (Ollama may not be running): ${errorMessage}`
+            );
             throw error;
         } finally {
             this.isInitializing = false;
@@ -116,7 +111,10 @@ class SharedLLMManager {
             await this.llmClient.invoke([new HumanMessage("ping")]);
             logger.debug("[SharedLLM] Health check passed");
         } catch (error) {
-            logger.warn({ err: error }, "[SharedLLM] Health check failed");
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn(
+                `[SharedLLM] Health check failed: ${errorMessage}`
+            );
             throw error;
         }
     }
@@ -162,7 +160,10 @@ class SharedLLMManager {
 
             return String(response.content);
         } catch (error) {
-            logger.warn({ err: error }, "[SharedLLM] Error extracting content");
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logger.warn(
+                `[SharedLLM] Error extracting content: ${errorMessage}`
+            );
             return JSON.stringify(response.content || "");
         }
     }
@@ -181,7 +182,10 @@ class SharedLLMManager {
             try {
                 await this.initializeLLM();
             } catch (error) {
-                logger.error({ err: error }, "[SharedLLM] Auto-initialization failed");
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                logger.error(
+                    `[SharedLLM] Auto-initialization failed: ${errorMessage}`
+                );
                 throw error;
             }
         }
@@ -198,7 +202,9 @@ class SharedLLMManager {
 
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                logger.debug({ attempt, maxRetries }, "[SharedLLM] Invoking LLM");
+                logger.debug(
+                    `[SharedLLM] Invoking LLM (attempt ${attempt}/${maxRetries})`
+                );
 
                 const response = await this.llmClient.invoke(messages);
                 const content = this.extractStringContent(response);
@@ -207,15 +213,16 @@ class SharedLLMManager {
                 return content;
             } catch (error) {
                 lastError = error as Error;
-                logger.warn({
-                    attempt,
-                    maxRetries,
-                    err: lastError
-                }, "[SharedLLM] Attempt failed");
+                const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+                logger.warn(
+                    `[SharedLLM] Attempt ${attempt}/${maxRetries} failed: ${errorMessage}`
+                );
 
                 if (attempt < maxRetries) {
                     const delayMs = Math.pow(2, attempt - 1) * 1000;
-                    logger.info({ delayMs }, "[SharedLLM] Retrying after delay");
+                    logger.info(
+                        `[SharedLLM] Retrying after ${delayMs}ms delay`
+                    );
                     await this.delay(delayMs);
                 }
             }
@@ -276,7 +283,10 @@ export async function initializeSharedLLM(
         await sharedLLM.invoke([new HumanMessage("ping")]);
         logger.info("[SharedLLM] Model preloaded successfully");
     } catch (error) {
-        logger.warn({ err: error }, "[SharedLLM] Preload failed (Ollama may not be running yet). Model will load on first request");
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.warn(
+            `[SharedLLM] Preload failed (Ollama may not be running yet). Error: ${errorMessage}. Model will load on first request`
+        );
     }
 }
 
@@ -290,6 +300,9 @@ export async function initializeSharedLLM(
         await sharedLLM.invoke([new HumanMessage("ping")]);
         logger.info("[SharedLLM] Model preloaded");
     } catch (err) {
-        logger.warn({ err }, "[SharedLLM] Preload failed (maybe not running yet). Model will load on first request");
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logger.warn(
+            `[SharedLLM] Preload failed (maybe not running yet). Error: ${errorMessage}. Model will load on first request`
+        );
     }
 })();

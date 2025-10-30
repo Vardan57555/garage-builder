@@ -85,10 +85,7 @@ export class ChatServiceImpl implements ChatService
 
         if (lockInfo && lockInfo.locked)
         {
-            logger.warn("[ChatService] Session already processing", {
-                sessionId,
-                lockedSince: new Date(lockInfo.timestamp).toISOString()
-            });
+            logger.warn(`[ChatService] Session already processing ${sessionId}`);
             return false;
         }
 
@@ -98,7 +95,7 @@ export class ChatServiceImpl implements ChatService
         }
 
         const autoReleaseTimeout = setTimeout(() => {
-            logger.warn("[ChatService] Lock auto-released due to timeout", { sessionId });
+            logger.warn(`[ChatService] Lock auto-released due to timeout ${sessionId}`);
             this.releaseLock(sessionId);
         }, 90000);
 
@@ -108,7 +105,7 @@ export class ChatServiceImpl implements ChatService
             timeout: autoReleaseTimeout
         });
 
-        logger.info("[ChatService] Lock acquired", { sessionId });
+        logger.info(`[ChatService] Lock acquired ${sessionId}`);
         return true;
     }
 
@@ -125,7 +122,7 @@ export class ChatServiceImpl implements ChatService
         {
             clearTimeout(lockInfo.timeout);
             this.requestLocks.delete(sessionId);
-            logger.info("[ChatService] Lock released", { sessionId });
+            logger.info(`[ChatService] Lock released ${sessionId}`);
         }
     }
 
@@ -143,10 +140,7 @@ export class ChatServiceImpl implements ChatService
             {
                 if (now - lockInfo.timestamp > 120000)
                 {
-                    logger.warn("[ChatService] Force releasing stale lock", {
-                        sessionId,
-                        heldFor: now - lockInfo.timestamp
-                    });
+                    logger.warn(`[ChatService] Force releasing stale lock ${sessionId}`);
                     this.releaseLock(sessionId);
                     cleanedCount++;
                 }
@@ -154,10 +148,7 @@ export class ChatServiceImpl implements ChatService
 
             if (cleanedCount > 0)
             {
-                logger.info("[ChatService] Lock cleanup complete", {
-                    cleanedCount,
-                    activeLocks: this.requestLocks.size
-                });
+                logger.info(`[ChatService] Lock cleanup complete ${cleanedCount}`);
             }
         }, 120000);
     }
@@ -206,13 +197,13 @@ export class ChatServiceImpl implements ChatService
         }
         catch (error)
         {
-            logger.error("[ChatService] Error processing request", { sessionId, error: error.message });
+            logger.error(`[ChatService] Error processing request ${error.message}`);
             throw new ServerError(ServerError.INTERNAL, `Failed to process request: ${error.message}`);
         }
         finally
         {
             this.releaseLock(sessionId);
-            logger.info("[ChatService] Request completed and lock released", { sessionId });
+            logger.info(`[ChatService] Request completed and lock released ${sessionId}`);
         }
     }
 
@@ -230,7 +221,7 @@ export class ChatServiceImpl implements ChatService
 
         if (!metadata)
         {
-            logger.warn("[ChatService] Attempt to end non-existent session", { sessionId })
+            logger.warn(`[ChatService] Attempt to end non-existent session ${sessionId}`)
             throw new ServerError(ServerError.INTERNAL, `Session ${sessionId} not found`);
         }
 
@@ -244,7 +235,7 @@ export class ChatServiceImpl implements ChatService
             this.requestLocks.delete(sessionId);
             this.metrics.totalEnded++;
 
-            logger.info("[ChatService] Session ended successfully", { sessionId });
+            logger.info(`[ChatService] Session ended successfully ${sessionId}`);
 
             return {success: true, message: `Session ${sessionId} ended successfully`};
         }
@@ -298,7 +289,7 @@ export class ChatServiceImpl implements ChatService
                 metadata.lastUserAgent = userAgent;
                 metadata.accessCount++;
 
-                logger.debug("[ChatService] Session reused", { clientId, sessionId: existingSessionId });
+                logger.debug(`[ChatService] Session reused ${clientId} ${existingSessionId}`);
 
                 return { sessionId: existingSessionId, isNew: false };
             }
@@ -311,7 +302,7 @@ export class ChatServiceImpl implements ChatService
                     this.requestLocks.delete(existingSessionId);
                     this.metrics.totalExpired++;
 
-                    logger.info("[ChatService] Expired session cleaned up", { clientId, sessionId: existingSessionId });
+                    logger.info(`[ChatService] Expired session cleaned up ${clientId} ${existingSessionId}`);
                 }
             }
         }
@@ -336,13 +327,6 @@ export class ChatServiceImpl implements ChatService
         this.sessionMetadata.set(newSessionId, metadata);
         this.clientSessions.set(clientId, newSessionId);
         this.metrics.totalCreated++;
-
-        logger.info("[ChatService] New session created", {
-            clientId,
-            sessionId: newSessionId,
-            ip: ip,
-            expiresAt: new Date(expiresAt).toISOString()
-        });
 
         return { sessionId: newSessionId, isNew: true };
     }
@@ -379,7 +363,7 @@ export class ChatServiceImpl implements ChatService
 
         this.cleanupInterval = setInterval(() => {this.performCleanup();}, Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL);
 
-        logger.info("[ChatService] Cleanup interval started", {intervalMinutes: Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL / 60000});
+        logger.info(`[ChatService] Cleanup interval started ${Constants.DEFAULT_CONFIG.CLEANUP_INTERVAL / 60000}`);
     }
 
     /**
@@ -415,14 +399,7 @@ export class ChatServiceImpl implements ChatService
 
         if (cleanedCount > 0 || warningCount > 0)
         {
-            logger.info("[SessionDebug] Cleanup cycle complete", {
-                cleanedSessions: cleanedCount,
-                expiringSoonCount: warningCount,
-                activeSessions: this.sessionMetadata.size,
-                activeClients: this.clientSessions.size,
-                activeLocks: this.requestLocks.size,
-                metrics: this.metrics
-            });
+            logger.info("[SessionDebug] Cleanup cycle complete");
         }
     }
 }

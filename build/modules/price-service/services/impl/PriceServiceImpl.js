@@ -356,8 +356,8 @@ class PriceServiceImpl {
         const { end_length, distance_on_center, side_end_name } = buildingStructureFull[0];
         const lengthArray = await this.getSideHeightCostsLength(length, end_length, distance_on_center, map_id);
         const structureString = `'${lengthArray.map(l => `${width}x${l}`).join("','")}'`;
-        logger.info("[fetchComponentsPricing] Generated structure string:", structureString);
-        logger.info("[fetchComponentsPricing] Length array:", lengthArray);
+        logger.info(`[fetchComponentsPricing] Generated structure string: ${structureString}`);
+        logger.info(`[fetchComponentsPricing] Length array: ${lengthArray}`);
         const components = await Promise.all(componentKeys.map(async (key) => {
             const procedureFn = PriceServiceImpl.PROCEDURE_MAP[key];
             if (!procedureFn) {
@@ -383,11 +383,10 @@ class PriceServiceImpl {
                 logger.info(`[fetchComponentsPricing] Query: ${query}`);
                 logger.info(`[fetchComponentsPricing] Args:`, args);
                 const data = await ProcedureExecutor_1.ProcedureExecutor.getProcedureData(args, query, key);
-                logger.info(`[fetchComponentsPricing] Component ${key} returned ${Array.isArray(data) ? data.length : 'non-array'} items`);
                 return [key, data];
             }
             catch (error) {
-                logger.error(`[fetchComponentsPricing] Error fetching ${key}:`, error);
+                logger.error(`[fetchComponentsPricing] Error fetching ${key}: ${error.message}`);
                 return [key, []];
             }
         }));
@@ -395,17 +394,16 @@ class PriceServiceImpl {
     }
     applyAddons(pricing) {
         logger.info("[applyAddons] ====== BEFORE ADDON PROCESSING ======");
-        logger.info("[applyAddons] Current pricing keys:", Object.keys(pricing));
-        logger.info("[applyAddons] Current bows:", pricing.bows);
-        logger.info("[applyAddons] Current addons:", pricing.addons);
+        logger.info(`[applyAddons] Current bows: ${pricing.bows}`);
+        logger.info(`[applyAddons] Current addons: ${pricing.addons}`);
         logger.info("[applyAddons] ====== END BEFORE ======");
         const { checkbox, checkboxQuantity, checkboxQuantityDropdown } = this.processAddons(pricing);
         pricing.checkbox = checkbox;
         pricing.checkbox_quantity = checkboxQuantity;
         pricing.checkbox_quantity_dropdown = checkboxQuantityDropdown;
         logger.info("[applyAddons] ====== AFTER ADDON PROCESSING ======");
-        logger.info("[applyAddons] Current bows after:", pricing.bows);
-        logger.info("[applyAddons] Current addons after:", pricing.addons);
+        logger.info(`[applyAddons] Current bows after: ${pricing.bows}`);
+        logger.info(`[applyAddons] Current addons after: ${pricing.addons}`);
         logger.info("[applyAddons] ====== END AFTER ======");
     }
     adjustConnectionFees(pricing, is_barn) {
@@ -546,7 +544,6 @@ class PriceServiceImpl {
         return `'${value}' COLLATE ${collation}`;
     }
     mergeComponents(pricing, components) {
-        logger.info("[mergeComponents] Starting merge with components:", Object.keys(components));
         for (const [key, value] of Object.entries(components)) {
             if (Array.isArray(value)) {
                 if (this.ARRAY_FIELDS.has(key)) {
@@ -563,7 +560,6 @@ class PriceServiceImpl {
                 logger.info(`[mergeComponents] Merged ${key}: non-array value`);
             }
         }
-        logger.info("[mergeComponents] Merge complete. Final pricing keys:", Object.keys(pricing));
     }
     applyPricingMultipliers(pricing, params) {
         logger.info("[applyPricingMultipliers] ====== APPLYING MULTIPLIERS ======");

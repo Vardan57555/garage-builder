@@ -41,7 +41,6 @@ interface UpdateResult {
     updatedField?: keyof UserFriendlyParams;
 }
 
-
 export class LeadAgent {
     private static instance: LeadAgent;
     private sessionManager: SessionManager;
@@ -76,26 +75,57 @@ export class LeadAgent {
         return LeadAgent.instance;
     }
 
+    /**
+     * ✅ USE CASE 1: Handle roof type selection with ChoiceHandler
+     *
+     * WHEN: User is asked "Which roof style would you prefer?"
+     * USER SAYS: "any", "vertical", "1", "whatever", etc.
+     * WHAT HAPPENS: ChoiceHandler intelligently picks the right option
+     */
     private async handleRoofTypeSelection(userInput: string): Promise<ChoiceResult> {
         try {
-            logger.info({ userInput }, "[LeadAgent] Handling roof type selection");
+            logger.info("[LeadAgent] Handling roof type selection:", userInput);
 
+            // Use ChoiceManager to parse user response
             const choice = await this.choiceManager.handleChoice("roof_type", userInput);
 
-            logger.info({
-                selected: choice.selected,
-                confidence: choice.confidence
-            }, "[LeadAgent] Roof type selected");
-
-            logger.info({ reasoning: choice.reasoning }, "[LeadAgent] Choice reasoning");
+            logger.info(`[LeadAgent] Roof type selected: ${choice.selected} (confidence: ${choice.confidence})`);
+            logger.info(`[LeadAgent] Reasoning: ${choice.reasoning}`);
 
             return choice;
         } catch (error) {
-            logger.error({ err: error }, "[LeadAgent] Roof type selection failed");
+            logger.error("[LeadAgent] Roof type selection failed:", error);
             throw error;
         }
     }
 
+    /**
+     * ✅ USE CASE 2: Handle building type selection
+     *
+     * WHEN: User is asked "What type of building?"
+     * USER SAYS: "garage", "shed", "barn", "something", "any", etc.
+     */
+    // private async handleBuildingTypeSelection(userInput: string): Promise<ChoiceResult> {
+    //     try {
+    //         logger.info("[LeadAgent] Handling building type selection:", userInput);
+    //
+    //         const choice = await this.choiceManager.handleChoice("building_type", userInput);
+    //
+    //         logger.info(`[LeadAgent] Building type selected: ${choice.selected}`);
+    //
+    //         return choice;
+    //     } catch (error) {
+    //         logger.error("[LeadAgent] Building type selection failed:", error);
+    //         throw error;
+    //     }
+    // }
+
+    /**
+     * ✅ USE CASE 3: Get prompt for asking user
+     *
+     * WHEN: Need to ask user to choose between options
+     * RETURNS: Formatted question with numbered options
+     */
     private getRoofTypePrompt(): string {
         return this.choiceManager.getPrompt("roof_type");
     }
@@ -104,7 +134,14 @@ export class LeadAgent {
         return this.choiceManager.getPrompt("building_type");
     }
 
+    /**
+     * ✅ USE CASE 4: Check if user response is a clear choice
+     *
+     * WHEN: Want to know if user clearly selected something
+     * RETURNS: true if "vertical", "1", etc. / false if "any", "whatever"
+     */
     private isClearRoofChoice(userInput: string): boolean {
+        // Get options from choice manager
         const options = [
             { value: "vertical", label: "Vertical" },
             { value: "regular", label: "Regular" },
@@ -113,30 +150,36 @@ export class LeadAgent {
 
         const lowerInput = userInput.toLowerCase().trim();
 
+        // Check for number (1, 2, 3)
         const numberMatch = userInput.match(/^\d+$/);
         if (numberMatch) {
             const index = parseInt(userInput) - 1;
             return index >= 0 && index < options.length;
         }
 
+        // Check if matches any option
         return options.some(opt =>
             opt.value.toLowerCase() === lowerInput ||
             opt.label.toLowerCase() === lowerInput
         );
     }
 
+    // ============================================================================
+    // EXISTING METHODS (unchanged)
+    // ============================================================================
+
     private async detectGarageIntentWithAI(input: string): Promise<boolean> {
         try {
             const prompt: string = Constants.INTENT_PROMPT.replace("{input}", input);
-            logger.debug({ promptLength: prompt.length }, "[LeadAgent] Intent detection prompt sent");
+            logger.info("[LeadAgent] Intent detection prompt:", prompt);
 
             const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const upperResponse: string = response.trim().toUpperCase();
 
-            logger.info({ response: upperResponse }, "[LeadAgent] Intent detection response");
+            logger.info("[LeadAgent] Intent detection response:", upperResponse);
             return upperResponse.includes("YES");
         } catch (error) {
-            logger.warn({ err: error }, "[LeadAgent] AI intent detection failed, using fallback");
+            logger.warn("[LeadAgent] AI intent detection failed, using fallback:", error);
             return this.detectGarageIntentFallback(input);
         }
     }
@@ -157,12 +200,12 @@ export class LeadAgent {
 
         const multiParamResult = this.extractMultipleParametersByRegex(lowerInput);
         if (multiParamResult && multiParamResult.length > 0) {
-            logger.info({ count: multiParamResult.length }, "[LeadAgent] Regex extracted parameters");
+            logger.info(`[LeadAgent] Regex extracted ${multiParamResult.length} parameters`);
 
             for (const param of multiParamResult) {
                 const validationError = await this.validateParameterValue(param.field, param.value);
                 if (validationError) {
-                    logger.warn({ field: param.field }, "[LeadAgent] Validation failed");
+                    logger.warn(`[LeadAgent] Validation failed for ${param.field}: ${validationError}`);
                     this.validationError = validationError;
                     return null;
                 }
@@ -174,14 +217,11 @@ export class LeadAgent {
 
         const regexResult = this.extractParameterByRegex(lowerInput);
         if (regexResult) {
-            logger.info({
-                field: regexResult.field,
-                value: regexResult.value
-            }, "[LeadAgent] Regex extracted parameter");
+            logger.info(`[LeadAgent] Regex extracted update: ${regexResult.field} = ${regexResult.value}`);
 
             const validationError = await this.validateParameterValue(regexResult.field, regexResult.value);
             if (validationError) {
-                logger.warn({ field: regexResult.field }, "[LeadAgent] Validation failed");
+                logger.warn(`[LeadAgent] Validation failed for ${regexResult.field}: ${validationError}`);
                 this.validationError = validationError;
                 return null;
             }
@@ -214,17 +254,14 @@ export class LeadAgent {
             ? parseInt(currentCarCountMatch[1], 10)
             : null;
 
-        logger.info({
-            currentCarCount,
-            newCarCount
-        }, "[LeadAgent] Car count check");
+        logger.info(
+            `[LeadAgent] Car count check - Current: ${currentCarCount}, New: ${newCarCount}`
+        );
 
         if (currentCarCount !== null && currentCarCount !== newCarCount) {
-            logger.info({
-                from: currentCarCount,
-                to: newCarCount
-            }, "[LeadAgent] Car count changed");
-
+            logger.info(
+                `[LeadAgent] Car count CHANGED from ${currentCarCount} to ${newCarCount}`
+            );
             return {
                 field: "garage_type",
                 value: `${newCarCount}-car`,
@@ -232,7 +269,7 @@ export class LeadAgent {
         }
 
         if (currentCarCount === null && newCarCount) {
-            logger.info({ carCount: newCarCount }, "[LeadAgent] Initial car count set");
+            logger.info(`[LeadAgent] Initial car count set to ${newCarCount}`);
             return {
                 field: "garage_type",
                 value: `${newCarCount}-car`,
@@ -265,7 +302,7 @@ or
 {"isUpdate": false}`;
 
             const responseText: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
-            logger.debug({ responseLength: responseText.length }, "[LeadAgent] AI update detection response");
+            logger.info(`[LeadAgent] AI update detection response: ${responseText}`);
 
             const cleanedResponse = responseText
                 .replace(/^```json\s*/g, "")
@@ -281,17 +318,16 @@ or
                 response.value !== undefined &&
                 response.value !== null
             ) {
-                logger.info({
-                    field: response.field,
-                    value: response.value
-                }, "[LeadAgent] AI detected update");
+                logger.info(`[LeadAgent] AI detected update: ${response.field} = ${response.value}`);
 
                 const validationError = await this.validateParameterValue(
                     response.field,
                     response.value
                 );
                 if (validationError) {
-                    logger.warn({ field: response.field }, "[LeadAgent] Validation failed");
+                    logger.warn(
+                        `[LeadAgent] Validation failed for ${response.field}: ${validationError}`
+                    );
                     this.validationError = validationError;
                     return null;
                 }
@@ -302,7 +338,7 @@ or
                 };
             }
         } catch (error) {
-            logger.warn({ err: error }, "[LeadAgent] AI update detection failed");
+            logger.warn("[LeadAgent] AI update detection failed:", error);
         }
 
         return null;
@@ -355,7 +391,7 @@ or
     private extractMultipleParametersByRegex(input: string): ParameterUpdate[] | null {
         const updates: ParameterUpdate[] = [];
 
-        logger.debug({ inputLength: input.length }, "[extractMultipleParametersByRegex] Processing input");
+        logger.info(`[extractMultipleParametersByRegex] Processing input: "${input}"`);
 
         const widthMatch = input.match(/\bwidth\s+(\d+(?:\.\d+)?)\b/);
         const lengthMatch = input.match(/\blength\s+(\d+(?:\.\d+)?)\b/);
@@ -366,28 +402,28 @@ or
             const value = parseFloat(widthMatch[1]);
             if (!isNaN(value) && value > 0) {
                 updates.push({ field: "width", value });
-                logger.debug({ value }, "[extractMultipleParametersByRegex] Added width");
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added width: ${value}`);
             }
         }
         if (lengthMatch) {
             const value = parseFloat(lengthMatch[1]);
             if (!isNaN(value) && value > 0) {
                 updates.push({ field: "length", value });
-                logger.debug({ value }, "[extractMultipleParametersByRegex] Added length");
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added length: ${value}`);
             }
         }
         if (heightMatch) {
             const value = parseFloat(heightMatch[1]);
             if (!isNaN(value) && value > 0) {
                 updates.push({ field: "height", value });
-                logger.debug({ value }, "[extractMultipleParametersByRegex] Added height");
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added height: ${value}`);
             }
         }
         if (gaugeMatch) {
             const value = parseFloat(gaugeMatch[1]);
             if (!isNaN(value) && value > 0) {
                 updates.push({ field: "gauge", value });
-                logger.debug({ value }, "[extractMultipleParametersByRegex] Added gauge");
+                logger.info(`[extractMultipleParametersByRegex] ✓ Added gauge: ${value}`);
             }
         }
 
@@ -401,11 +437,9 @@ or
                     { field: "length", value: parseFloat(dimensionMatch[2]) },
                     { field: "height", value: parseFloat(dimensionMatch[3]) }
                 );
-                logger.debug({
-                    width: dimensionMatch[1],
-                    length: dimensionMatch[2],
-                    height: dimensionMatch[3]
-                }, "[extractMultipleParametersByRegex] Matched dimensions");
+                logger.info(
+                    `[extractMultipleParametersByRegex] Matched dimensions: ${dimensionMatch[1]}x${dimensionMatch[2]}x${dimensionMatch[3]}`
+                );
             }
         }
 
@@ -459,14 +493,11 @@ or
                 try {
                     const result = pattern.parse(match);
                     if (result && result.value !== null && result.value !== undefined) {
-                        logger.debug({
-                            field: result.field,
-                            value: result.value
-                        }, "[extractParameterByRegex] Pattern matched");
+                        logger.info(`[extractParameterByRegex] Matched ${result.field} = ${result.value}`);
                         return result as ParameterUpdate;
                     }
                 } catch (e) {
-                    logger.warn({ err: e }, "[extractParameterByRegex] Parse error");
+                    logger.warn("[extractParameterByRegex] Parse error:", e);
                 }
             }
         }
@@ -480,10 +511,11 @@ or
     ): UpdateResult {
         const { field, value } = update;
 
-        logger.debug({
-            field,
-            newValue: value
-        }, "[LeadAgent] Attempting parameter update");
+        logger.info(
+            `[LeadAgent] Attempting to update ${field} from ${
+                (session.state.userFriendlyParams as any)[field]
+            } to ${value}`
+        );
 
         if (field === "garage_type") {
             return this.handleGarageTypeUpdate(session, value);
@@ -500,13 +532,13 @@ or
         const carCountMatch = String(value).match(/(\d+)/);
         const numCars = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
 
-        logger.info({ value, numCars }, "[LeadAgent] Processing garage_type");
+        logger.info(`[LeadAgent] Processing garage_type: ${value}, extracted numCars: ${numCars}`);
 
         if (numCars && numCars > 0) {
             const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(
                 `${numCars} cars`
             );
-            logger.debug({ calculationKeys: Object.keys(calculation) }, "[LeadAgent] Calculation result");
+            logger.info("[LeadAgent] Calculation result:", JSON.stringify(calculation));
 
             if (calculation.width && calculation.length) {
                 (session.state.userFriendlyParams as any).width = calculation.width;
@@ -514,11 +546,9 @@ or
                 (session.state.userFriendlyParams as any).height = calculation.height;
                 (session.state.userFriendlyParams as any).garage_type = calculation.garageType;
 
-                logger.info({
-                    width: calculation.width,
-                    length: calculation.length,
-                    height: calculation.height
-                }, "[LeadAgent] Recalculated dimensions");
+                logger.info(
+                    `[LeadAgent] Recalculated dimensions: ${calculation.width}×${calculation.length}×${calculation.height}`
+                );
 
                 return {
                     success: true,
@@ -528,7 +558,7 @@ or
             }
         }
 
-        logger.warn({ value }, "[LeadAgent] Failed to calculate dimensions for garage_type");
+        logger.warn(`[LeadAgent] Failed to calculate dimensions for garage_type: ${value}`);
         return {
             success: false,
             message: `❌ Could not calculate dimensions for ${value}`,
@@ -551,7 +581,7 @@ or
         }
 
         if (isNaN(numValue) || numValue <= 0) {
-            logger.warn({ field, value }, "[LeadAgent] Invalid numeric value");
+            logger.warn(`[LeadAgent] Invalid ${field} value: ${value}`);
             return {
                 success: false,
                 message: `❌ Invalid ${field}. Please provide a positive number.`,
@@ -559,7 +589,7 @@ or
         }
 
         (session.state.userFriendlyParams as any)[field] = numValue;
-        logger.info({ field, value: numValue }, "[LeadAgent] Successfully updated numeric field");
+        logger.info(`[LeadAgent] Successfully updated ${field} to ${numValue}`);
 
         return {
             success: true,
@@ -574,7 +604,7 @@ or
         value: any
     ): UpdateResult {
         (session.state.userFriendlyParams as any)[field] = String(value).trim();
-        logger.info({ field, value }, "[LeadAgent] Successfully updated string field");
+        logger.info(`[LeadAgent] Successfully updated ${field} to ${value}`);
 
         return {
             success: true,
@@ -614,7 +644,7 @@ or
         };
 
         this.sessionManager.createSession(sessionId, newSession);
-        logger.info({ sessionId }, "[LeadAgent] New session created");
+        logger.info(`[LeadAgent] New session created: ${sessionId}`);
         return newSession;
     }
 
@@ -674,7 +704,7 @@ or
             session.stateMapCache.set(cacheKey, null);
             return null;
         } catch (error) {
-            logger.error({ err: error }, "[LeadAgent] State mapping failed");
+            logger.error("[LeadAgent] State mapping failed:", error);
             session.stateMapCache.set(cacheKey, null);
             return null;
         }
@@ -705,7 +735,7 @@ or
                 return result[0].roof_id;
             }
         } catch (error) {
-            logger.error({ err: error }, "[LeadAgent] Roof type mapping failed");
+            logger.error("[LeadAgent] Roof type mapping failed:", error);
         }
 
         const fallbackId: number = Constants.ROOF_TYPE_MAPPING[normalizedRoofType] ??
@@ -737,7 +767,7 @@ or
                     map_id = mapping.map_id;
                     manufacturer_id = mapping.manufacturer_id;
                 } else {
-                    logger.warn({ stateName: userParams.state_name }, "[LeadAgent] State not found, using defaults");
+                    logger.warn(`[LeadAgent] State "${userParams.state_name}" not found, using defaults.`);
                 }
             }
 
@@ -758,7 +788,7 @@ or
                 is_barn: userParams.is_barn,
             };
         } catch (error) {
-            logger.error({ err: error }, "[LeadAgent] Param conversion failed");
+            logger.error("[LeadAgent] Param conversion failed:", error);
             return null;
         }
     }
@@ -766,6 +796,15 @@ or
     private getMissingFields(params: Partial<UserFriendlyParams>): (keyof UserFriendlyParams)[] {
         return Constants.REQUIRED_FIELDS.filter((field) => !params[field]);
     }
+
+    // private formatDimensionsResponse(currentParams: Partial<UserFriendlyParams>): string {
+    //     const dimensions: string = (["width", "length", "height"] as const)
+    //         .filter((k) => currentParams[k])
+    //         .map((k) => `${this.formatFieldName(k)}: ${currentParams[k]}ft`)
+    //         .join(" | ");
+    //
+    //     return dimensions ? `Got it! ${dimensions}\n\n` : "";
+    // }
 
     private formatCurrentParams(params: Partial<UserFriendlyParams>): string {
         const parts: string[] = [];
@@ -782,31 +821,41 @@ or
 
     private resetSessionState(session: LeadAgentSessionMetadata, fullReset: boolean = false): void {
         if (fullReset) {
+            // Only reset when user explicitly starts over
             session.state.userFriendlyParams = {};
             session.state.hasGarageIntent = false;
             session.state.currentField = undefined;
             session.state.priceCalculated = false;
         } else {
+            // Partial reset: keep parameters, just clear current field
             session.state.currentField = undefined;
             session.state.priceCalculated = true;
         }
     }
 
+    /**
+     * MAIN: Process user input and generate response
+     *
+     * ✅ WHERE CHOICE HANDLER IS USED:
+     * This is integrated throughout the run() method to handle user selections
+     */
     public async run(sessionId: string, input: string): Promise<string> {
         this.currentSessionId = sessionId;
         this.validationError = null;
         this.pendingUpdates = [];
 
-        logger.info({ input }, "[LeadAgent] User input received");
+        logger.info(`[LeadAgent] Session ${sessionId} - User input:`, input);
 
         const session: LeadAgentSessionMetadata = this.getOrCreateSession(sessionId);
         await session.memory.chatHistory.addUserMessage(input);
 
+        // ✅ AFTER PRICE: Check if price was already calculated
         if (session.state.priceCalculated) {
-            logger.info("[LeadAgent] Post-price phase - User attempting parameter update");
+            logger.info(`[LeadAgent] Post-price phase - User trying to update`);
 
+            // Check if user wants to completely reset
             if (this.detectResetIntent(input)) {
-                logger.info("[LeadAgent] User requested full reset");
+                logger.info(`[LeadAgent] User requested full reset`);
                 this.resetSessionState(session, true);
                 session.state.hasGarageIntent = false;
                 const response: string =
@@ -816,17 +865,20 @@ or
                 return response;
             }
 
+            // Try to detect what parameter user wants to change
             const paramUpdate = await this.detectParameterUpdate(input);
 
             if (paramUpdate === null) {
                 if (this.validationError) {
-                    logger.warn({ validationError: this.validationError }, "[LeadAgent] Validation error occurred");
+                    logger.warn(`[LeadAgent] Validation error: ${this.validationError}`);
                     const error = this.validationError;
                     this.validationError = null;
                     await session.memory.chatHistory.addAIChatMessage(error);
                     return error;
                 }
 
+                // User said something but we couldn't detect an update
+                // Show current params and ask what they want to change
                 const currentParams = this.formatCurrentParams(session.state.userFriendlyParams);
                 const response =
                     `${currentParams}\n\n` +
@@ -836,6 +888,7 @@ or
                 return response;
             }
 
+            // ✅ Update the parameter and recalculate price
             const updateResult = await this.handleParameterUpdateAfterPrice(session, paramUpdate);
 
             if (!updateResult.success) {
@@ -843,9 +896,11 @@ or
                 return updateResult.message;
             }
 
+            // Show update confirmation
             await session.memory.chatHistory.addAIChatMessage(updateResult.message);
-            logger.info({ field: paramUpdate.field, value: paramUpdate.value }, "[LeadAgent] Parameter update detected");
+            logger.info(`[LeadAgent] Parameter updated: ${paramUpdate.field} = ${paramUpdate.value}`);
 
+            // Recalculate price with updated parameters
             const technicalParams: IPricingParams | null = await this.convertToTechnicalParams(
                 session.state.userFriendlyParams as UserFriendlyParams,
                 session
@@ -869,6 +924,11 @@ or
             return response;
         }
 
+        // ============================================================
+        // INITIAL QUOTE FLOW (Before first price calculation)
+        // ============================================================
+
+        // Step 1: Check if user has garage intent
         if (!session.state.hasGarageIntent) {
             const hasIntent: boolean = await this.detectGarageIntentWithAI(input);
 
@@ -882,22 +942,24 @@ or
             session.state.hasGarageIntent = true;
         }
 
+        // Step 2: Extract building_type if mentioned
         if (!session.state.userFriendlyParams.building_type) {
             const detectedBuildingType = await this.detectBuildingTypeFromInitialInput(input);
             if (detectedBuildingType) {
                 (session.state.userFriendlyParams as any).building_type = detectedBuildingType;
-                logger.info({ buildingType: detectedBuildingType }, "[LeadAgent] Pre-filled building_type");
+                logger.info(`[LeadAgent] Pre-filled building_type: ${detectedBuildingType}`);
                 await session.memory.chatHistory.addAIChatMessage(
                     `✓ Got it - you're looking for a ${detectedBuildingType}!`
                 );
             }
         }
 
+        // Step 3: Check for parameter updates during initial flow
         const paramUpdate = await this.detectParameterUpdate(input);
 
         if (paramUpdate === null) {
             if (this.validationError) {
-                logger.warn({ validationError: this.validationError }, "[LeadAgent] Validation error occurred");
+                logger.warn(`[LeadAgent] Validation error: ${this.validationError}`);
                 const error = this.validationError;
                 this.validationError = null;
                 await session.memory.chatHistory.addAIChatMessage(error);
@@ -905,6 +967,7 @@ or
             }
         }
 
+        // Step 4: Process parameter updates during initial flow
         if (paramUpdate) {
             const updateResults = await this.processParameterUpdates(session, paramUpdate);
             if (updateResults) {
@@ -912,13 +975,15 @@ or
             }
         }
 
+        // Step 5: Extract parameters from conversation context
         const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
         const rawParams: string = await extractor._call(await this.getConversationContext(session));
-        logger.info({ sessionId, rawParamsLength: rawParams.length }, "[LeadAgent] Raw params from extractor");
+        logger.info(`[LeadAgent] Session ${sessionId} - Raw params from extractor:`, rawParams);
 
         const extractedParams: Partial<UserFriendlyParams> = extractor.safeExtractUserFriendlyParams(rawParams);
-        logger.info({ sessionId, extractedKeys: Object.keys(extractedParams) }, "[LeadAgent] Extracted params");
+        logger.info(`[LeadAgent] Session ${sessionId} - Extracted params:`, extractedParams);
 
+        // Validate extracted parameters
         if (extractedParams.state_name) {
             const validationResult = await StateDataValidator.validateState(
                 extractedParams.state_name,
@@ -943,12 +1008,14 @@ or
             extractedParams.roof_type = validationResult.normalizedType;
         }
 
+        // Keep building_type if already detected
         if (extractedParams.building_type && !session.state.userFriendlyParams.building_type) {
             extractedParams.building_type = extractedParams.building_type;
         } else if (session.state.userFriendlyParams.building_type) {
             extractedParams.building_type = session.state.userFriendlyParams.building_type;
         }
 
+        // Merge extracted parameters into session
         const filteredExtractedParams: Partial<UserFriendlyParams> = {};
         for (const [key, value] of Object.entries(extractedParams)) {
             if (
@@ -965,6 +1032,7 @@ or
             ...filteredExtractedParams,
         };
 
+        // Step 6: Check for missing fields
         const missingFields: (keyof UserFriendlyParams)[] = this.getMissingFields(
             session.state.userFriendlyParams
         );
@@ -973,21 +1041,26 @@ or
             const nextField: keyof UserFriendlyParams = missingFields[0];
             session.state.currentField = nextField;
 
+            // Skip building_type if already filled
             if (nextField === "building_type" && session.state.userFriendlyParams.building_type) {
                 logger.info("[LeadAgent] Building type already set, skipping");
                 const updatedMissingFields = this.getMissingFields(session.state.userFriendlyParams);
 
                 if (updatedMissingFields.length === 0) {
+                    // All params filled, calculate price
                     return await this.calculateAndReturnPrice(session);
                 } else {
+                    // Ask for next field
                     const nextMissingField = updatedMissingFields[0];
                     return await this.askForField(session, nextMissingField);
                 }
             }
 
+            // Ask for missing field
             return await this.askForField(session, nextField);
         }
 
+        // Step 7: All fields provided - Calculate price
         return await this.calculateAndReturnPrice(session);
     }
 
@@ -995,20 +1068,22 @@ or
         session: LeadAgentSessionMetadata,
         paramUpdate: ParameterUpdate
     ): Promise<UpdateResult> {
+        // Validate the update value
         const validationError = await this.validateParameterValue(paramUpdate.field, paramUpdate.value);
         if (validationError) {
-            logger.warn({ field: paramUpdate.field }, "[LeadAgent] Validation failed");
+            logger.warn(`[LeadAgent] Validation failed for ${paramUpdate.field}: ${validationError}`);
             return {
                 success: false,
                 message: validationError
             };
         }
 
+        // For roof_type, use ChoiceHandler if not a clear choice
         if (paramUpdate.field === "roof_type") {
             if (!this.isClearRoofChoice(String(paramUpdate.value))) {
                 const choice = await this.handleRoofTypeSelection(String(paramUpdate.value));
                 paramUpdate.value = choice.selected;
-                logger.info({ selected: choice.selected }, "[LeadAgent] ChoiceHandler selected roof");
+                logger.info(`[LeadAgent] ChoiceHandler selected roof: ${choice.selected}`);
             }
 
             const validationResult = await RoofDataValidator.validateRoofType(paramUpdate.value);
@@ -1021,6 +1096,7 @@ or
             paramUpdate.value = validationResult.normalizedType;
         }
 
+        // For state_name, validate it
         if (paramUpdate.field === "state_name") {
             const validationResult = await StateDataValidator.validateState(
                 paramUpdate.value,
@@ -1036,6 +1112,7 @@ or
             paramUpdate.value = validationResult.normalizedName;
         }
 
+        // Apply the update
         return this.handleParameterUpdate(session, paramUpdate);
     }
 
@@ -1055,6 +1132,7 @@ or
 
         await session.memory.chatHistory.addAIChatMessage(result);
 
+        // ✅ Mark price as calculated so next input goes to update flow
         session.state.priceCalculated = true;
         session.state.currentField = undefined;
 
@@ -1066,6 +1144,7 @@ or
 
         return response;
     }
+
 
     private async askForField(session: LeadAgentSessionMetadata, field: keyof UserFriendlyParams): Promise<string> {
         let promptMessage = "";
@@ -1081,10 +1160,16 @@ or
 
         session.state.currentField = field;
         await session.memory.chatHistory.addAIChatMessage(promptMessage);
-        logger.info({ field }, "[LeadAgent] Asking for field");
+        logger.info(`[LeadAgent] Asking for field: ${field}`);
         return promptMessage;
     }
 
+    /**
+     * Process parameter updates from user input
+     *
+     * ✅ USE CASE 6: When processing updates that might be choices
+     * Example: If updating roof_type, check if it's a choice response first
+     */
     private async processParameterUpdates(
         session: LeadAgentSessionMetadata,
         paramUpdate: ParameterUpdate
@@ -1093,11 +1178,12 @@ or
         let allUpdateResults: UpdateResult[] = [];
 
         if (pendingUpdates.length > 0) {
-            logger.info({ count: pendingUpdates.length }, "[LeadAgent] Processing pending updates");
+            logger.info(`[LeadAgent] Processing ${pendingUpdates.length} pending updates`);
 
             for (const update of pendingUpdates) {
-                logger.debug({ field: update.field, value: update.value }, "[LeadAgent] Validating update");
+                logger.info(`[LeadAgent] Validating update: ${update.field} = ${update.value}`);
 
+                // Handle roof_type choice
                 if (update.field === "roof_type") {
                     if (!this.isClearRoofChoice(String(update.value))) {
                         const choice = await this.handleRoofTypeSelection(String(update.value));
@@ -1113,6 +1199,7 @@ or
                     update.value = validationResult.normalizedType;
                 }
 
+                // Handle state_name
                 if (update.field === "state_name") {
                     const validationResult = await StateDataValidator.validateState(
                         update.value,
@@ -1144,7 +1231,7 @@ or
 
             const response = `✓ Updated: ${allUpdatesMessage}`;
             await session.memory.chatHistory.addAIChatMessage(response);
-            logger.info({ updateCount: allUpdateResults.length }, "[LeadAgent] Multi-param update completed");
+            logger.info(`[LeadAgent] Multi-param update response: ${response}`);
 
             const missingFields = this.getMissingFields(session.state.userFriendlyParams);
             if (missingFields.length === 0) {
@@ -1154,6 +1241,7 @@ or
                 return await this.askForField(session, nextField);
             }
         } else {
+            // Single parameter update
             if (paramUpdate.field === "roof_type") {
                 if (!this.isClearRoofChoice(String(paramUpdate.value))) {
                     const choice = await this.handleRoofTypeSelection(String(paramUpdate.value));
@@ -1192,7 +1280,7 @@ or
             }
 
             await session.memory.chatHistory.addAIChatMessage(updateResult.message);
-            logger.info({ updatedField: paramUpdate.field }, "[LeadAgent] Single parameter updated");
+            logger.info(`[LeadAgent] Single parameter updated:`, JSON.stringify(session.state.userFriendlyParams));
 
             const missingFields = this.getMissingFields(session.state.userFriendlyParams);
             if (missingFields.length === 0) {
@@ -1206,23 +1294,34 @@ or
         return null;
     }
 
+    /**
+     * Manually end a session
+     */
     public async endSession(sessionId: string): Promise<void> {
         if (this.sessionManager.endSession(sessionId)) {
-            logger.info({ sessionId }, "[LeadAgent] Session ended");
+            logger.info(`[LeadAgent] Session ended: ${sessionId}`);
         } else {
-            logger.warn({ sessionId }, "[LeadAgent] Attempted to end non-existent session");
+            logger.warn(`[LeadAgent] Attempted to end non-existent session: ${sessionId}`);
         }
     }
 
+    /**
+     * Full reset (for testing/shutdown)
+     */
     public async reset(): Promise<void> {
         this.sessionManager.destroy();
-        logger.info("[LeadAgent] All sessions cleared and cleanup stopped");
+        logger.info("[LeadAgent] All sessions cleared and cleanup stopped.");
     }
 
+    /**
+     * Enhanced parameter extraction to detect building_type early
+     * So we don't ask for it later
+     */
     private async detectBuildingTypeFromInitialInput(input: string): Promise<string | null> {
         try {
             const lowerInput = input.toLowerCase();
 
+            // Quick regex check for common patterns
             const buildingPatterns = [
                 { pattern: /\bgarage\b/i, type: "garage" },
                 { pattern: /\bshed\b/i, type: "shed" },
@@ -1233,14 +1332,14 @@ or
 
             for (const { pattern, type } of buildingPatterns) {
                 if (pattern.test(lowerInput)) {
-                    logger.info({ type }, "[LeadAgent] Detected building type from input");
+                    logger.info(`[LeadAgent] Detected building type from input: ${type}`);
                     return type;
                 }
             }
 
             return null;
         } catch (error) {
-            logger.warn({ err: error }, "[LeadAgent] Error detecting building type");
+            logger.warn("[LeadAgent] Error detecting building type:", error);
             return null;
         }
     }
@@ -1252,6 +1351,122 @@ or
         ];
         return resetPatterns.some((p) => p.test(input));
     }
+
+    // private async processParameterUpdatesPostPrice(
+    //     session: LeadAgentSessionMetadata,
+    //     paramUpdate: ParameterUpdate
+    // ): Promise<string | null> {
+    //     const pendingUpdates = this.pendingUpdates;
+    //     let allUpdateResults: UpdateResult[] = [];
+    //
+    //     if (pendingUpdates.length > 0) {
+    //         logger.info(`[LeadAgent] Processing ${pendingUpdates.length} pending post-price updates`);
+    //
+    //         for (const update of pendingUpdates) {
+    //             logger.info(`[LeadAgent] Validating post-price update: ${update.field} = ${update.value}`);
+    //
+    //             // ✅ SPECIAL CASE: Check if this is a roof_type choice response
+    //             if (update.field === "roof_type") {
+    //                 if (this.isClearRoofChoice(String(update.value))) {
+    //                     logger.info(`[LeadAgent] Direct roof choice matched: ${update.value}`);
+    //                 } else {
+    //                     const choice = await this.handleRoofTypeSelection(String(update.value));
+    //                     logger.info(`[LeadAgent] ChoiceHandler selected: ${choice.selected}`);
+    //                     update.value = choice.selected;
+    //                 }
+    //
+    //                 const validationResult = await RoofDataValidator.validateRoofType(update.value);
+    //                 if (!validationResult.isValid) {
+    //                     const errorMessage = `❌ "${update.value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`;
+    //                     await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                     return errorMessage;
+    //                 }
+    //                 update.value = validationResult.normalizedType;
+    //             }
+    //
+    //             // ✅ SPECIAL CASE: Check if this is a state_name response
+    //             if (update.field === "state_name") {
+    //                 const validationResult = await StateDataValidator.validateState(
+    //                     update.value,
+    //                     async (name: string) => await this.mapStateToDB(name, session)
+    //                 );
+    //
+    //                 if (!validationResult.isValid) {
+    //                     const errorMessage = `❌ "${update.value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`;
+    //                     await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                     return errorMessage;
+    //                 }
+    //                 update.value = validationResult.normalizedName;
+    //             }
+    //
+    //             const updateResult = await this.handleParameterUpdate(session, update);
+    //             allUpdateResults.push(updateResult);
+    //
+    //             if (!updateResult.success) {
+    //                 await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+    //                 return updateResult.message;
+    //             }
+    //         }
+    //
+    //         this.pendingUpdates = [];
+    //
+    //         const allUpdatesMessage = allUpdateResults
+    //             .map((result) => result.message)
+    //             .join(" | ");
+    //
+    //         const response = `✓ Updated: ${allUpdatesMessage}`;
+    //         await session.memory.chatHistory.addAIChatMessage(response);
+    //         logger.info(`[LeadAgent] Multi-param post-price update response: ${response}`);
+    //
+    //         return response; // ✅ Return here - don't ask for missing fields
+    //     } else {
+    //         // Single parameter update
+    //         if (paramUpdate.field === "roof_type") {
+    //             if (this.isClearRoofChoice(String(paramUpdate.value))) {
+    //                 logger.info(`[LeadAgent] Direct roof choice matched: ${paramUpdate.value}`);
+    //             } else {
+    //                 const choice = await this.handleRoofTypeSelection(String(paramUpdate.value));
+    //                 logger.info(`[LeadAgent] ChoiceHandler selected: ${choice.selected}`);
+    //                 paramUpdate.value = choice.selected;
+    //             }
+    //
+    //             const validationResult = await RoofDataValidator.validateRoofType(paramUpdate.value);
+    //             if (!validationResult.isValid) {
+    //                 const errorMessage = `❌ "${paramUpdate.value}" is not a valid roof type.\n\n${RoofDataValidator.getValidRoofTypesMessage()}`;
+    //                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                 return errorMessage;
+    //             }
+    //             paramUpdate.value = validationResult.normalizedType;
+    //         }
+    //
+    //         if (paramUpdate.field === "state_name") {
+    //             const validationResult = await StateDataValidator.validateState(
+    //                 paramUpdate.value,
+    //                 async (name: string) => await this.mapStateToDB(name, session)
+    //             );
+    //
+    //             if (!validationResult.isValid) {
+    //                 const errorMessage = `❌ "${paramUpdate.value}" is not a valid state.\n\n${StateDataValidator.getValidStatesMessage()}`;
+    //                 await session.memory.chatHistory.addAIChatMessage(errorMessage);
+    //                 return errorMessage;
+    //             }
+    //             paramUpdate.value = validationResult.normalizedName;
+    //         }
+    //
+    //         const updateResult = await this.handleParameterUpdate(session, paramUpdate);
+    //         allUpdateResults.push(updateResult);
+    //
+    //         if (!updateResult.success) {
+    //             await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+    //             return updateResult.message;
+    //         }
+    //
+    //         await session.memory.chatHistory.addAIChatMessage(updateResult.message);
+    //         logger.info(`[LeadAgent] Single post-price parameter updated:`, JSON.stringify(session.state.userFriendlyParams));
+    //
+    //         return updateResult.message; // ✅ Return here - don't ask for missing fields
+    //     }
+    // }
 }
 
 function Enforce(): void {}
