@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   garage-backend:
     build: .
@@ -26,11 +24,14 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+      LOKI_HOST: http://loki:3100
+      APP_NAME: garage-backend
     networks:
       - garage-network
     restart: always
     depends_on:
       - ollama
+      - loki
 
   ollama:
     image: ollama/ollama:latest
@@ -73,17 +74,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  redis:
-    image: redis:latest
-    container_name: redis
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis-data:/data
-    networks:
-      - garage-network
-    restart: always
-
   phpmyadmin:
     image: phpmyadmin/phpmyadmin:latest
     container_name: phpmyadmin
@@ -98,9 +88,39 @@ services:
       - garage-network
     restart: always
 
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-storage:/loki
+    networks:
+      - garage-network
+    restart: always
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3001"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/loki-datasource.yml
+    networks:
+      - garage-network
+    depends_on:
+      - loki
+    restart: always
+
 volumes:
   ollama-data:
-  redis-data:
+  loki-storage:
+  grafana-storage:
 
 networks:
   garage-network:
