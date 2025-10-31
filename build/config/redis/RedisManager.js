@@ -35,7 +35,7 @@ class RedisManager extends ServiceManager_1.ServiceManager {
                 connectTimeout: timeout,
                 host: process.env.REDIS_HOST || host,
                 port: process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT) : port,
-                family: 6,
+                family: 4,
                 retryStrategy: (times) => Math.min(times * 30, 1000),
                 reconnectOnError(error) {
                     const targetErrors = [

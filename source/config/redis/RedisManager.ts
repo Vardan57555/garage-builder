@@ -79,7 +79,7 @@ export class RedisManager extends ServiceManager
                 connectTimeout: timeout,
                 host: process.env.REDIS_HOST || host,
                 port: process.env.REDIS_PORT ? parseInt(process.env.REDIS_PORT) : port,
-                family: 6,
+                family: 4,
                 retryStrategy: (times: number): number => Math.min(times * 30, 1000),
                 reconnectOnError(error: Error): boolean
                 {
