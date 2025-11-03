@@ -1,3 +1,7 @@
+// ============================================================================
+// FILE: LeadAgent.ts - FIXED PRICE CALCULATION
+// ============================================================================
+
 import { BufferMemory, ChatMessageHistory } from "langchain/memory";
 import { InstantiationError } from "@errors/InstantiationError";
 import { RedisCacheUtils } from "@utils/cache/RedisCacheUtils";
@@ -10,6 +14,7 @@ import {
     detectParameterUpdateFromInput,
     detectResetIntent
 } from "@agents/tools/impl/DetectionHelpers";
+import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -49,7 +54,6 @@ export class LeadAgent {
             const session = this.getOrCreateSession(sessionId);
             await session.memory.chatHistory.addUserMessage(input);
 
-            // ✅ CHECK FOR RESET FIRST
             if (detectResetIntent(input)) {
                 logger.info(`[LeadAgent] Reset intent detected`);
                 const result = await leadAgentGraph.invoke({
@@ -85,25 +89,86 @@ export class LeadAgent {
                 return response;
             }
 
-            // ✅ POST-PRICE PHASE (user already got a quote)
             if (session.state.priceCalculated) {
                 logger.info(`[LeadAgent] POST-PRICE PHASE - priceCalculated: true`);
                 logger.info(`[LeadAgent] Session basePrice: $${session.state.basePrice}`);
 
                 const userInput = input.toLowerCase().trim();
 
-                if (/(no|skip|none|without|don't|nope|nah)/i.test(userInput)) {
-                    logger.info(`[LeadAgent] User declined addons, showing final price`);
+                // ✅ FIX: When user declines addons, calculate FULL price with all service costs
+                if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
+                    logger.info(`[LeadAgent] User declined addons, calculating final price with all services`);
+
                     const basePrice = session.state.basePrice || 0;
-                    // ... format final price response
-                    const response = `Final price: $${basePrice}`;
+                    const params = session.state.userFriendlyParams;
+
+                    // ✅ CRITICAL FIX: Calculate ALL service costs
+                    const sqft = (params.width || 0) * (params.length || 0);
+                    const laborCost = basePrice * 0.5;  // 50% of kit price
+                    const foundationCost = sqft * 8.5;  // $8.50 per sq ft
+                    const deliveryCost = 750;  // Fixed delivery cost
+                    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;  // 5%
+                    const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
+
+                    logger.info(`[LeadAgent] Price breakdown:`);
+                    logger.info(`  - Base kit: $${basePrice.toFixed(2)}`);
+                    logger.info(`  - Labor: $${laborCost.toFixed(2)}`);
+                    logger.info(`  - Foundation: $${foundationCost.toFixed(2)}`);
+                    logger.info(`  - Delivery: $${deliveryCost.toFixed(2)}`);
+                    logger.info(`  - Contingency: $${contingency.toFixed(2)}`);
+                    logger.info(`  - FINAL TOTAL: $${finalTotal.toFixed(2)}`);
+
+                    const currentParams = LeadAgentHelpers.formatCurrentParams(params);
+
+                    const response = `✅ **FINAL PRICE QUOTE**
+
+${currentParams}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 **DETAILED PRICE BREAKDOWN:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Building Kit & Materials:**
+• Base Building Package: $${basePrice.toFixed(2)}
+
+**Installation & Construction:**
+• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
+• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
+• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
+• Contingency & Misc (5%): $${contingency.toFixed(2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 **TOTAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ **What's Included:**
+  • Building kit and all materials
+  • Professional installation labor
+  • Foundation slab preparation (concrete)
+  • Delivery & site preparation
+  • 5% contingency for unforeseen costs
+
+📞 **Next Steps:**
+Contact us to finalize your order and discuss:
+  • Custom modifications
+  • Financing options
+  • Installation timeline
+  • Warranty details
+
+🔧 **Want to modify anything?**
+(e.g., "change width to 30", "make it 3 cars")
+Or say **"start over"** to create a new quote.`;
+
                     await session.memory.chatHistory.addAIChatMessage(response);
+                    session.state.finalPrice = finalTotal;
                     return response;
                 }
 
+                // Handle addon selections
                 const addonKeywords = /(add|window|door|brace|anchor|cupola|\d+)/i;
                 if (addonKeywords.test(userInput)) {
                     logger.info(`[LeadAgent] User provided addon input: "${userInput}"`);
+
                     const result = await leadAgentGraph.invoke({
                         sessionId,
                         messages: await session.memory.chatHistory.getMessages(),
@@ -125,15 +190,21 @@ export class LeadAgent {
 
                     const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
+
                     session.state.selectedAddons = result.selectedAddons || [];
                     session.state.finalPrice = result.finalPrice || 0;
+
+                    logger.info(`[LeadAgent] Addon processing completed`);
                     return response;
                 }
 
-                // Check for parameter updates in POST-PRICE phase
+                // Check for parameter updates
+                logger.info(`[LeadAgent] Checking for parameter updates`);
                 const update = await detectParameterUpdateFromInput(input);
+
                 if (update) {
-                    logger.info(`[LeadAgent] Detected parameter update in POST-PRICE: ${update.field}=${update.value}`);
+                    logger.info(`[LeadAgent] Detected parameter update: ${update.field}=${update.value}`);
+
                     const result = await leadAgentGraph.invoke({
                         sessionId,
                         messages: await session.memory.chatHistory.getMessages(),
@@ -155,6 +226,7 @@ export class LeadAgent {
 
                     const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
+
                     session.state.userFriendlyParams = result.userFriendlyParams;
                     session.state.priceCalculated = result.priceCalculated || false;
 
@@ -162,79 +234,56 @@ export class LeadAgent {
                         session.state.pricingData = result.pricingData;
                         session.state.basePrice = result.basePrice || 0;
                         session.state.finalPrice = result.finalPrice || 0;
+                        logger.info(`[LeadAgent] ✅ Updated pricing data after parameter change`);
                     }
+
                     return response;
                 }
 
-                return "Please select add-ons or type 'no' to finish.";
-            }
-
-            // ✅ INITIAL QUOTE FLOW (user hasn't gotten a quote yet)
-            logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
-
-            // ✅ KEY FIX: Check for parameter updates FIRST
-            // If user provides an update, route directly to handle_update, skip extraction
-            const update = await detectParameterUpdateFromInput(input);
-
-            if (update) {
-                logger.info(`[LeadAgent] ✅ Parameter update detected: ${update.field}=${update.value}`);
-                logger.info(`[LeadAgent] Routing directly to handle_update (BYPASS extraction)`);
-
+                // If unclear, show addon menu again
+                logger.info(`[LeadAgent] Unclear input, showing addon menu again`);
                 const result = await leadAgentGraph.invoke({
                     sessionId,
                     messages: await session.memory.chatHistory.getMessages(),
                     userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
                     hasGarageIntent: session.state.hasGarageIntent,
-                    priceCalculated: false,
+                    priceCalculated: true,
                     currentField: null,
                     validationError: null,
                     response: "",
-                    nextStep: "handle_update",  // ✅ DIRECTLY to handle_update
+                    nextStep: "show_addons",
                     stateMapCache: session.stateMapCache || new Map(),
                     roofMapCache: session.roofMapCache || new Map(),
-                    pendingUpdates: [update],  // ✅ Pass the detected update
-                    pricingData: null,
-                    basePrice: 0,
-                    selectedAddons: [],
-                    finalPrice: 0,
+                    pendingUpdates: [],
+                    pricingData: session.state.pricingData || null,
+                    basePrice: session.state.basePrice || 0,
+                    selectedAddons: session.state.selectedAddons || [],
+                    finalPrice: session.state.finalPrice || 0,
                 });
 
                 const response = result.response;
                 await session.memory.chatHistory.addAIChatMessage(response);
-
-                session.state.userFriendlyParams = result.userFriendlyParams;
-                session.state.hasGarageIntent = result.hasGarageIntent;
-                session.state.priceCalculated = result.priceCalculated || false;
-                session.state.currentField = result.currentField;
-                session.stateMapCache = result.stateMapCache;
-                session.roofMapCache = result.roofMapCache;
-
-                if (result.priceCalculated && result.pricingData) {
-                    session.state.pricingData = result.pricingData;
-                    session.state.basePrice = result.basePrice || 0;
-                    session.state.selectedAddons = result.selectedAddons || [];
-                    session.state.finalPrice = result.finalPrice || 0;
-                }
-
                 return response;
             }
 
-            // No parameter update detected, proceed with normal flow
-            logger.info(`[LeadAgent] No parameter update, proceeding with normal flow`);
+            // INITIAL QUOTE FLOW
+            logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
+
+            const update = await detectParameterUpdateFromInput(input);
 
             const result = await leadAgentGraph.invoke({
                 sessionId,
                 messages: await session.memory.chatHistory.getMessages(),
                 userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
                 hasGarageIntent: session.state.hasGarageIntent,
-                priceCalculated: false,
-                currentField: session.state.currentField as keyof UserFriendlyParams || null,
+                priceCalculated: session.state.priceCalculated || false,
+                currentField: (session.state.currentField as keyof UserFriendlyParams) || null,
                 validationError: null,
                 response: "",
-                nextStep: null,
+                nextStep: update ? "handle_update" : null,
                 stateMapCache: session.stateMapCache || new Map(),
                 roofMapCache: session.roofMapCache || new Map(),
-                pendingUpdates: [],
+                pendingUpdates: update ? [update] : [],
                 pricingData: null,
                 basePrice: 0,
                 selectedAddons: [],
@@ -257,9 +306,7 @@ export class LeadAgent {
                 session.state.selectedAddons = result.selectedAddons || [];
                 session.state.finalPrice = result.finalPrice || 0;
 
-                logger.info(`[LeadAgent] ✅ Saved pricing data to session:`);
-                logger.info(`  - basePrice: $${session.state.basePrice}`);
-                logger.info(`  - finalPrice: $${session.state.finalPrice}`);
+                logger.info(`[LeadAgent] ✅ Saved pricing data to session`);
             }
 
             return response;
@@ -268,7 +315,6 @@ export class LeadAgent {
             return "❌ An error occurred. Please try again.";
         }
     }
-
 
     private getOrCreateSession(sessionId: string): LeadAgentSessionMetadata {
         const existing: any = this.sessionManager.getSession(sessionId);

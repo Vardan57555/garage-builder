@@ -1,3 +1,7 @@
+// ============================================================================
+// FILE: ProcessAddonsNode.ts - FIXED ADDON SELECTION
+// ============================================================================
+
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
@@ -7,99 +11,129 @@ import {buildAddonsMenuFromPricing} from "@agents/tools/impl/ShowAddonsNode";
 const logger: pino.Logger = createLogger(module);
 
 /**
- * Parse user's addon selections from input
+ * ✅ IMPROVED: Parse user's addon selections with better quantity handling
  */
 function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
     const selected: any[] = [];
     const lowerInput = userInput.toLowerCase();
 
     logger.info(`[parseAddonSelections] Parsing: "${userInput}"`);
+    logger.info(`[parseAddonSelections] Available addons: ${addonsMenu.length}`);
 
     // ✅ METHOD 1: Number selection (e.g., "1" or "1, 2" or "1 and 2")
     const numberMatches = userInput.match(/\d+/g);
     if (numberMatches && numberMatches.length > 0) {
         logger.info(`[parseAddonSelections] Found numbers: ${numberMatches.join(", ")}`);
 
-        const uniqueNumbers = new Set<number>();
-        numberMatches.forEach((numStr) => {
-            const index = parseInt(numStr) - 1;
-            if (index >= 0 && index < addonsMenu.length) {
-                logger.info(`[parseAddonSelections] Adding addon at index ${index}`);
-                uniqueNumbers.add(index);
-            }
-        });
+        // Check if these numbers are addon indices (1-based)
+        const potentialIndices = numberMatches.map(n => parseInt(n) - 1);
+        const validIndices = potentialIndices.filter(idx => idx >= 0 && idx < addonsMenu.length);
 
-        if (uniqueNumbers.size > 0) {
-            uniqueNumbers.forEach((idx) => {
+        // If we have valid addon indices, use them
+        if (validIndices.length > 0) {
+            validIndices.forEach(idx => {
                 selected.push(addonsMenu[idx]);
-                logger.info(`[parseAddonSelections] Selected: ${addonsMenu[idx].label}`);
+                logger.info(`[parseAddonSelections] Selected by number: ${addonsMenu[idx].label}`);
             });
             return selected;
         }
     }
 
-    // ✅ METHOD 2: Keyword selection with quantity (e.g., "2 windows", "also 2 windows")
+    // ✅ METHOD 2: Keyword selection with quantity (e.g., "2 windows", "add 3 doors")
 
-    // Extract quantity if mentioned
-    const quantityMatch = userInput.match(/(\d+)\s*(window|door|brace|anchor|cupola|garage door|walk)/i);
-    let quantity = 1;
-    if (quantityMatch) {
-        quantity = parseInt(quantityMatch[1], 10);
-        logger.info(`[parseAddonSelections] Found quantity: ${quantity}`);
+    // Extract quantity pattern: "2 windows" or "add 2 windows" or "also 2 windows"
+    const quantityPattern = /(?:add|also|and)?\s*(\d+)\s+(window|door|walkin|walk.?in|brace|anchor|cupola|garage door)/gi;
+    const quantityMatches = [...userInput.matchAll(quantityPattern)];
+
+    if (quantityMatches.length > 0) {
+        logger.info(`[parseAddonSelections] Found quantity matches: ${quantityMatches.length}`);
+
+        quantityMatches.forEach(match => {
+            const quantity = parseInt(match[1], 10);
+            const addonType = match[2].toLowerCase();
+
+            logger.info(`[parseAddonSelections] Looking for ${quantity} × "${addonType}"`);
+
+            // Find matching addons
+            let matchingAddons: any[] = [];
+
+            if (/window/i.test(addonType)) {
+                matchingAddons = addonsMenu.filter(a => /window/i.test(a.label));
+            } else if (/walk.?in/i.test(addonType)) {
+                matchingAddons = addonsMenu.filter(a => /walk.?in/i.test(a.label));
+            } else if (/garage door/i.test(addonType) || (/door/i.test(addonType) && !/walk/i.test(addonType))) {
+                matchingAddons = addonsMenu.filter(a => /door/i.test(a.label) && !/walk.?in/i.test(a.label));
+            } else if (/brace|anchor/i.test(addonType)) {
+                matchingAddons = addonsMenu.filter(a => /brace|anchor/i.test(a.label));
+            }
+
+            // Add the requested quantity
+            for (let i = 0; i < Math.min(quantity, matchingAddons.length); i++) {
+                selected.push(matchingAddons[i]);
+                logger.info(`[parseAddonSelections] Added: ${matchingAddons[i].label}`);
+            }
+
+            // If user wants more than available, repeat the last one
+            if (quantity > matchingAddons.length && matchingAddons.length > 0) {
+                const lastAddon = matchingAddons[matchingAddons.length - 1];
+                for (let i = matchingAddons.length; i < quantity; i++) {
+                    selected.push({ ...lastAddon, id: `${lastAddon.id}_${i}` });
+                    logger.info(`[parseAddonSelections] Added duplicate: ${lastAddon.label}`);
+                }
+            }
+        });
+
+        if (selected.length > 0) {
+            logger.info(`[parseAddonSelections] Total selected from quantity matches: ${selected.length}`);
+            return selected;
+        }
     }
 
-    // Check for window selections
+    // ✅ METHOD 3: Keyword without quantity (e.g., "windows", "doors", "add windows and doors")
+    logger.info(`[parseAddonSelections] Checking for keywords without quantity`);
+
     if (/window/i.test(lowerInput)) {
-        logger.info(`[parseAddonSelections] User wants ${quantity} window(s)`);
-        const windowAddons = addonsMenu.filter((a) => /window/i.test(a.label));
-
-        for (let i = 0; i < Math.min(quantity, windowAddons.length); i++) {
-            selected.push(windowAddons[i]);
-            logger.info(`[parseAddonSelections] Added window: ${windowAddons[i].label}`);
+        const windowAddons = addonsMenu.filter(a => /window/i.test(a.label));
+        if (windowAddons.length > 0) {
+            selected.push(windowAddons[0]);  // Add first window option
+            logger.info(`[parseAddonSelections] Added default window: ${windowAddons[0].label}`);
         }
     }
 
-    // Check for door selections
     if (/door/i.test(lowerInput) && !/walk/i.test(lowerInput)) {
-        logger.info(`[parseAddonSelections] User wants ${quantity} door(s)`);
-        const doorAddons = addonsMenu.filter((a) => /door/i.test(a.label) && !/walk/i.test(a.label));
-
-        for (let i = 0; i < Math.min(quantity, doorAddons.length); i++) {
-            selected.push(doorAddons[i]);
-            logger.info(`[parseAddonSelections] Added door: ${doorAddons[i].label}`);
+        const doorAddons = addonsMenu.filter(a => /door/i.test(a.label) && !/walk.?in/i.test(a.label));
+        if (doorAddons.length > 0) {
+            selected.push(doorAddons[0]);
+            logger.info(`[parseAddonSelections] Added default door: ${doorAddons[0].label}`);
         }
     }
 
-    // Check for walk-in selections
     if (/walk.?in/i.test(lowerInput)) {
-        logger.info(`[parseAddonSelections] User wants ${quantity} walk-in door(s)`);
-        const walkinAddons = addonsMenu.filter((a) => /walk.?in/i.test(a.label));
-
-        for (let i = 0; i < Math.min(quantity, walkinAddons.length); i++) {
-            selected.push(walkinAddons[i]);
-            logger.info(`[parseAddonSelections] Added walk-in: ${walkinAddons[i].label}`);
+        const walkinAddons = addonsMenu.filter(a => /walk.?in/i.test(a.label));
+        if (walkinAddons.length > 0) {
+            selected.push(walkinAddons[0]);
+            logger.info(`[parseAddonSelections] Added default walk-in: ${walkinAddons[0].label}`);
         }
     }
 
-    // Check for brace selections
     if (/brace|anchor/i.test(lowerInput)) {
-        logger.info(`[parseAddonSelections] User wants ${quantity} brace(s)`);
-        const braceAddons = addonsMenu.filter((a) => /brace|anchor/i.test(a.label));
-
-        for (let i = 0; i < Math.min(quantity, braceAddons.length); i++) {
-            selected.push(braceAddons[i]);
-            logger.info(`[parseAddonSelections] Added brace: ${braceAddons[i].label}`);
+        const braceAddons = addonsMenu.filter(a => /brace|anchor/i.test(a.label));
+        if (braceAddons.length > 0) {
+            selected.push(braceAddons[0]);
+            logger.info(`[parseAddonSelections] Added default brace: ${braceAddons[0].label}`);
         }
     }
 
     // Remove duplicates by ID
     const uniqueMap = new Map();
     selected.forEach((addon) => {
-        uniqueMap.set(addon.id, addon);
+        if (!uniqueMap.has(addon.id)) {
+            uniqueMap.set(addon.id, addon);
+        }
     });
 
     const finalSelected = Array.from(uniqueMap.values());
-    logger.info(`[parseAddonSelections] Final selected count: ${finalSelected.length}`);
+    logger.info(`[parseAddonSelections] ✅ Final selected count: ${finalSelected.length}`);
     return finalSelected;
 }
 
@@ -123,13 +157,27 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
         if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
             logger.info(`[ProcessAddonsNode] User declined addons`);
 
-            const finalTotal = state.basePrice || 0;
+            const basePrice = state.basePrice || 0;
+            const params = state.userFriendlyParams;
+
+            // Calculate full price with service costs
+            const sqft = (params.width || 0) * (params.length || 0);
+            const laborCost = basePrice * 0.5;
+            const foundationCost = sqft * 8.5;
+            const deliveryCost = 750;
+            const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
+            const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
+
             const response = formatFinalPrice(
-                state.userFriendlyParams,
-                state.basePrice || 0,
+                params,
+                basePrice,
                 [],
                 0,
-                finalTotal
+                finalTotal,
+                laborCost,
+                foundationCost,
+                deliveryCost,
+                contingency
             );
 
             return {
@@ -150,23 +198,56 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
         }
 
         const addonsMenu = buildAddonsMenuFromPricing(state.pricingData);
-        logger.info(`[ProcessAddonsNode] Available addons: ${addonsMenu.length}`);
+        logger.info(`[ProcessAddonsNode] Available addons in menu: ${addonsMenu.length}`);
+
+        if (addonsMenu.length === 0) {
+            logger.warn(`[ProcessAddonsNode] No addons available in pricing data`);
+            return {
+                response: "No addons are available for this building configuration.",
+                nextStep: "__end__",
+            };
+        }
 
         const selectedAddons = parseAddonSelections(userInput, addonsMenu);
         logger.info(`[ProcessAddonsNode] User selected: ${selectedAddons.length} addon(s)`);
 
+        if (selectedAddons.length === 0) {
+            logger.warn(`[ProcessAddonsNode] No addons matched user input`);
+            return {
+                response: `I couldn't understand which addons you want. Please try:\n• Select by number (e.g., "1" or "1 and 2")\n• Specify quantity (e.g., "2 windows")\n• Or say "no" to skip addons`,
+                nextStep: "__end__",
+            };
+        }
+
         // Calculate addon total
         const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
-        const finalTotal = (state.basePrice || 0) + addonTotal;
 
-        logger.info(`[ProcessAddonsNode] Base price: $${state.basePrice}, Addon total: $${addonTotal}, Final: $${finalTotal}`);
+        // Calculate full price including service costs
+        const basePrice = state.basePrice || 0;
+        const params = state.userFriendlyParams;
+        const sqft = (params.width || 0) * (params.length || 0);
+        const laborCost = basePrice * 0.5;
+        const foundationCost = sqft * 8.5;
+        const deliveryCost = 750;
+        const contingency = (basePrice + laborCost + foundationCost + deliveryCost + addonTotal) * 0.05;
+        const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency + addonTotal;
+
+        logger.info(`[ProcessAddonsNode] Price calculation:`);
+        logger.info(`  - Base: $${basePrice}`);
+        logger.info(`  - Addons: $${addonTotal}`);
+        logger.info(`  - Services: $${(laborCost + foundationCost + deliveryCost + contingency).toFixed(2)}`);
+        logger.info(`  - Final: $${finalTotal}`);
 
         const response = formatFinalPrice(
-            state.userFriendlyParams,
-            state.basePrice || 0,
+            params,
+            basePrice,
             selectedAddons,
             addonTotal,
-            finalTotal
+            finalTotal,
+            laborCost,
+            foundationCost,
+            deliveryCost,
+            contingency
         );
 
         return {
@@ -185,24 +266,19 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
     }
 };
 
-
 function formatFinalPrice(
     params: any,
     basePrice: number,
     selectedAddons: any[],
     addonTotal: number,
-    finalTotal: number
+    finalTotal: number,
+    laborCost: number,
+    foundationCost: number,
+    deliveryCost: number,
+    contingency: number
 ): string {
     const currentParams = LeadAgentHelpers.formatCurrentParams(params);
-
-    // Calculate service costs
     const sqft = (params.width || 0) * (params.length || 0);
-    const laborCost = basePrice * 0.5;
-    const foundationCost = sqft * 8.5;
-    const deliveryCost = 750;
-    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
-    const totalWithServices = basePrice + laborCost + foundationCost + deliveryCost + contingency;
-    const grandTotal = totalWithServices + addonTotal;
 
     let response = `${currentParams}
 
@@ -217,9 +293,7 @@ function formatFinalPrice(
 • Installation Labor (50% of kit): $${laborCost.toFixed(2)}
 • Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
 • Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
-• Contingency & Misc (5%): $${contingency.toFixed(2)}
-
-**Subtotal (Building + Services): $${totalWithServices.toFixed(2)}**`;
+• Contingency & Misc (5%): $${contingency.toFixed(2)}`;
 
     if (selectedAddons.length > 0) {
         response += `
@@ -234,11 +308,11 @@ function formatFinalPrice(
     response += `
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **FINAL ESTIMATED PRICE: $${grandTotal.toFixed(2)}**
+💰 **FINAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ✅ **What's Included:**
-  • Building kit and materials
+  • Building kit and all materials
   • Professional installation labor
   • Foundation slab preparation (concrete)
   • Delivery & site preparation
