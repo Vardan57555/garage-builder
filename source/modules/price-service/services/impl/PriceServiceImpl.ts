@@ -285,7 +285,6 @@ export class PriceServiceImpl implements PriceService
                 gauge: matchingPrice.gauge ?? (params.gauge ?? 14)
             };
 
-            // ✅ ADD THIS - APPLY MULTIPLIERS BEFORE FETCHING COMPONENTS
             this.applyPricingMultipliers(pricing, params);
 
             const componentKeys: string[] = this.getComponentKeys(params.single_slope_height);
@@ -475,11 +474,9 @@ export class PriceServiceImpl implements PriceService
         const safeMapId: number = map_id ?? 0;
         const safeRoofId: number = roof_id ?? 0;
 
-        // CHANGE FROM: 'getBuildingStructure'
-        // CHANGE TO: 'getBuildingStructure(?, ?, ?, ?, ?)'
         const structures: IBuildingStructure[] = await ProcedureExecutor.getProcedureData<IBuildingStructure>(
             [safeMapId, safeRoofId, null, null, null],
-            'getBuildingStructure(?, ?, ?, ?, ?)',  // ← FIX: ADD PLACEHOLDERS
+            'getBuildingStructure(?, ?, ?, ?, ?)',
             'building_structure'
         );
 
@@ -517,8 +514,6 @@ export class PriceServiceImpl implements PriceService
         const safeHeight: number = height ?? 0;
         const safeLength: number = length ?? 0;
 
-        // CHANGE FROM: 'getBuildingStructure'
-        // CHANGE TO: 'getBuildingStructure(?, ?, ?, ?, ?)'
         return await ProcedureExecutor.getProcedureData<IBuildingStructure>(
             [safeMapId, safeRoofId, safeWidth, safeHeight, safeLength],
             'getBuildingStructure(?, ?, ?, ?, ?)',  // ← FIX: ADD PLACEHOLDERS
@@ -720,37 +715,6 @@ export class PriceServiceImpl implements PriceService
         logger.info(`[applyAddons] Current addons after: ${pricing.addons}`);
         logger.info("[applyAddons] ====== END AFTER ======");
     }
-
-    // private validatePricingComponents(pricing: Record<string, any>): void
-    // {
-    //     logger.info("[validatePricingComponents] ====== VALIDATION CHECK ======");
-    //     logger.info("[validatePricingComponents] Checking all expected components exist...");
-    //
-    //     const requiredComponentKeys = [
-    //         'end', 'garage_door', 'garage_door_frameout', 'walkin_door_frameout',
-    //         'window_frameout', 'insulation', 'certificate', 'full_length_panel',
-    //         'end_cross_bracing', 'side_cross_bracing', 'roof_pitch', 'connection_fees',
-    //         'full_length_side', 'anchors_cost', 'bows', 'addons', 'braces', 'trusses'
-    //     ];
-    //
-    //     for (const key of requiredComponentKeys)
-    //     {
-    //         if (pricing[key])
-    //         {
-    //             const value = pricing[key];
-    //             const isArray = Array.isArray(value);
-    //             const hasContent = isArray ? value.length > 0 : !!value;
-    //             const summary = isArray ? `${value.length} items` : "object";
-    //             logger.info(`[validatePricingComponents] ✓ ${key}: ${summary}`);
-    //         }
-    //         else
-    //         {
-    //             logger.warn(`[validatePricingComponents] ✗ MISSING: ${key}`);
-    //         }
-    //     }
-    //
-    //     logger.info("[validatePricingComponents] ====== END VALIDATION ======");
-    // }
 
     /**
      * @param pricing - The pricing object containing connection fees to adjust.
@@ -1086,15 +1050,10 @@ export class PriceServiceImpl implements PriceService
 
         const sqft = params.width * params.length;
 
-        // ========================================
-        // 1. GAUGE MULTIPLIER (12ga = +15%, 14ga = baseline)
-        // ========================================
+
         const gaugeMultiplier = params.gauge === 12 ? 1.15 : params.gauge === 16 ? 0.95 : 1.0;
         logger.info(`[applyPricingMultipliers] Gauge: ${params.gauge}ga × ${gaugeMultiplier}`);
 
-        // ========================================
-        // 2. BUILDING TYPE MULTIPLIER
-        // ========================================
         const buildingTypeMultipliers: Record<string, number> = {
             'garage': 1.0,      // baseline
             'carport': 0.85,    // lighter duty
@@ -1106,9 +1065,6 @@ export class PriceServiceImpl implements PriceService
         const buildingMultiplier = buildingTypeMultipliers[params.building_type?.toLowerCase() || 'garage'] || 1.0;
         logger.info(`[applyPricingMultipliers] Building type "${params.building_type}": × ${buildingMultiplier}`);
 
-        // ========================================
-        // 3. ROOF TYPE MULTIPLIER
-        // ========================================
         const roofTypeMultipliers: Record<number, number> = {
             1: 1.0,  // vertical = baseline
             2: 0.95, // regular = slightly cheaper
@@ -1117,18 +1073,12 @@ export class PriceServiceImpl implements PriceService
         const roofMultiplier = roofTypeMultipliers[params.roof_id] || 1.0;
         logger.info(`[applyPricingMultipliers] Roof ID ${params.roof_id}: × ${roofMultiplier}`);
 
-        // ========================================
-        // 4. HEIGHT PREMIUM (per foot over 10ft baseline)
-        // ========================================
         const baseHeight = 10;
         const heightPremium = params.height > baseHeight
             ? (params.height - baseHeight) * (sqft * 0.50) // $0.50 per sq ft per foot of height
             : 0;
         logger.info(`[applyPricingMultipliers] Height premium: $${heightPremium}`);
 
-        // ========================================
-        // APPLY TO BASE PRICE
-        // ========================================
         const combinedMultiplier = gaugeMultiplier * buildingMultiplier * roofMultiplier;
 
         pricing.base_price_regular = (pricing.base_price_regular ?? 0) * combinedMultiplier;
@@ -1141,9 +1091,6 @@ export class PriceServiceImpl implements PriceService
         logger.info(`  - Box: $${pricing.base_price_box}`);
         logger.info(`  - Vertical: $${pricing.base_price_vertical}`);
 
-        // ========================================
-        // ADD HEIGHT PREMIUM TO BASE PRICES
-        // ========================================
         if (heightPremium > 0) {
             pricing.height_premium = heightPremium;
             pricing.base_price_regular += heightPremium;

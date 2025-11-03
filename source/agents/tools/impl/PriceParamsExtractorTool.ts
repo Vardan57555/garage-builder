@@ -98,7 +98,7 @@ export class PriceParamsExtractorTool extends BaseTool {
     ): Partial<UserFriendlyParams> {
         const input: string = userInput.toLowerCase();
 
-
+        // Only infer dimensions if user provided car count
         if (!this.hasDimensions(params)) {
             const garageType: string = params.garage_type || this.detectGarageType(input);
             const standardDims = this.getStandardDimensions(garageType);
@@ -108,19 +108,24 @@ export class PriceParamsExtractorTool extends BaseTool {
                 width: standardDims.width,
                 length: standardDims.length,
                 height: standardDims.height
-            }, "[validateAndInferMissingParams] Missing dimensions, inferred from type");
+            }, "[validateAndInferMissingParams] Inferred dimensions from garage type");
 
             Object.assign(params, standardDims);
             params.garage_type = garageType;
         }
 
-        if (!params.state_name) {
-            const extractedState = this.extractState(input);
-            if (extractedState) {
-                logger.info({ state: extractedState }, "[validateAndInferMissingParams] Inferred state");
-                params.state_name = extractedState;
-            }
-        }
+        // ✅ REMOVE ALL STATE INFERENCE - Do NOT call extractState()
+        // Let the system ask for state if missing
+        // if (!params.state_name) {
+        //     const extractedState = this.extractState(input);
+        //     if (extractedState) {
+        //         logger.info({ state: extractedState }, "[validateAndInferMissingParams] Extracted state from input");
+        //         params.state_name = extractedState;
+        //     }
+        // }
+
+        // ✅ Do NOT set defaults for roof_type, gauge, or building_type
+        // Let them be prompted if missing
 
         logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Final params");
         return params;
@@ -148,19 +153,24 @@ export class PriceParamsExtractorTool extends BaseTool {
         return "garage";
     }
 
-    private extractState(input: string): string | null {
-        for (const [pattern, stateName] of Object.entries(Constants.STATE_PATTERNS)) {
-            if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input)) {
-                logger.debug({ stateName }, "[extractState] Matched state");
-                return stateName;
-            }
-        }
-        logger.debug("[extractState] No state pattern matched");
-        return null;
-    }
+    // private extractState(input: string): string | null {
+    //     for (const [pattern, stateName] of Object.entries(Constants.STATE_PATTERNS)) {
+    //         if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input)) {
+    //             logger.debug({ stateName }, "[extractState] Matched state");
+    //             return stateName;
+    //         }
+    //     }
+    //     logger.debug("[extractState] No state pattern matched");
+    //     return null;
+    // }
 
-    private formatPricingResult(pricing: any, params: IPricingParams): string {
+    public formatPricingResult(pricing: any, params: IPricingParams): string {
         logger.info("[formatPricingResult] Formatting price quote");
+
+        if (!pricing || Object.keys(pricing).length === 0) {
+            logger.warn("[formatPricingResult] Empty pricing data, using fallback");
+            return this.formatFallbackPrice(params);
+        }
 
         const { total: kitPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
         const { total: finalTotal, breakdown: serviceBreakdown } = this.addServiceCosts(
@@ -264,6 +274,39 @@ export class PriceParamsExtractorTool extends BaseTool {
         }
 
         return lines;
+    }
+
+    private formatFallbackPrice(params: IPricingParams): string {
+        const sqft = params.width * params.length;
+
+        // ✅ Calculate price based on square footage
+        const basePrice = sqft * 120;  // $120 per sq ft as baseline
+        const laborCost = basePrice * 0.5;
+        const foundationCost = sqft * 8.5;
+        const deliveryCost = 750;
+        const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
+        const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
+
+        const roofName = Constants.ROOF_NAMES[params.roof_id] || "Standard";
+
+        return `✅ **Price Quote Generated!**
+
+📐 **Building Specifications:**
+   • Dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft (${sqft} sq ft)
+   • Roof Style: ${roofName}
+   • Gauge: ${params.gauge}GA
+
+💰 **ESTIMATED TOTAL PRICE: $${this.formatCurrency(finalTotal)}**
+
+📊 **Price Breakdown:**
+   • Base Building: $${this.formatCurrency(basePrice)}
+   • Installation Labor (50%): $${this.formatCurrency(laborCost)}
+   • Concrete Foundation: $${this.formatCurrency(foundationCost)}
+   • Delivery & Site Prep: $${this.formatCurrency(deliveryCost)}
+   • Contingency (5%): $${this.formatCurrency(contingency)}
+
+💡 *This is an estimate based on standard pricing.*
+*Actual pricing may vary by location and specific options.*`;
     }
 
     private calculateTotalPrice(pricing: any, params: IPricingParams): PricingBreakdown {
@@ -497,11 +540,9 @@ ${dimensionExplanation}
 6. Extract state if mentioned in input
 
 EXAMPLES:
-- Input: "5 car garage" → {"garage_type": "5-car", "width": 38, "length": 20, "height": 10}
-- Input: "10 cars" → {"garage_type": "10-car", "width": 68, "length": 20, "height": 10}
-- Input: "3 cars in texas" → {"garage_type": "3-car", "width": 26, "length": 20, "height": 10, "state_name": "texas"}
-- Input: "20x25x10 garage" → {"width": 20, "length": 25, "height": 10, "garage_type": null}
-- Input: "truck garage" → {"garage_type": "truck", "width": varies, "length": 24, "height": 12}
+- Input: "5 car garage" → {"garage_type": "5-car", "width": 38, "length": 20, "height": 10, "state_name": null, "roof_type": null, "gauge": null, "building_type": "garage"}
+- Input: "3 cars in texas with box roof" → {"garage_type": "3-car", "width": 26, "length": 20, "height": 10, "state_name": "Texas", "roof_type": "box", "gauge": null, "building_type": "garage"}
+- Input: "20x25x10" → {"width": 20, "length": 25, "height": 10, "state_name": null, "roof_type": null, "gauge": null, "building_type": null}
 
 OUTPUT FORMAT - Return ONLY valid JSON (no markdown, no explanation):
 {

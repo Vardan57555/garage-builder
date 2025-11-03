@@ -334,11 +334,11 @@ export class Constants
         "width",
         "length",
         "height",
-        "state_name",
+        "state_name",      // ← MUST include this
         "roof_type",
         "gauge",
         "building_type"
-    ]
+    ];
     public static readonly FIELD_PROMPTS: Record<keyof UserFriendlyParams, string> = {
         garage_type: "What type of garage do you need?",
         width: "What width do you need for your garage (in feet)?",
