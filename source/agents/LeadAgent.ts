@@ -87,9 +87,6 @@ export class LeadAgent {
                 return response;
             }
 
-            // ============================================================================
-            // ✅ POST-PRICE PHASE (when priceCalculated = true)
-            // ============================================================================
             if (session.state.priceCalculated) {
                 logger.info(`[LeadAgent] POST-PRICE PHASE - priceCalculated: true`);
                 logger.info(`[LeadAgent] Session basePrice: $${session.state.basePrice}`); // ✅ DEBUG LOG
@@ -254,9 +251,6 @@ Or **start over** to create a new quote.`;
                 return response;
             }
 
-            // ============================================================
-            // INITIAL QUOTE FLOW (Before first price calculation)
-            // ============================================================
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
             // ✅ Detect parameter update
@@ -289,7 +283,6 @@ Or **start over** to create a new quote.`;
             const response = result.response;
             await session.memory.chatHistory.addAIChatMessage(response);
 
-            // ✅ Update session with new state
             session.state.userFriendlyParams = result.userFriendlyParams;
             session.state.hasGarageIntent = result.hasGarageIntent;
             session.state.priceCalculated = result.priceCalculated || false;
@@ -297,7 +290,6 @@ Or **start over** to create a new quote.`;
             session.stateMapCache = result.stateMapCache;
             session.roofMapCache = result.roofMapCache;
 
-            // ✅ CRITICAL FIX: Save pricing data into session state
             if (result.priceCalculated && result.pricingData) {
                 session.state.pricingData = result.pricingData;
                 session.state.basePrice = result.basePrice || 0;

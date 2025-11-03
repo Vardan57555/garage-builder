@@ -26,14 +26,12 @@ export function buildLeadAgentGraph() {
         .addNode("ask_for_field", askForFieldNode)
         .addNode("calculate_price", calculatePriceNode)
         .addNode("show_addons", showAddonsNode)
-        .addNode("process_addons", processAddonsSelectionNode)  // ✅ This node processes "skip" OR addon selections
+        .addNode("process_addons", processAddonsSelectionNode)
         .addNode("handle_update", handleParameterUpdateNode)
         .addNode("handle_reset", handleResetNode)
 
-        // ✅ START
         .addEdge("__start__", "detect_intent")
 
-        // ✅ DETECT_INTENT → Extract or End
         .addConditionalEdges(
             "detect_intent",
             (state) => {
@@ -50,7 +48,6 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ DETECT_BUILDING_TYPE → Extract Parameters
         .addConditionalEdges(
             "detect_building_type",
             (state) => {
@@ -65,7 +62,6 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ EXTRACT_PARAMETERS → Check Missing or Handle Update
         .addConditionalEdges(
             "extract_parameters",
             (state) => {
@@ -81,7 +77,6 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ CHECK_MISSING_FIELDS → Calculate, Ask, or Update
         .addConditionalEdges(
             "check_missing_fields",
             (state) => {
@@ -97,10 +92,8 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ ASK_FOR_FIELD → Wait for user input
         .addEdge("ask_for_field", "__end__")
 
-        // ✅ CALCULATE_PRICE → Show Addons
         .addConditionalEdges(
             "calculate_price",
             (state) => {
@@ -115,8 +108,6 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ SHOW_ADDONS → Go to PROCESS_ADDONS (NOT END!)
-        // This is the KEY FIX - when user responds to addon menu, it goes to process_addons
         .addConditionalEdges(
             "show_addons",
             (state) => {
@@ -124,14 +115,13 @@ export function buildLeadAgentGraph() {
                 return state.nextStep || "__end__";  // First time: wait for user (END)
             },
             {
-                "process_addons": "process_addons",  // ✅ User responds → process it
+                "process_addons": "process_addons",
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
                 "__end__": "__end__",
             }
         )
 
-        // ✅ PROCESS_ADDONS → End (after showing final price)
         .addConditionalEdges(
             "process_addons",
             (state) => {
@@ -145,7 +135,6 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ HANDLE_UPDATE → Can go to multiple places
         .addConditionalEdges(
             "handle_update",
             (state) => {
@@ -161,7 +150,6 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ HANDLE_RESET → Back to start
         .addConditionalEdges(
             "handle_reset",
             (state) => {

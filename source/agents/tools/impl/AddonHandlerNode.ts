@@ -15,7 +15,6 @@ export interface AddonOption {
     description?: string;
 }
 
-// Available addons based on building specs
 export const ADDON_CATALOG: AddonOption[] = [
     {
         name: 'garage_door',
@@ -94,52 +93,6 @@ Return JSON:
         logger.error("[detectAddonsFromInput] Error:", error);
         return { addons: [], quantities: new Map() };
     }
-}
-
-/**
- * Detect addon updates in user input AFTER price calculated
- * Call this in LeadAgent.run() when priceCalculated=true
- */
-export async function detectAddonUpdateFromInput(
-    input: string
-): Promise<{ field: 'selectedAddons'; value: AddonSelection[] } | null> {
-    logger.info("[detectAddonUpdateFromInput] Checking for addon updates");
-
-    const addonPatterns = [
-        { name: 'garage_door', patterns: ['garage door', 'door'] },
-        { name: 'window', patterns: ['window', 'windows'] },
-        { name: 'walkin_door', patterns: ['walkin', 'walk in', 'personnel door'] },
-        { name: 'braces', patterns: ['brace', 'braces'] },
-        { name: 'cupola', patterns: ['cupola', 'ventilation'] },
-    ];
-
-    const quantityMatch = input.match(/(\d+)\s+(?:more|additional|extra)?/i);
-    const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 1;
-
-    for (const { name, patterns } of addonPatterns) {
-        if (patterns.some(p => new RegExp(p, 'i').test(input))) {
-            const catalogItem = ADDON_CATALOG.find(a => a.name === name);
-            if (!catalogItem) continue;
-
-            logger.info(`[detectAddonUpdateFromInput] Detected addon: ${name} x${quantity}`);
-
-            return {
-                field: 'selectedAddons',
-                value: [{
-                    name,
-                    label: catalogItem.label,
-                    quantity,
-                    cost: catalogItem.costPerUnit,
-                    totalCost: quantity * catalogItem.costPerUnit,
-                    type: catalogItem.type,
-                    id: "",
-                    description: ""
-                }]
-            };
-        }
-    }
-
-    return null;
 }
 
 export const askForAddonsNode = async (state: LeadAgentStateType) => {

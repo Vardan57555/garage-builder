@@ -66,7 +66,6 @@ export const LeadAgentState = Annotation.Root({
         default: () => null,
     }),
 
-    // ✅ ADD THESE MISSING FIELDS
     pricingData: Annotation<any>({
         value: (_, update) => update ?? null,
         default: () => null,
