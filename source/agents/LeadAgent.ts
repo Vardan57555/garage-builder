@@ -7,7 +7,6 @@ import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { leadAgentGraph } from "@agents/LeadAgentGraph";
 import {
-    detectAddonSelectionFromInput,
     detectParameterUpdateFromInput,
     detectResetIntent
 } from "@agents/tools/impl/DetectionHelpers";
@@ -88,17 +87,72 @@ export class LeadAgent {
                 return response;
             }
 
-            // ✅ NEW FIX: If price already calculated, check for ADDON selection FIRST
+            // ============================================================================
+            // ✅ POST-PRICE PHASE (when priceCalculated = true)
+            // ============================================================================
             if (session.state.priceCalculated) {
                 logger.info(`[LeadAgent] POST-PRICE PHASE - priceCalculated: true`);
+                logger.info(`[LeadAgent] Session basePrice: $${session.state.basePrice}`); // ✅ DEBUG LOG
 
-                // ✅ Check if this is an ADDON selection
-                const addonSelection = detectAddonSelectionFromInput(input);
+                // ✅ Get user input
+                const userInput = input.toLowerCase().trim();
 
-                if (addonSelection) {
-                    logger.info(`[LeadAgent] Detected addon selection:`, addonSelection);
+                // ✅ Check if user is trying to skip/decline addons
+                if (/(no|skip|none|without|don't|nope|nah)/i.test(userInput)) {
+                    logger.info(`[LeadAgent] User declined addons, showing final price`);
 
-                    // ✅ Go directly to process_addons
+                    const basePrice = session.state.basePrice || 0;
+
+                    // ✅ DEBUG: Log what we're working with
+                    logger.info(`[LeadAgent] Using basePrice: $${basePrice}`);
+                    logger.info(`[LeadAgent] Width: ${session.state.userFriendlyParams.width}, Length: ${session.state.userFriendlyParams.length}`);
+
+                    const sqft = session.state.userFriendlyParams.width! * session.state.userFriendlyParams.length!;
+                    const laborCost = basePrice * 0.5;
+                    const foundationCost = sqft * 8.5;
+                    const deliveryCost = 750;
+                    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
+                    const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
+
+                    const currentParams = LeadAgentHelpers.formatCurrentParams(session.state.userFriendlyParams);
+                    const response = `✅ **FINAL PRICE QUOTE**
+
+${currentParams}
+
+---
+
+📊 **Price Breakdown:**
+- Base Building: $${basePrice.toFixed(2)}
+- Installation Labor (50% of kit): $${laborCost.toFixed(2)}
+- Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
+- Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
+- Contingency & Misc (5%): $${contingency.toFixed(2)}
+
+---
+
+💰 **TOTAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
+
+---
+
+📝 This includes:
+  • Building kit and materials
+  • Installation labor
+  • Foundation slab preparation
+  • Delivery & site preparation
+
+🔧 Want to modify anything? (e.g., "change width to 30", "add more windows")
+Or **start over** to create a new quote.`;
+
+                    await session.memory.chatHistory.addAIChatMessage(response);
+                    session.state.finalPrice = finalTotal;
+                    return response;
+                }
+
+                // ✅ Check if user is trying to add addons (e.g., "add windows", "1, 2, 3")
+                const addonKeywords = /(add|window|door|brace|anchor|cupola|\d+)/i;
+                if (addonKeywords.test(userInput)) {
+                    logger.info(`[LeadAgent] User provided addon input: "${userInput}"`);
+
                     const result = await leadAgentGraph.invoke({
                         sessionId,
                         messages: await session.memory.chatHistory.getMessages(),
@@ -121,7 +175,7 @@ export class LeadAgent {
                     const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
 
-                    // ✅ Store results back in session
+                    // ✅ SAVE addon processing results
                     session.state.selectedAddons = result.selectedAddons || [];
                     session.state.finalPrice = result.finalPrice || 0;
 
@@ -129,8 +183,8 @@ export class LeadAgent {
                     return response;
                 }
 
-                // ✅ Only check for parameter updates if NOT addon selection
-                logger.info(`[LeadAgent] Not an addon selection, checking for parameter update`);
+                // ✅ Check for parameter updates (e.g., "change width to 25")
+                logger.info(`[LeadAgent] Checking for parameter updates`);
                 const update = await detectParameterUpdateFromInput(input);
 
                 if (update) {
@@ -158,18 +212,44 @@ export class LeadAgent {
                     const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
 
-                    // ✅ Update session with new state
+                    // ✅ SAVE update results
                     session.state.userFriendlyParams = result.userFriendlyParams;
                     session.state.priceCalculated = result.priceCalculated || false;
+
+                    // ✅ CRITICAL: If price was recalculated, save new pricing data
+                    if (result.priceCalculated && result.pricingData) {
+                        session.state.pricingData = result.pricingData;
+                        session.state.basePrice = result.basePrice || 0;
+                        session.state.finalPrice = result.finalPrice || 0;
+                        logger.info(`[LeadAgent] ✅ Updated pricing data after parameter change`);
+                        logger.info(`  - New basePrice: $${session.state.basePrice}`);
+                    }
 
                     return response;
                 }
 
-                // ✅ If neither addon nor parameter update
-                logger.info(`[LeadAgent] No addon or parameter update detected, showing current state`);
-                const currentParams = LeadAgentHelpers.formatCurrentParams(session.state.userFriendlyParams);
-                const response = `${currentParams}\n\nI didn't understand that. Would you like to:\n• Add optional features? (e.g., "add 2 windows", "add door")\n• Change a parameter? (e.g., "change width to 25")\n• Start over? (e.g., "new quote")`;
+                // ✅ If unclear, show addon menu again
+                logger.info(`[LeadAgent] Unclear input, showing addon menu again`);
+                const result = await leadAgentGraph.invoke({
+                    sessionId,
+                    messages: await session.memory.chatHistory.getMessages(),
+                    userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
+                    hasGarageIntent: session.state.hasGarageIntent,
+                    priceCalculated: true,
+                    currentField: null,
+                    validationError: null,
+                    response: "",
+                    nextStep: "show_addons",
+                    stateMapCache: session.stateMapCache || new Map(),
+                    roofMapCache: session.roofMapCache || new Map(),
+                    pendingUpdates: [],
+                    pricingData: session.state.pricingData || null,
+                    basePrice: session.state.basePrice || 0,
+                    selectedAddons: session.state.selectedAddons || [],
+                    finalPrice: session.state.finalPrice || 0,
+                });
 
+                const response = result.response;
                 await session.memory.chatHistory.addAIChatMessage(response);
                 return response;
             }
@@ -217,6 +297,19 @@ export class LeadAgent {
             session.stateMapCache = result.stateMapCache;
             session.roofMapCache = result.roofMapCache;
 
+            // ✅ CRITICAL FIX: Save pricing data into session state
+            if (result.priceCalculated && result.pricingData) {
+                session.state.pricingData = result.pricingData;
+                session.state.basePrice = result.basePrice || 0;
+                session.state.selectedAddons = result.selectedAddons || [];
+                session.state.finalPrice = result.finalPrice || 0;
+
+                logger.info(`[LeadAgent] ✅ Saved pricing data to session:`);
+                logger.info(`  - basePrice: $${session.state.basePrice}`);
+                logger.info(`  - finalPrice: $${session.state.finalPrice}`);
+                logger.info(`  - pricingData keys: ${Object.keys(result.pricingData || {}).join(', ')}`);
+            }
+
             logger.info(`[LeadAgent] Response sent, state updated`);
             return response;
         } catch (error) {
@@ -224,6 +317,7 @@ export class LeadAgent {
             return "❌ An error occurred. Please try again.";
         }
     }
+
 
     private getOrCreateSession(sessionId: string): LeadAgentSessionMetadata {
         const existing: any = this.sessionManager.getSession(sessionId);
@@ -249,7 +343,7 @@ export class LeadAgent {
                 priceCalculated: false,
                 pricingData: null,
                 basePrice: 0,
-                selectedAddons: [] as GraphAddon[],  // ✅ CHANGED: Use GraphAddon
+                selectedAddons: [] as GraphAddon[],
                 finalPrice: 0,
             },
             stateMapCache: new Map(),

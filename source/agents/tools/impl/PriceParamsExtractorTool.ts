@@ -98,7 +98,6 @@ export class PriceParamsExtractorTool extends BaseTool {
     ): Partial<UserFriendlyParams> {
         const input: string = userInput.toLowerCase();
 
-        // Only infer dimensions if user provided car count
         if (!this.hasDimensions(params)) {
             const garageType: string = params.garage_type || this.detectGarageType(input);
             const standardDims = this.getStandardDimensions(garageType);
@@ -113,19 +112,6 @@ export class PriceParamsExtractorTool extends BaseTool {
             Object.assign(params, standardDims);
             params.garage_type = garageType;
         }
-
-        // ✅ REMOVE ALL STATE INFERENCE - Do NOT call extractState()
-        // Let the system ask for state if missing
-        // if (!params.state_name) {
-        //     const extractedState = this.extractState(input);
-        //     if (extractedState) {
-        //         logger.info({ state: extractedState }, "[validateAndInferMissingParams] Extracted state from input");
-        //         params.state_name = extractedState;
-        //     }
-        // }
-
-        // ✅ Do NOT set defaults for roof_type, gauge, or building_type
-        // Let them be prompted if missing
 
         logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Final params");
         return params;
@@ -153,19 +139,15 @@ export class PriceParamsExtractorTool extends BaseTool {
         return "garage";
     }
 
-    // private extractState(input: string): string | null {
-    //     for (const [pattern, stateName] of Object.entries(Constants.STATE_PATTERNS)) {
-    //         if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input)) {
-    //             logger.debug({ stateName }, "[extractState] Matched state");
-    //             return stateName;
-    //         }
-    //     }
-    //     logger.debug("[extractState] No state pattern matched");
-    //     return null;
-    // }
-
     public formatPricingResult(pricing: any, params: IPricingParams): string {
         logger.info("[formatPricingResult] Formatting price quote");
+        logger.info("[formatPricingResult] Input pricing keys:", Object.keys(pricing || {}));
+        logger.info("[formatPricingResult] Base prices:", {
+            vertical: pricing.base_price_vertical,
+            box: pricing.base_price_box,
+            regular: pricing.base_price_regular
+        });
+        logger.info("[formatPricingResult] Params roof_id:", params.roof_id);
 
         if (!pricing || Object.keys(pricing).length === 0) {
             logger.warn("[formatPricingResult] Empty pricing data, using fallback");
@@ -173,6 +155,9 @@ export class PriceParamsExtractorTool extends BaseTool {
         }
 
         const { total: kitPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
+
+        logger.info("[formatPricingResult] Calculated:", { kitPrice, roofPrice });
+
         const { total: finalTotal, breakdown: serviceBreakdown } = this.addServiceCosts(
             kitPrice,
             params
@@ -278,9 +263,7 @@ export class PriceParamsExtractorTool extends BaseTool {
 
     private formatFallbackPrice(params: IPricingParams): string {
         const sqft = params.width * params.length;
-
-        // ✅ Calculate price based on square footage
-        const basePrice = sqft * 120;  // $120 per sq ft as baseline
+        const basePrice = sqft * 120;
         const laborCost = basePrice * 0.5;
         const foundationCost = sqft * 8.5;
         const deliveryCost = 750;
@@ -309,7 +292,8 @@ export class PriceParamsExtractorTool extends BaseTool {
 *Actual pricing may vary by location and specific options.*`;
     }
 
-    private calculateTotalPrice(pricing: any, params: IPricingParams): PricingBreakdown {
+    // ✅ MADE PUBLIC so PriceCalculationNode can use it
+    public calculateTotalPrice(pricing: any, params: IPricingParams): PricingBreakdown {
         const roofPrice: number = this.selectRoofPrice(params.roof_id, pricing);
         let total: number = roofPrice;
 
@@ -330,16 +314,23 @@ export class PriceParamsExtractorTool extends BaseTool {
     }
 
     private selectRoofPrice(roofId: number, pricing: any): number {
+        // ✅ CORRECT MAPPING based on Constants.ROOF_NAMES
         const fieldMap: Record<number, string> = {
-            1: "base_price_vertical",
-            2: "base_price_box",
-            3: "base_price_regular",
+            1: "base_price_vertical",   // roof_id 1 = Vertical
+            2: "base_price_regular",    // roof_id 2 = Regular
+            3: "base_price_box",        // roof_id 3 = Boxed-Eave
         };
 
         const field: string = fieldMap[roofId] ?? "base_price_regular";
         const price = pricing[field] ?? pricing.base_price_regular ?? 0;
 
-        logger.debug({ roofId, field, price }, "[selectRoofPrice] Selected roof price");
+        logger.debug({
+            roofId,
+            field,
+            price,
+            availableFields: Object.keys(pricing).filter(k => k.includes('base_price'))
+        }, "[selectRoofPrice] Selected roof price");
+
         return price;
     }
 

@@ -1,6 +1,5 @@
 import { PriceParamsExtractorTool } from "@agents/tools/impl/PriceParamsExtractorTool";
 import { IPricingParams } from "@modules/price-service/services/io/IPrice";
-import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
@@ -9,58 +8,41 @@ import { LeadAgentStateType } from "@agents/LeadAgentState";
 const logger: pino.Logger = createLogger(module);
 
 async function convertToTechnicalParams(
-    userParams: Partial<UserFriendlyParams>,
+    userParams: any,
     stateMapCache: Map<string, any>,
     roofMapCache: Map<string, number>
 ): Promise<IPricingParams | null> {
+    // Use your actual implementation from your LeadAgent or LeadAgentHelpers
     try {
-        let map_id: number = 1;
-        let manufacturer_id: number = 1;
+        let map_id = 1;
+        let manufacturer_id = 1;
 
         if (userParams.state_name) {
-            logger.info(`[convertToTechnicalParams] Mapping state: ${userParams.state_name}`);
-
             const mapping = await LeadAgentHelpers.mapStateToDB(userParams.state_name, stateMapCache);
             if (mapping) {
                 map_id = mapping.map_id;
                 manufacturer_id = mapping.manufacturer_id;
-                logger.info(`[convertToTechnicalParams] Mapped to map_id: ${map_id}, manufacturer_id: ${manufacturer_id}`);
-            } else {
-                logger.warn(`[convertToTechnicalParams] State not found, using default map_id: 1`);
             }
         }
 
-        const roof_id: number = userParams.roof_type
+        const roof_id = userParams.roof_type
             ? await LeadAgentHelpers.mapRoofTypeToDB(userParams.roof_type, map_id, roofMapCache)
             : 2;
 
-        logger.info(`[convertToTechnicalParams] Roof type mapped to roof_id: ${roof_id}`);
-
-        const technicalParams: IPricingParams = {
-            width: userParams.width ?? 0,
-            length: userParams.length ?? 0,
-            height: userParams.height ?? 0,
+        return {
+            width: userParams.width,
+            length: userParams.length,
+            height: userParams.height,
             map_id,
             roof_id,
             manufacturer_id,
-            utility_length: userParams.utility_length,
-            building_type: userParams.building_type,
             gauge: userParams.gauge ?? 14,
+            building_type: userParams.building_type,
+            utility_length: userParams.utility_length,
             is_barn: userParams.is_barn,
         };
-
-        logger.info(`[convertToTechnicalParams] Final technical params:`, {
-            width: technicalParams.width,
-            length: technicalParams.length,
-            height: technicalParams.height,
-            map_id: technicalParams.map_id,
-            roof_id: technicalParams.roof_id,
-            gauge: technicalParams.gauge,
-        });
-
-        return technicalParams;
     } catch (error) {
-        logger.error("[convertToTechnicalParams] Param conversion failed:", error);
+        logger.error("[convertToTechnicalParams] Error:", error);
         return null;
     }
 }
@@ -70,9 +52,9 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
     logger.info(`[PriceNode] User params:`, state.userFriendlyParams);
 
     try {
-        // ✅ STEP 1: Convert user params to technical params
+        // Convert to technical params
         const technicalParams = await convertToTechnicalParams(
-            state.userFriendlyParams as Partial<UserFriendlyParams>,
+            state.userFriendlyParams,
             state.stateMapCache,
             state.roofMapCache
         );
@@ -82,81 +64,82 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
             return {
                 response: "❌ Failed to convert parameters to technical format.",
                 nextStep: "__end__",
-                userFriendlyParams: state.userFriendlyParams,
                 priceCalculated: false,
-                pricingData: null,
-                basePrice: 0,
-                selectedAddons: [],
-                finalPrice: 0,
             };
         }
 
         logger.info(`[PriceNode] Technical params converted successfully`);
 
-        // ✅ STEP 2: Call pricing service to get pricing data
-        logger.info(`[PriceNode] Calling pricing service...`);
-
+        // Get pricing from service
         const { PriceServiceImpl } = await import("@modules/price-service/services/impl/PriceServiceImpl");
         const priceService = PriceServiceImpl.getInstance();
 
-        // ✅ Get RAW pricing data (not just formatted quote)
         const rawPricingData = await priceService.fetchBuildingPricingWithUtility(technicalParams);
 
-        logger.info(`[PriceNode] Raw pricing data received`);
-        logger.info(`[PriceNode] Pricing data keys:`, Object.keys(rawPricingData || {}));
-
-        // ✅ Check if we got valid pricing
-        if (!rawPricingData || (rawPricingData.status === false)) {
+        if (!rawPricingData || rawPricingData.status === false) {
             logger.warn(`[PriceNode] Invalid pricing data:`, rawPricingData);
             return {
                 response: rawPricingData?.message || "❌ Failed to calculate price.",
                 nextStep: "__end__",
-                userFriendlyParams: state.userFriendlyParams,
                 priceCalculated: false,
-                pricingData: null,
-                basePrice: 0,
-                selectedAddons: [],
-                finalPrice: 0,
             };
         }
 
-        // ✅ STEP 3: Extract base price from raw data
-        const basePrice = rawPricingData.base_price_vertical ??
-            rawPricingData.base_price_regular ??
-            rawPricingData.base_price_box ?? 0;
-
-        logger.info(`[PriceNode] Base price extracted: $${basePrice.toFixed(2)}`);
-
-        // ✅ STEP 4: Format price for display
+        // Calculate total price
         const extractor = PriceParamsExtractorTool.getInstance();
-        const formattedPrice = extractor.formatPricingResult(rawPricingData, technicalParams);
+        const { total: kitPrice } = extractor.calculateTotalPrice(rawPricingData, technicalParams);
 
-        logger.info(`[PriceNode] Price formatted successfully`);
-        logger.info(`[PriceNode] Formatted price length: ${formattedPrice.length} chars`);
+        logger.info(`[PriceNode] Kit price calculated: $${kitPrice.toFixed(2)}`);
 
-        // ✅ STEP 5: Return with all necessary data stored
+        // Format the COMPLETE price breakdown for display
+        const formattedPrice = formatCompletePrice(kitPrice, state.userFriendlyParams);
+
+        // ✅ REMOVED: await session.memory.chatHistory.addAIChatMessage(formattedPrice);
+        // This is handled by LeadAgent.run() after the graph returns
+
         return {
             response: formattedPrice,
             userFriendlyParams: state.userFriendlyParams,
-            pricingData: rawPricingData,      // ← Store full pricing data
-            basePrice: basePrice,              // ← Store base price
+            pricingData: rawPricingData,
+            basePrice: kitPrice,
             priceCalculated: true,
             currentField: null,
-            nextStep: "show_addons",           // ← Go to show addons
+            nextStep: "show_addons",
             selectedAddons: [],
-            finalPrice: basePrice,             // Initial final price (before addons)
+            finalPrice: kitPrice,
         };
     } catch (error) {
         logger.error(`[PriceNode] Error:`, error);
         return {
             response: `❌ Failed to calculate price: ${error instanceof Error ? error.message : 'Unknown error'}`,
             nextStep: "__end__",
-            userFriendlyParams: state.userFriendlyParams,
             priceCalculated: false,
-            pricingData: null,
-            basePrice: 0,
-            selectedAddons: [],
-            finalPrice: 0,
         };
     }
 };
+
+function formatCompletePrice(kitPrice: number, params: any): string {
+    const sqft = params.width * params.length;
+    const laborCost = kitPrice * 0.5;
+    const foundationCost = sqft * 8.5;
+    const deliveryCost = 750;
+    const contingency = (kitPrice + laborCost + foundationCost + deliveryCost) * 0.05;
+    const finalTotal = kitPrice + laborCost + foundationCost + deliveryCost + contingency;
+
+    const currentParams = LeadAgentHelpers.formatCurrentParams(params);
+
+    return `${currentParams}
+
+📊 **PRICE BREAKDOWN:**
+
+• Base Building Kit: $${kitPrice.toFixed(2)}
+• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
+• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
+• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
+• Contingency & Misc (5%): $${contingency.toFixed(2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 **TOTAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+}
+

@@ -26,7 +26,7 @@ export function buildLeadAgentGraph() {
         .addNode("ask_for_field", askForFieldNode)
         .addNode("calculate_price", calculatePriceNode)
         .addNode("show_addons", showAddonsNode)
-        .addNode("process_addons", processAddonsSelectionNode)
+        .addNode("process_addons", processAddonsSelectionNode)  // ✅ This node processes "skip" OR addon selections
         .addNode("handle_update", handleParameterUpdateNode)
         .addNode("handle_reset", handleResetNode)
 
@@ -115,22 +115,23 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ SHOW_ADDONS → Wait for user input
+        // ✅ SHOW_ADDONS → Go to PROCESS_ADDONS (NOT END!)
+        // This is the KEY FIX - when user responds to addon menu, it goes to process_addons
         .addConditionalEdges(
             "show_addons",
             (state) => {
                 logger.debug(`[show_addons] nextStep=${state.nextStep}`);
-                return state.nextStep || "__end__";
+                return state.nextStep || "__end__";  // First time: wait for user (END)
             },
             {
-                "process_addons": "process_addons",
+                "process_addons": "process_addons",  // ✅ User responds → process it
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
                 "__end__": "__end__",
             }
         )
 
-        // ✅ PROCESS_ADDONS → End
+        // ✅ PROCESS_ADDONS → End (after showing final price)
         .addConditionalEdges(
             "process_addons",
             (state) => {
