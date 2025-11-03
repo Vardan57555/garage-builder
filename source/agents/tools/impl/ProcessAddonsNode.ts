@@ -11,13 +11,20 @@ const logger: pino.Logger = createLogger(module);
  */
 function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
     const selected: any[] = [];
+    const lowerInput = userInput.toLowerCase();
 
+    logger.info(`[parseAddonSelections] Parsing: "${userInput}"`);
+
+    // ✅ METHOD 1: Number selection (e.g., "1" or "1, 2" or "1 and 2")
     const numberMatches = userInput.match(/\d+/g);
     if (numberMatches && numberMatches.length > 0) {
+        logger.info(`[parseAddonSelections] Found numbers: ${numberMatches.join(", ")}`);
+
         const uniqueNumbers = new Set<number>();
         numberMatches.forEach((numStr) => {
             const index = parseInt(numStr) - 1;
             if (index >= 0 && index < addonsMenu.length) {
+                logger.info(`[parseAddonSelections] Adding addon at index ${index}`);
                 uniqueNumbers.add(index);
             }
         });
@@ -25,31 +32,75 @@ function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
         if (uniqueNumbers.size > 0) {
             uniqueNumbers.forEach((idx) => {
                 selected.push(addonsMenu[idx]);
+                logger.info(`[parseAddonSelections] Selected: ${addonsMenu[idx].label}`);
             });
             return selected;
         }
     }
 
-    const lowerInput = userInput.toLowerCase();
-    if (/window/i.test(lowerInput)) {
-        selected.push(...addonsMenu.filter((a) => /window/i.test(a.label)));
-    }
-    if (/door/i.test(lowerInput)) {
-        selected.push(...addonsMenu.filter((a) => /door/i.test(a.label) && !/walk/i.test(a.label)));
-    }
-    if (/walk.?in/i.test(lowerInput)) {
-        selected.push(...addonsMenu.filter((a) => /walk.?in/i.test(a.label)));
-    }
-    if (/brace|anchor/i.test(lowerInput)) {
-        selected.push(...addonsMenu.filter((a) => /brace|anchor/i.test(a.label)));
+    // ✅ METHOD 2: Keyword selection with quantity (e.g., "2 windows", "also 2 windows")
+
+    // Extract quantity if mentioned
+    const quantityMatch = userInput.match(/(\d+)\s*(window|door|brace|anchor|cupola|garage door|walk)/i);
+    let quantity = 1;
+    if (quantityMatch) {
+        quantity = parseInt(quantityMatch[1], 10);
+        logger.info(`[parseAddonSelections] Found quantity: ${quantity}`);
     }
 
+    // Check for window selections
+    if (/window/i.test(lowerInput)) {
+        logger.info(`[parseAddonSelections] User wants ${quantity} window(s)`);
+        const windowAddons = addonsMenu.filter((a) => /window/i.test(a.label));
+
+        for (let i = 0; i < Math.min(quantity, windowAddons.length); i++) {
+            selected.push(windowAddons[i]);
+            logger.info(`[parseAddonSelections] Added window: ${windowAddons[i].label}`);
+        }
+    }
+
+    // Check for door selections
+    if (/door/i.test(lowerInput) && !/walk/i.test(lowerInput)) {
+        logger.info(`[parseAddonSelections] User wants ${quantity} door(s)`);
+        const doorAddons = addonsMenu.filter((a) => /door/i.test(a.label) && !/walk/i.test(a.label));
+
+        for (let i = 0; i < Math.min(quantity, doorAddons.length); i++) {
+            selected.push(doorAddons[i]);
+            logger.info(`[parseAddonSelections] Added door: ${doorAddons[i].label}`);
+        }
+    }
+
+    // Check for walk-in selections
+    if (/walk.?in/i.test(lowerInput)) {
+        logger.info(`[parseAddonSelections] User wants ${quantity} walk-in door(s)`);
+        const walkinAddons = addonsMenu.filter((a) => /walk.?in/i.test(a.label));
+
+        for (let i = 0; i < Math.min(quantity, walkinAddons.length); i++) {
+            selected.push(walkinAddons[i]);
+            logger.info(`[parseAddonSelections] Added walk-in: ${walkinAddons[i].label}`);
+        }
+    }
+
+    // Check for brace selections
+    if (/brace|anchor/i.test(lowerInput)) {
+        logger.info(`[parseAddonSelections] User wants ${quantity} brace(s)`);
+        const braceAddons = addonsMenu.filter((a) => /brace|anchor/i.test(a.label));
+
+        for (let i = 0; i < Math.min(quantity, braceAddons.length); i++) {
+            selected.push(braceAddons[i]);
+            logger.info(`[parseAddonSelections] Added brace: ${braceAddons[i].label}`);
+        }
+    }
+
+    // Remove duplicates by ID
     const uniqueMap = new Map();
     selected.forEach((addon) => {
         uniqueMap.set(addon.id, addon);
     });
 
-    return Array.from(uniqueMap.values());
+    const finalSelected = Array.from(uniqueMap.values());
+    logger.info(`[parseAddonSelections] Final selected count: ${finalSelected.length}`);
+    return finalSelected;
 }
 
 /**
@@ -68,6 +119,7 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
             };
         }
 
+        // Check if user declined addons
         if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
             logger.info(`[ProcessAddonsNode] User declined addons`);
 
@@ -90,6 +142,7 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
         }
 
         if (!state.pricingData) {
+            logger.error(`[ProcessAddonsNode] No pricing data available`);
             return {
                 response: "❌ Error: No pricing data available.",
                 nextStep: "__end__",
@@ -97,10 +150,16 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
         }
 
         const addonsMenu = buildAddonsMenuFromPricing(state.pricingData);
-        const selectedAddons = parseAddonSelections(userInput, addonsMenu);
+        logger.info(`[ProcessAddonsNode] Available addons: ${addonsMenu.length}`);
 
-        const addonTotal = selectedAddons.reduce((sum, addon) => sum + addon.cost, 0);
+        const selectedAddons = parseAddonSelections(userInput, addonsMenu);
+        logger.info(`[ProcessAddonsNode] User selected: ${selectedAddons.length} addon(s)`);
+
+        // Calculate addon total
+        const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
         const finalTotal = (state.basePrice || 0) + addonTotal;
+
+        logger.info(`[ProcessAddonsNode] Base price: $${state.basePrice}, Addon total: $${addonTotal}, Final: $${finalTotal}`);
 
         const response = formatFinalPrice(
             state.userFriendlyParams,
@@ -135,35 +194,66 @@ function formatFinalPrice(
     finalTotal: number
 ): string {
     const currentParams = LeadAgentHelpers.formatCurrentParams(params);
+
+    // Calculate service costs
+    const sqft = (params.width || 0) * (params.length || 0);
+    const laborCost = basePrice * 0.5;
+    const foundationCost = sqft * 8.5;
+    const deliveryCost = 750;
+    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
+    const totalWithServices = basePrice + laborCost + foundationCost + deliveryCost + contingency;
+    const grandTotal = totalWithServices + addonTotal;
+
     let response = `${currentParams}
 
-📊 **Price Summary:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 **DETAILED PRICE BREAKDOWN:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-• Base Building (including all services): $${basePrice.toFixed(2)}`;
+**Building Kit & Materials:**
+• Base Building Package: $${basePrice.toFixed(2)}
+
+**Installation & Construction:**
+• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
+• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
+• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
+• Contingency & Misc (5%): $${contingency.toFixed(2)}
+
+**Subtotal (Building + Services): $${totalWithServices.toFixed(2)}**`;
 
     if (selectedAddons.length > 0) {
-        response += `\n\n**Selected Add-ons:**`;
+        response += `
+
+**Selected Add-ons:**`;
         selectedAddons.forEach((addon) => {
-            response += `\n  • ${addon.label}: $${addon.cost.toFixed(2)}`;
+            response += `\n  • ${addon.label}: $${(addon.cost || 0).toFixed(2)}`;
         });
-        response += `\n\n• Add-ons Total: +$${addonTotal.toFixed(2)}`;
+        response += `\n\n**Add-ons Total: +$${addonTotal.toFixed(2)}**`;
     }
 
     response += `
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **FINAL PRICE: $${finalTotal.toFixed(2)}**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 **FINAL ESTIMATED PRICE: $${grandTotal.toFixed(2)}**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📝 This includes:
+✅ **What's Included:**
   • Building kit and materials
-  • Installation labor
-  • Foundation slab preparation
+  • Professional installation labor
+  • Foundation slab preparation (concrete)
   • Delivery & site preparation
-${selectedAddons.length > 0 ? `  • Selected add-ons (${selectedAddons.length} items)` : ''}
+  • 5% contingency for unforeseen costs
+${selectedAddons.length > 0 ? `  • ${selectedAddons.length} selected add-on(s)` : ''}
 
-🔧 Want to modify anything? (e.g., "change width to 30", "add more windows")
-Or **start over** to create a new quote.`;
+📞 **Next Steps:**
+Contact us to finalize your order and discuss:
+  • Custom modifications
+  • Financing options
+  • Installation timeline
+  • Warranty details
+
+🔧 **Want to modify anything?**
+Say "start over" to create a new quote.`;
 
     return response;
 }

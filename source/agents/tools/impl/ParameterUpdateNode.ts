@@ -1,7 +1,3 @@
-// ============================================================================
-// FILE: handleParameterUpdateNode.ts (COMPLETE FIX)
-// ============================================================================
-
 import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
@@ -9,6 +5,8 @@ import { RoofDataValidator } from "@agents/validators/RoofValidator";
 import { StateDataValidator } from "@agents/validators/StateValidator";
 import { GenericChoiceManager } from "@agents/tools/impl/ChoiceHandler";
 import { DynamicGarageDimensionCalculator } from "@utils/dimensionCalculator/DimensionCalculator";
+import { HumanMessage } from "@langchain/core/messages";
+import { sharedLLM } from "@llm/SharedLLM";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 
@@ -21,6 +19,161 @@ interface UpdateResult {
     updatedParams?: Partial<UserFriendlyParams>;
 }
 
+async function extractFieldValueWithLLM(
+    userInput: string,
+    field: keyof UserFriendlyParams,
+    currentParams: Partial<UserFriendlyParams>
+): Promise<any> {
+    try {
+        logger.info(`[extractFieldValueWithLLM] Extracting ${field} from: "${userInput}"`);
+
+        // ✅ Check for indecision patterns FIRST
+        const indecisionPatterns = [
+            /\b(any|whatever|anyways|idk|i don't know|doesn't matter|don't care|idc|no preference|surprise me|you pick|all the same|doesn't matter|whatever's fine)\b/i,
+            /^(any|whatever|idk|hmm|um|uh)$/i,
+        ];
+
+        const isIndecisive = indecisionPatterns.some(p => p.test(userInput));
+
+        if (isIndecisive) {
+            logger.info(`[extractFieldValueWithLLM] ✅ Detected indecision: "${userInput}"`);
+
+            // Return balanced defaults
+            const defaults: Record<keyof UserFriendlyParams, any> = {
+                roof_type: "regular",      // Most balanced (middle option)
+                gauge: 16,                 // Most common gauge
+                building_type: "garage",   // Most common building type
+                state_name: null,          // Can't default for state - needs user input
+                width: null,
+                length: null,
+                height: null,
+                garage_type: null,
+                manufacturer_name: null,
+                utility_length: null,
+                is_barn: null,
+            };
+
+            const defaultValue = defaults[field];
+
+            if (defaultValue === null) {
+                logger.warn(`[extractFieldValueWithLLM] No default for field: ${field}, returning null`);
+                return null;
+            }
+
+            logger.info(`[extractFieldValueWithLLM] ✅ Returning default for ${field}: ${defaultValue}`);
+            return defaultValue;
+        }
+
+        // Build locked fields context
+        let lockedContext = "Already extracted (do NOT override):";
+        if (currentParams.width) lockedContext += `\n  - width: ${currentParams.width}ft`;
+        if (currentParams.length) lockedContext += `\n  - length: ${currentParams.length}ft`;
+        if (currentParams.height) lockedContext += `\n  - height: ${currentParams.height}ft`;
+        if (currentParams.state_name) lockedContext += `\n  - state_name: "${currentParams.state_name}"`;
+        if (currentParams.roof_type) lockedContext += `\n  - roof_type: "${currentParams.roof_type}"`;
+        if (currentParams.gauge) lockedContext += `\n  - gauge: ${currentParams.gauge}`;
+        if (currentParams.garage_type) lockedContext += `\n  - garage_type: "${currentParams.garage_type}"`;
+
+        let fieldInstructions = "";
+        let exampleOutput = "";
+
+        switch (field) {
+            case "width":
+                fieldInstructions = `Extract WIDTH in feet as a number. Valid range: 1-100.`;
+                exampleOutput = `USER: "change width to 20" → OUTPUT: 20\nUSER: "make it 30 feet" → OUTPUT: 30`;
+                break;
+            case "length":
+                fieldInstructions = `Extract LENGTH in feet as a number. Valid range: 1-200.`;
+                exampleOutput = `USER: "30 feet long" → OUTPUT: 30\nUSER: "length 40" → OUTPUT: 40`;
+                break;
+            case "height":
+                fieldInstructions = `Extract HEIGHT in feet as a number. Valid range: 1-30.`;
+                exampleOutput = `USER: "12 feet tall" → OUTPUT: 12\nUSER: "height 10" → OUTPUT: 10`;
+                break;
+            case "gauge":
+                fieldInstructions = `Extract GAUGE as a number. VALID ONLY: 14, 16, 18, 20. If user says "any"/"idk"/etc, return 16 (default).`;
+                exampleOutput = `USER: "14GA" → OUTPUT: 14\nUSER: "gauge 18" → OUTPUT: 18\nUSER: "any" → OUTPUT: 16`;
+                break;
+            case "state_name":
+                fieldInstructions = `Extract STATE NAME as text. Examples: Texas, California, New York`;
+                exampleOutput = `USER: "I'm in Texas" → OUTPUT: Texas\nUSER: "California" → OUTPUT: California`;
+                break;
+            case "roof_type":
+                fieldInstructions = `Extract ROOF TYPE. VALID ONLY: vertical, regular, box, a-frame. If user says "any"/"idk"/etc, return "regular" (default).`;
+                exampleOutput = `USER: "I want vertical" → OUTPUT: vertical\nUSER: "box roof" → OUTPUT: box\nUSER: "any" → OUTPUT: regular`;
+                break;
+            case "building_type":
+                fieldInstructions = `Extract BUILDING TYPE. Valid: garage, shed, barn. If user says "any"/"idk"/etc, return "garage" (default).`;
+                exampleOutput = `USER: "make it 3 car" → OUTPUT: 3-car\nUSER: "any" → OUTPUT: garage`;
+                break;
+            default:
+                fieldInstructions = `Extract ${field}`;
+                exampleOutput = `OUTPUT: value`;
+        }
+
+        const prompt = `CRITICAL: You are ONLY extracting a single value. NO EXPLANATIONS. NO CODE.
+
+FIELD: ${field}
+INSTRUCTION: ${fieldInstructions}
+
+${lockedContext}
+
+⚠️ STRICT RULES:
+1. Return ONLY the value - nothing else
+2. NO explanations, NO code, NO comments
+3. NO markdown, NO JSON structure
+4. If user expresses indecision ("any", "idk", "whatever", etc), return the DEFAULT for this field
+5. If user mentions different field, return: null
+6. If cannot extract, return: null
+
+EXAMPLES:
+${exampleOutput}
+
+USER INPUT: "${userInput}"
+
+RETURN ONLY THE VALUE:`;
+
+        logger.info(`[extractFieldValueWithLLM] Calling LLM for field extraction`);
+        const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+        let value = response.trim().toLowerCase();
+
+        logger.info(`[extractFieldValueWithLLM] Raw response: "${value}"`);
+
+        // ✅ STRICT VALIDATION - reject if response contains code/markdown indicators
+        if (
+            value.includes("def ") ||
+            value.includes("import ") ||
+            value.includes("```") ||
+            value.includes("function ") ||
+            value.includes("const ") ||
+            value.includes("let ") ||
+            value.includes("class ") ||
+            value.includes(".replace") ||
+            value.includes("pattern ") ||
+            value.includes("regex") ||
+            value.length > 100  // Values should be short
+        ) {
+            logger.warn(
+                `[extractFieldValueWithLLM] Invalid response (looks like code): "${value.substring(0, 50)}..."`
+            );
+            return null;
+        }
+
+        // Parse the response
+        if (value === "null" || value === "" || value === "undefined" || value === "none") {
+            logger.info(`[extractFieldValueWithLLM] No value extracted for ${field}`);
+            return null;
+        }
+
+        logger.info(`[extractFieldValueWithLLM] ✅ Extracted ${field}: ${value}`);
+        return value;
+    } catch (error) {
+        logger.error(`[extractFieldValueWithLLM] Error:`, error);
+        return null;
+    }
+}
+
 async function validateParameterValue(
     field: keyof UserFriendlyParams,
     value: any,
@@ -29,7 +182,7 @@ async function validateParameterValue(
     if (field === "roof_type") {
         const validationResult = await RoofDataValidator.validateRoofType(value);
         if (!validationResult.isValid) {
-            return `❌ "${value}" is not valid`;
+            return `❌ "${value}" is not a valid roof type (vertical, regular, box, a-frame)`;
         }
     }
 
@@ -39,7 +192,7 @@ async function validateParameterValue(
             async (name: string) => await LeadAgentHelpers.mapStateToDB(name, stateMapCache)
         );
         if (!validationResult.isValid) {
-            return `❌ "${value}" is not valid`;
+            return `❌ "${value}" is not a valid state`;
         }
     }
 
@@ -54,7 +207,12 @@ async function validateParameterValue(
         }
 
         if (isNaN(numValue) || numValue <= 0) {
-            return `❌ Invalid ${field}`;
+            return `❌ Invalid ${field}: must be a positive number`;
+        }
+
+        // Gauge validation
+        if (field === "gauge" && ![14, 16, 18, 20].includes(numValue)) {
+            return `❌ Invalid gauge. Must be 14, 16, 18, or 20`;
         }
     }
 
@@ -121,7 +279,6 @@ function applyParameterUpdate(
             };
         }
 
-        // ✅ This now works - no type error
         updatedParams[field] = numValue;
         logger.info(`[applyParameterUpdate] Set ${field} = ${numValue}`);
 
@@ -133,7 +290,6 @@ function applyParameterUpdate(
     }
 
     // String fields
-    // ✅ This now works - no type error
     updatedParams[field] = String(value).trim();
 
     logger.info(`[applyParameterUpdate] Set ${field} = ${String(value).trim()}`);
@@ -149,15 +305,33 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
     logger.info(`[UpdateNode] Pending updates: ${state.pendingUpdates.length}`);
 
     if (state.pendingUpdates && state.pendingUpdates.length > 0) {
-        // ✅ Use Record type here too
         let updatedParams: Record<keyof UserFriendlyParams, any> = {
             ...state.userFriendlyParams
         } as Record<keyof UserFriendlyParams, any>;
 
         const updateMessages: string[] = [];
 
+        // ✅ Get current user input
+        const userInput = state.messages[state.messages.length - 1]?.content as string;
+
         for (const update of state.pendingUpdates) {
             logger.info(`[UpdateNode] Processing: ${update.field} = ${update.value}`);
+
+            // ✅ NEW: Use LLM to extract field-specific value
+            // This prevents "Vertical" from being interpreted as state_name
+            const extractedValue = await extractFieldValueWithLLM(
+                userInput,
+                update.field,
+                updatedParams as Partial<UserFriendlyParams>
+            );
+
+            if (extractedValue === null) {
+                logger.warn(`[UpdateNode] Could not extract ${update.field} from input`);
+                continue;
+            }
+
+            // Use extracted value instead of detection value
+            update.value = extractedValue;
 
             // Validate
             const validationError = await validateParameterValue(
@@ -170,7 +344,7 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
                 logger.warn(`[UpdateNode] Validation failed: ${validationError}`);
                 return {
                     response: validationError,
-                    userFriendlyParams: state.userFriendlyParams,
+                    userFriendlyParams: updatedParams as Partial<UserFriendlyParams>,
                     currentField: update.field,
                     nextStep: "ask_for_field",
                     pendingUpdates: [],

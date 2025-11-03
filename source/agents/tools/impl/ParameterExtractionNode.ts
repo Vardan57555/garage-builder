@@ -22,7 +22,6 @@ async function extractParametersWithUnifiedPrompt(
     try {
         logger.info(`[extractParametersWithUnifiedPrompt] Processing context (${context.length} chars)`);
         logger.info(`[extractParametersWithUnifiedPrompt] Current field: ${currentField}`);
-        logger.info(`[extractParametersWithUnifiedPrompt] Current params:`, currentParams);
 
         const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(context);
 
@@ -41,121 +40,112 @@ Example for ${calculation.numCars} car(s):
 - Height: ${calculation.height} ft`;
         }
 
-        // ✅ ADD FIELD CONTEXT
         let fieldContext = "";
         if (currentField) {
             fieldContext = `
 
-⚠️ IMPORTANT: The user is currently being asked for: "${currentField}"
-- If they provide a number, it's likely the answer to "${currentField}", NOT necessarily a car count
-- Only extract car count if they explicitly mention "cars" or "car garage"
+⚠️ CRITICAL: User is ONLY being asked for: "${currentField}"
 
-${currentField === "gauge" ? `- Valid gauge values are ONLY: 14, 16, 18, 20` : ""}
-${currentField === "width" ? `- They are providing WIDTH in feet` : ""}
-${currentField === "length" ? `- They are providing LENGTH in feet` : ""}
-${currentField === "height" ? `- They are providing HEIGHT in feet` : ""}`;
+SPECIAL HANDLING FOR INDECISIVE RESPONSES:
+If user says ANY of these: "any", "whatever", "i don't know", "idk", "doesn't matter", "anything", "surprise me", "you pick", "no preference", "doesn't care", "pick one", "whatever works"
+→ Select a BALANCED/DEFAULT option for that field:
+  - For roof_type: Select "regular" (most balanced option - middle choice)
+  - For gauge: Select "16" (most common gauge in industry)
+  - For building_type: Select "garage" (most common type)
+
+RULES:
+- Extract ONLY ${currentField} from their response
+- DO NOT extract other fields
+- If answer is indecisive/vague, return the default instead of asking again
+${currentField === "gauge" ? `- Valid gauge values ONLY: 14, 16, 18, 20. If user says "any/idk/whatever", return: 16` : ""}
+${currentField === "roof_type" ? `- Valid roof types ONLY: vertical, regular, box, a-frame. If user says "any/idk/whatever", return: regular` : ""}
+${currentField === "building_type" ? `- Valid types: garage, shed, barn. If user says "any/idk/whatever", return: garage` : ""}`;
         }
 
-        // ✅ ADD CURRENT PARAMETERS CONTEXT
         let paramsContext = "";
         if (currentParams && Object.keys(currentParams).length > 0) {
             paramsContext = `
 
-🔒 ALREADY EXTRACTED - DO NOT OVERRIDE THESE:`;
-            if (currentParams.garage_type) paramsContext += `\n  - garage_type: "${currentParams.garage_type}"`;
-            if (currentParams.width) paramsContext += `\n  - width: ${currentParams.width}ft`;
-            if (currentParams.length) paramsContext += `\n  - length: ${currentParams.length}ft`;
-            if (currentParams.height) paramsContext += `\n  - height: ${currentParams.height}ft`;
-            if (currentParams.state_name) paramsContext += `\n  - state_name: "${currentParams.state_name}"`;
-            if (currentParams.roof_type) paramsContext += `\n  - roof_type: "${currentParams.roof_type}"`;
-            if (currentParams.gauge) paramsContext += `\n  - gauge: ${currentParams.gauge}`;
-            if (currentParams.building_type) paramsContext += `\n  - building_type: "${currentParams.building_type}"`;
+🔒 LOCKED FIELDS (DO NOT INCLUDE IN OUTPUT):`;
+
+            const lockedFields: string[] = [];
+            if (currentParams.garage_type) lockedFields.push(`garage_type`);
+            if (currentParams.width) lockedFields.push(`width`);
+            if (currentParams.length) lockedFields.push(`length`);
+            if (currentParams.height) lockedFields.push(`height`);
+            if (currentParams.state_name) lockedFields.push(`state_name`);
+            if (currentParams.roof_type) lockedFields.push(`roof_type`);
+            if (currentParams.gauge) lockedFields.push(`gauge`);
+            if (currentParams.building_type) lockedFields.push(`building_type`);
+
+            if (lockedFields.length > 0) {
+                paramsContext += `\n- ${lockedFields.join(", ")}`;
+                paramsContext += `\n\nONLY extract the current field, OMIT locked fields entirely`;
+            }
         }
 
-        const prompt = `You are a garage/building specification extraction system.
+        const prompt = `You are a building parameter extraction system.
 
-CRITICAL INSTRUCTIONS:
-1. Fix ALL typos and spelling mistakes in the input
-2. Extract building parameters
-3. Return ONLY valid JSON - no explanation, no markdown
-4. ⚠️ DO NOT override existing parameters - only add NEW ones
-5. If unsure about a field, return null instead of guessing
+CRITICAL: Return ONLY valid JSON. NO explanations, NO code.
 
-EXTRACTION RULES:
-1. Extract car count if user specifies (e.g., "2 cars", "5 car garage")
-   - The system will calculate dimensions dynamically from car count
-   - Just extract: "garage_type": "X-car" (e.g., "2-car", "5-car", etc.)
-
-2. If explicit dimensions given (e.g., "20x30x10"), extract those exact numbers
-   - In this case, ignore car count
-
-3. Special garage types: Truck garage, RV garage
-
-4. Roof type handling:
-   - ONLY extract roof_type if user EXPLICITLY mentions it
-   - Valid values: "vertical", "regular", "box", "a-frame"
-   - If not mentioned, return null
-
-5. State: Extract if mentioned (e.g., "in Texas" → "Texas")
-
-6. Building type: Extract if mentioned (garage, shed, barn)
-
-7. Gauge: ONLY if explicitly mentioned or user provides a valid gauge number
-   - Valid ONLY: 14, 16, 18, 20
-   - If number doesn't match valid gauges, it's probably not gauge, return null
+RULES:
+1. Extract value user provides for current field
+2. If user expresses indecision (any, whatever, idk, etc), return BALANCED DEFAULT
+3. Return ONLY JSON with extracted values
+4. Omit fields you're not extracting (not even "null")
+5. Fix typos in input
 ${fieldContext}
-
-TYPO CORRECTIONS:
-- garge, garag, gaige → garage
-- carsas, carr → cars
-- widh, wid → width
-- lenght, lenth → length
-- hieght, hgt → height
-- tx → texas, ca → california, etc.
-
-EXAMPLES:
-- Input: "5 car garage"
-  → Output: {"garage_type": "5-car", "building_type": "garage"}
-  (System will calculate: width=38, length=20, height=10)
-
-- Input: "I want in Texas" (when already have dimensions)
-  → Output: {"state_name": "Texas"}
-  (Keep existing width, length, height!)
-
-- Input: "14" (when asking for gauge)
-  → Output: {"gauge": 14}
-  (NOT 14-car garage!)
-
-- Input: "20 feet" (when asking for width)
-  → Output: {"width": 20}
-  (NOT 20-car garage!)
-
-- Input: "any" (when asking for roof)
-  → Output: {"roof_type": "regular"}
-  (Select middle option as balanced choice)
 ${paramsContext}
 
-OUTPUT FORMAT - Return ONLY valid JSON (no markdown):
-{
-  "garage_type": "X-car or truck or rv or null",
-  "width": number or null,
-  "length": number or null,
-  "height": number or null,
-  "state_name": "state name or null",
-  "roof_type": null or "vertical"|"regular"|"box"|"a-frame",
-  "manufacturer_name": null,
-  "utility_length": number or null,
-  "building_type": "garage"|"shed"|"barn" or null,
-  "gauge": number or null,
-  "is_barn": null
-}
+EXTRACTION RULES:
+1. Car count: "2 cars" → {"garage_type": "2-car"}
+2. Roof types: ONLY "vertical", "regular", "box", "a-frame"
+   - If user says "any"/"whatever"/etc → {"roof_type": "regular"} (balanced default)
+3. Gauge: ONLY 14, 16, 18, 20
+   - If user says "any"/"whatever"/etc → {"gauge": 16} (most common)
+4. States: "Texas", "California", etc.
+5. Building type: "garage", "shed", "barn"
+
+EXAMPLES OF INDECISION HANDLING:
+- User says "any" for roof → {"roof_type": "regular"}
+- User says "whatever" for gauge → {"gauge": 16}
+- User says "idk" for gauge → {"gauge": 16}
+- User says "doesn't matter" for gauge → {"gauge": 16}
+- User says "idk" for building type → {"building_type": "garage"}
+- User says "surprise me" for roof → {"roof_type": "regular"}
+- User says "don't care" for gauge → {"gauge": 16}
+- User says "pick one" for roof → {"roof_type": "regular"}
+
+NORMAL EXAMPLES:
+- Input: "5 car garage" → Output: {"garage_type": "5-car", "width": 38, "length": 20, "height": 10}
+- Input: "vertical roof" → Output: {"roof_type": "vertical"}
+- Input: "Texas" with current field "state_name" → Output: {"state_name": "Texas"}
+- Input: "14GA" with current field "gauge" → Output: {"gauge": 14}
+
+OUTPUT: ONLY valid JSON, nothing else
 
 User input: "${context}"`;
 
         logger.info(`[extractParametersWithUnifiedPrompt] Calling LLM with enhanced prompt`);
         const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
-        logger.info(`[extractParametersWithUnifiedPrompt] LLM response received: ${response.substring(0, 150)}...`);
+        logger.info(`[extractParametersWithUnifiedPrompt] LLM response received (first 100 chars): ${response.substring(0, 100)}...`);
+
+        // ✅ STRICT VALIDATION - reject if response contains code
+        if (
+            response.includes("def ") ||
+            response.includes("import ") ||
+            response.includes("function ") ||
+            response.includes("const ") ||
+            response.includes("pattern ") ||
+            response.includes("regex")
+        ) {
+            logger.warn(
+                `[extractParametersWithUnifiedPrompt] LLM returned code instead of JSON`
+            );
+            return "{}";
+        }
+
         return response;
     } catch (error) {
         logger.error(`[extractParametersWithUnifiedPrompt] Error:`, error);
