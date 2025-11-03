@@ -131,7 +131,6 @@ export const processAddonsNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // Check if user is declining addons
         const declinePatterns = [/\b(no|skip|none|don't|nope|nothing)\b/i];
         if (declinePatterns.some(p => p.test(userInput))) {
             logger.info("[ProcessAddonsNode] User declined addons");
@@ -143,7 +142,6 @@ export const processAddonsNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // Detect addons from input
         const { addons, quantities } = await detectAddonsFromInput(userInput);
 
         if (addons.length === 0) {
@@ -154,7 +152,6 @@ export const processAddonsNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // Build addon selections
         const selectedAddons: AddonSelection[] = [];
         let summaryLines: string[] = ["✓ Selected add-ons:"];
 

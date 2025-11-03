@@ -2,7 +2,6 @@ import { InstantiationError } from "@errors/InstantiationError";
 import { sharedLLM } from "@llm/SharedLLM";
 import { BaseTool } from "@agents/tools/BaseTool";
 import { IPricingParams } from "@modules/price-service/services/io/IPrice";
-import { PriceServiceImpl } from "@modules/price-service/services/impl/PriceServiceImpl";
 import { HumanMessage } from "@langchain/core/messages";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
@@ -58,37 +57,6 @@ export class PriceParamsExtractorTool extends BaseTool {
         } catch (error) {
             logger.error(`[PriceParamsExtractorTool] _call failed ${error}`);
             return JSON.stringify({});
-        }
-    }
-
-    public async calculatePriceWithParams(params: IPricingParams): Promise<string> {
-        try {
-            logger.info({
-                width: params.width,
-                length: params.length,
-                height: params.height,
-                roofId: params.roof_id
-            }, "[PriceParamsExtractorTool] Calculating price with params");
-
-            const result = await PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(
-                params
-            );
-
-            if (!result) {
-                logger.warn("[PriceParamsExtractorTool] Empty result from pricing service");
-                return "⚠️ Pricing service returned empty result.";
-            }
-
-            if (!result.status && result.message) {
-                logger.warn(`[PriceParamsExtractorTool] Pricing service error ${result.message}`);
-                return `⚠️ ${result.message}`;
-            }
-
-            logger.info("[PriceParamsExtractorTool] Price calculated successfully");
-            return this.formatPricingResult(result, params);
-        } catch (error) {
-            logger.error(`[PriceParamsExtractorTool] calculatePriceWithParams failed ${error.message}`);
-            return "⚠️ Failed to calculate price with the given parameters.";
         }
     }
 
@@ -292,7 +260,6 @@ export class PriceParamsExtractorTool extends BaseTool {
 *Actual pricing may vary by location and specific options.*`;
     }
 
-    // ✅ MADE PUBLIC so PriceCalculationNode can use it
     public calculateTotalPrice(pricing: any, params: IPricingParams): PricingBreakdown {
         const roofPrice: number = this.selectRoofPrice(params.roof_id, pricing);
         let total: number = roofPrice;
@@ -314,11 +281,10 @@ export class PriceParamsExtractorTool extends BaseTool {
     }
 
     private selectRoofPrice(roofId: number, pricing: any): number {
-        // ✅ CORRECT MAPPING based on Constants.ROOF_NAMES
         const fieldMap: Record<number, string> = {
-            1: "base_price_vertical",   // roof_id 1 = Vertical
-            2: "base_price_regular",    // roof_id 2 = Regular
-            3: "base_price_box",        // roof_id 3 = Boxed-Eave
+            1: "base_price_vertical",
+            2: "base_price_regular",
+            3: "base_price_box",
         };
 
         const field: string = fieldMap[roofId] ?? "base_price_regular";

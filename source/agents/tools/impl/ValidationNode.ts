@@ -8,7 +8,6 @@ const logger: pino.Logger = createLogger(module);
 export const checkMissingFieldsNode = async (state: LeadAgentStateType) => {
     logger.info(`[ValidationNode] Checking missing fields`);
 
-    // ✅ FIX: If pending updates, handle them first
     if (state.pendingUpdates && state.pendingUpdates.length > 0) {
         logger.info(`[ValidationNode] Pending updates found, routing to handle_update`);
         return {

@@ -111,7 +111,6 @@ export class LeadAgentHelpers {
         for (const field of Constants.REQUIRED_FIELDS) {
             const value = params[field as keyof UserFriendlyParams];
 
-            // If field is empty/null/undefined, it's MISSING
             if (value === null || value === undefined || value === "") {
                 missing.push(field);
                 logger.info(`[getMissingFields] Field "${field}" is MISSING`);

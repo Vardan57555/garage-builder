@@ -169,12 +169,9 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
     logger.info(`[ExtractNode] Current field:`, state.currentField);
 
     try {
-        // ✅ FIX 1: Preserve current parameters as baseline
         const currentParams = { ...state.userFriendlyParams };
         logger.info(`[ExtractNode] Starting with current params:`, currentParams);
 
-        // ✅ CRITICAL FIX: Use ONLY the last user message, not full history
-        // This prevents re-extracting old values from previous messages
         const lastMessage = state.messages[state.messages.length - 1];
         let context = "";
 
@@ -190,30 +187,24 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[ExtractNode] Current user input: "${context}"`);
 
-        // Step 1: Call unified prompt to get raw JSON
-        // ✅ FIX 2: Pass current field and parameters to LLM for context
         const rawParams = await extractParametersWithUnifiedPrompt(
             context,
-            state.currentField,  // ← Pass field context
-            currentParams         // ← Pass current params
+            state.currentField,
+            currentParams
         );
 
-        // Step 2: Parse the response using extractor
         const extractor = PriceParamsExtractorTool.getInstance();
         const extractedParams = extractor.safeExtractUserFriendlyParams(rawParams);
 
         logger.info(`[ExtractNode] Extracted params from LLM:`, extractedParams);
 
-        // ✅ FIX 3: MERGE instead of replace
-        // Start with what we have, add what we just extracted
         let mergedParams = {
-            ...currentParams,        // Start with current params
-            ...extractedParams,      // Override with extracted
+            ...currentParams,
+            ...extractedParams,
         };
 
         logger.info(`[ExtractNode] Merged params (before dimension preservation):`, mergedParams);
 
-        // ✅ FIX 4: Never lose dimensions (they are sacred!)
         if (currentParams.width && !extractedParams.width) {
             mergedParams.width = currentParams.width;
             logger.info(`[ExtractNode] ✅ Preserved width from current params: ${currentParams.width}`);
@@ -233,10 +224,6 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[ExtractNode] Merged params (after preservation):`, mergedParams);
 
-        // ============================================================
-        // ✅ DIMENSION CALCULATION SECTION
-        // ============================================================
-        // Step 3: If we have garage_type but no dimensions, CALCULATE them
         if (mergedParams.garage_type && !mergedParams.width) {
             logger.info(`[ExtractNode] Calculating dimensions for garage_type: ${mergedParams.garage_type}`);
 
@@ -260,9 +247,6 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
                 logger.warn(`[ExtractNode] ❌ Calculator did not return complete dimensions`);
             }
         }
-        // ============================================================
-        // END OF DIMENSION CALCULATION SECTION
-        // ============================================================
 
         logger.info(`[ExtractNode] Final dimensions AFTER calculation:`, {
             width: mergedParams.width,
@@ -271,13 +255,11 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
             garage_type: mergedParams.garage_type,
         });
 
-        // DEBUG: Check if width is actually set
         if (!mergedParams.width) {
             logger.error(`[ExtractNode] ⚠️  WARNING: Width is still null/undefined after calculation!`);
             logger.error(`[ExtractNode] mergedParams:`, JSON.stringify(mergedParams));
         }
 
-        // Step 4: Validate state if present
         if (mergedParams.state_name) {
             logger.info(`[ExtractNode] Validating state: ${mergedParams.state_name}`);
 
@@ -300,7 +282,6 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
             logger.info(`[ExtractNode] State validated: ${mergedParams.state_name}`);
         }
 
-        // Step 5: Validate roof_type if present
         if (mergedParams.roof_type) {
             logger.info(`[ExtractNode] Validating roof type: ${mergedParams.roof_type}`);
 
@@ -322,7 +303,6 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
         logger.info(`[ExtractNode] All validations passed ✅`);
         logger.info(`[ExtractNode] Final extracted params:`, mergedParams);
 
-        // ✅ DEBUG: Log what we're returning
         logger.info(`[ExtractNode] RETURNING to state:`, {
             width: mergedParams.width,
             length: mergedParams.length,
@@ -340,7 +320,6 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
     } catch (error) {
         logger.error(`[ExtractNode] LLM extraction failed, falling back to pattern matching:`, error);
 
-        // ✅ FALLBACK: Use pattern matching when LLM fails
         const context = state.messages
             .map((msg) => {
                 if (typeof msg.content === "string") return msg.content;
@@ -353,16 +332,13 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
             })
             .join("\n");
 
-        // Start with current params
         const fallbackParams = { ...state.userFriendlyParams };
 
-        // Try to extract car count
         const carCountMatch = context.match(/(\d+)\s*cars?/i);
         if (carCountMatch) {
             const numCars = parseInt(carCountMatch[1], 10);
             fallbackParams.garage_type = `${numCars}-car`;
 
-            // Calculate dimensions from car count
             const calc = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(
                 `${numCars}-car`
             );
@@ -382,7 +358,6 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
             }
         }
 
-        // If fallback also fails, ask for input
         logger.warn(`[ExtractNode] Fallback pattern matching also failed`);
         return {
             response: "I couldn't understand your request. Could you please provide your building dimensions? (e.g., '20x20x10' for width x length x height in feet)",

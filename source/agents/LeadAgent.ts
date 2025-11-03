@@ -50,7 +50,6 @@ export class LeadAgent {
             const session = this.getOrCreateSession(sessionId);
             await session.memory.chatHistory.addUserMessage(input);
 
-            // ✅ FIX: Detect reset first
             if (detectResetIntent(input)) {
                 logger.info(`[LeadAgent] Reset intent detected`);
                 const result = await leadAgentGraph.invoke({
@@ -74,7 +73,6 @@ export class LeadAgent {
 
                 const response = result.response;
                 await session.memory.chatHistory.addAIChatMessage(response);
-                // ✅ FIX: Reset with all properties
                 session.state = {
                     userFriendlyParams: {},
                     hasGarageIntent: false,
@@ -91,16 +89,13 @@ export class LeadAgent {
                 logger.info(`[LeadAgent] POST-PRICE PHASE - priceCalculated: true`);
                 logger.info(`[LeadAgent] Session basePrice: $${session.state.basePrice}`); // ✅ DEBUG LOG
 
-                // ✅ Get user input
                 const userInput = input.toLowerCase().trim();
 
-                // ✅ Check if user is trying to skip/decline addons
                 if (/(no|skip|none|without|don't|nope|nah)/i.test(userInput)) {
                     logger.info(`[LeadAgent] User declined addons, showing final price`);
 
                     const basePrice = session.state.basePrice || 0;
 
-                    // ✅ DEBUG: Log what we're working with
                     logger.info(`[LeadAgent] Using basePrice: $${basePrice}`);
                     logger.info(`[LeadAgent] Width: ${session.state.userFriendlyParams.width}, Length: ${session.state.userFriendlyParams.length}`);
 
@@ -145,7 +140,6 @@ Or **start over** to create a new quote.`;
                     return response;
                 }
 
-                // ✅ Check if user is trying to add addons (e.g., "add windows", "1, 2, 3")
                 const addonKeywords = /(add|window|door|brace|anchor|cupola|\d+)/i;
                 if (addonKeywords.test(userInput)) {
                     logger.info(`[LeadAgent] User provided addon input: "${userInput}"`);
@@ -172,7 +166,6 @@ Or **start over** to create a new quote.`;
                     const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
 
-                    // ✅ SAVE addon processing results
                     session.state.selectedAddons = result.selectedAddons || [];
                     session.state.finalPrice = result.finalPrice || 0;
 
@@ -180,7 +173,6 @@ Or **start over** to create a new quote.`;
                     return response;
                 }
 
-                // ✅ Check for parameter updates (e.g., "change width to 25")
                 logger.info(`[LeadAgent] Checking for parameter updates`);
                 const update = await detectParameterUpdateFromInput(input);
 
@@ -209,11 +201,9 @@ Or **start over** to create a new quote.`;
                     const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
 
-                    // ✅ SAVE update results
                     session.state.userFriendlyParams = result.userFriendlyParams;
                     session.state.priceCalculated = result.priceCalculated || false;
 
-                    // ✅ CRITICAL: If price was recalculated, save new pricing data
                     if (result.priceCalculated && result.pricingData) {
                         session.state.pricingData = result.pricingData;
                         session.state.basePrice = result.basePrice || 0;
@@ -225,7 +215,6 @@ Or **start over** to create a new quote.`;
                     return response;
                 }
 
-                // ✅ If unclear, show addon menu again
                 logger.info(`[LeadAgent] Unclear input, showing addon menu again`);
                 const result = await leadAgentGraph.invoke({
                     sessionId,
@@ -253,7 +242,6 @@ Or **start over** to create a new quote.`;
 
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
-            // ✅ Detect parameter update
             const update = await detectParameterUpdateFromInput(input);
 
             logger.info(`[LeadAgent] Update detected:`, update ? `${update.field}=${update.value}` : "none");

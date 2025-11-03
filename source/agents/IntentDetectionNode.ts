@@ -42,12 +42,11 @@ Answer with ONLY "YES" or "NO":`;
 export const detectGarageIntentNode = async (state: LeadAgentStateType) => {
     logger.info(`[IntentNode] Session ${state.sessionId} - Checking garage intent`);
 
-    // If already confirmed, move to next step
     if (state.hasGarageIntent) {
         logger.info(`[IntentNode] Intent already confirmed, proceeding to extract_parameters`);
         return {
             hasGarageIntent: true,
-            nextStep: "extract_parameters",  // ✅ EXPLICITLY SET NEXT STEP
+            nextStep: "extract_parameters",
         };
     }
 
@@ -65,11 +64,10 @@ export const detectGarageIntentNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[IntentNode] User input: "${userInput}"`);
 
-        // ✅ SIMPLE & FAST: Use direct pattern matching first
         const commonPatterns = [
             /\b(garage|shed|barn|carport|metal building|quote|price|cost)\b/i,
             /\b(\d+)\s*(car|cars)\b/i,
-            /(\d+)\s*x\s*(\d+)/i,  // dimensions like 20x30
+            /(\d+)\s*x\s*(\d+)/i,
         ];
 
         const hasCommonPattern = commonPatterns.some(pattern => pattern.test(userInput));
@@ -78,11 +76,10 @@ export const detectGarageIntentNode = async (state: LeadAgentStateType) => {
             logger.info(`[IntentNode] ✅ Matched common pattern, confirming garage intent`);
             return {
                 hasGarageIntent: true,
-                nextStep: "extract_parameters",  // ✅ EXPLICITLY SET
+                nextStep: "extract_parameters",
             };
         }
 
-        // ✅ If no pattern match, use LLM as backup
         logger.info(`[IntentNode] No pattern match, using LLM for intent detection`);
         const hasIntent = await detectGarageIntentWithLLM(userInput);
 
@@ -100,7 +97,7 @@ export const detectGarageIntentNode = async (state: LeadAgentStateType) => {
         logger.info(`[IntentNode] ✅ Garage intent confirmed by LLM`);
         return {
             hasGarageIntent: true,
-            nextStep: "extract_parameters",  // ✅ EXPLICITLY SET
+            nextStep: "extract_parameters",
         };
     } catch (error) {
         logger.error(`[IntentNode] Error:`, error);

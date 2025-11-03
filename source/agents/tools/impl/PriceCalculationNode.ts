@@ -12,7 +12,6 @@ async function convertToTechnicalParams(
     stateMapCache: Map<string, any>,
     roofMapCache: Map<string, number>
 ): Promise<IPricingParams | null> {
-    // Use your actual implementation from your LeadAgent or LeadAgentHelpers
     try {
         let map_id = 1;
         let manufacturer_id = 1;
@@ -52,7 +51,6 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
     logger.info(`[PriceNode] User params:`, state.userFriendlyParams);
 
     try {
-        // Convert to technical params
         const technicalParams = await convertToTechnicalParams(
             state.userFriendlyParams,
             state.stateMapCache,
@@ -70,7 +68,6 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[PriceNode] Technical params converted successfully`);
 
-        // Get pricing from service
         const { PriceServiceImpl } = await import("@modules/price-service/services/impl/PriceServiceImpl");
         const priceService = PriceServiceImpl.getInstance();
 
@@ -85,17 +82,13 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // Calculate total price
         const extractor = PriceParamsExtractorTool.getInstance();
         const { total: kitPrice } = extractor.calculateTotalPrice(rawPricingData, technicalParams);
 
         logger.info(`[PriceNode] Kit price calculated: $${kitPrice.toFixed(2)}`);
 
-        // Format the COMPLETE price breakdown for display
         const formattedPrice = formatCompletePrice(kitPrice, state.userFriendlyParams);
 
-        // ✅ REMOVED: await session.memory.chatHistory.addAIChatMessage(formattedPrice);
-        // This is handled by LeadAgent.run() after the graph returns
 
         return {
             response: formattedPrice,

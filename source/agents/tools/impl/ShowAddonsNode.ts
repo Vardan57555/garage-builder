@@ -87,7 +87,6 @@ export const showAddonsNode = async (state: LeadAgentStateType) =>  {
             };
         }
 
-        // Build addon menu
         const addonsMenu = buildAddonsMenuFromPricing(state.pricingData);
 
         if (addonsMenu.length === 0) {
@@ -100,7 +99,6 @@ export const showAddonsNode = async (state: LeadAgentStateType) =>  {
 
         logger.info(`[ShowAddonsNode] Found ${addonsMenu.length} addon options`);
 
-        // Format addon menu with examples
         const addonDisplay = formatAddonsMenu(addonsMenu);
         const currentParams = LeadAgentHelpers.formatCurrentParams(state.userFriendlyParams);
 
@@ -121,7 +119,7 @@ export const showAddonsNode = async (state: LeadAgentStateType) =>  {
             pricingData: state.pricingData,
             basePrice: state.basePrice,
             finalPrice: state.basePrice,
-            nextStep: "__end__",  // Wait for user response
+            nextStep: "__end__",
         };
     } catch (error) {
         logger.error(`[ShowAddonsNode] Error:`, error);

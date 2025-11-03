@@ -112,7 +112,7 @@ export function buildLeadAgentGraph() {
             "show_addons",
             (state) => {
                 logger.debug(`[show_addons] nextStep=${state.nextStep}`);
-                return state.nextStep || "__end__";  // First time: wait for user (END)
+                return state.nextStep || "__end__";
             },
             {
                 "process_addons": "process_addons",

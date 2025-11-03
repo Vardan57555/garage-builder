@@ -12,7 +12,6 @@ const logger: pino.Logger = createLogger(module);
 function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
     const selected: any[] = [];
 
-    // Try number selection
     const numberMatches = userInput.match(/\d+/g);
     if (numberMatches && numberMatches.length > 0) {
         const uniqueNumbers = new Set<number>();
@@ -31,7 +30,6 @@ function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
         }
     }
 
-    // Try name matching
     const lowerInput = userInput.toLowerCase();
     if (/window/i.test(lowerInput)) {
         selected.push(...addonsMenu.filter((a) => /window/i.test(a.label)));
@@ -46,7 +44,6 @@ function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
         selected.push(...addonsMenu.filter((a) => /brace|anchor/i.test(a.label)));
     }
 
-    // Remove duplicates
     const uniqueMap = new Map();
     selected.forEach((addon) => {
         uniqueMap.set(addon.id, addon);
@@ -71,17 +68,15 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // ✅ Check if user declined addons
         if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
             logger.info(`[ProcessAddonsNode] User declined addons`);
 
             const finalTotal = state.basePrice || 0;
-            // ✅ FIX: Use the correct function name
             const response = formatFinalPrice(
                 state.userFriendlyParams,
                 state.basePrice || 0,
-                [],  // empty addons
-                0,   // no addon total
+                [],
+                0,
                 finalTotal
             );
 
@@ -94,7 +89,6 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // ✅ Check if user selected addons
         if (!state.pricingData) {
             return {
                 response: "❌ Error: No pricing data available.",

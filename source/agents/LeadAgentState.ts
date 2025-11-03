@@ -52,7 +52,7 @@ export const LeadAgentState = Annotation.Root({
     }),
 
     pendingUpdates: Annotation<Array<{ field: keyof UserFriendlyParams; value: any }>>({
-        reducer: (current, update) => update ?? [],  // Replace, not concat
+        reducer: (current, update) => update ?? [],
         default: () => [],
     }),
 
