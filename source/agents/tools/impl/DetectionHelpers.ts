@@ -16,7 +16,22 @@ export function detectResetIntent(input: string): boolean {
 }
 
 /**
+ * ✅ FIXED: Check for addon keywords FIRST before dimension patterns
+ * This prevents "2 windows" from being interpreted as "2 cars"
+ */
+function isAddonRequest(input: string): boolean {
+    const addonPatterns = [
+        /\b(add|also|and)\s+(\d+\s+)?(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)/i,
+        /\b(\d+)\s+(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
+        /\b(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
+    ];
+
+    return addonPatterns.some(pattern => pattern.test(input));
+}
+
+/**
  * Detect parameter updates from user input
+ * ✅ FIXED: Addon check happens FIRST, preventing misinterpretation
  */
 export async function detectParameterUpdateFromInput(input: string): Promise<{
     field: keyof UserFriendlyParams;
@@ -26,16 +41,33 @@ export async function detectParameterUpdateFromInput(input: string): Promise<{
 
     const lowerInput = input.toLowerCase().trim();
 
+    // ✅ CRITICAL FIX: Check for addon keywords FIRST
+    // This prevents "2 windows" from matching car count pattern
+    if (isAddonRequest(input)) {
+        logger.info(`[detectParameterUpdateFromInput] Detected addon request - skipping parameter detection`);
+        return null;  // Let addon processor handle it
+    }
+
+    // Building type detection
     const buildingMatch = input.match(/\b(garage|shed|barn)\b/i);
     if (buildingMatch) {
         logger.info(`[detectParameterUpdateFromInput] Matched building_type: ${buildingMatch[1]}`);
         return { field: "building_type", value: buildingMatch[1].toLowerCase() };
     }
 
-    const carCountMatch = input.match(/(\d+)\s*cars?/i);
+    // ✅ FIXED: Car count pattern - only match if NOT preceded by addon keywords
+    // Pattern: "2 cars", "3 car", "5-car garage" (but NOT "2 car windows")
+    const carCountMatch = input.match(/(?<!window\s)(?<!door\s)(?<!brace\s)(\d+)\s*cars?(?!\s+window|\s+door|\s+brace)/i);
     if (carCountMatch) {
-        logger.info(`[detectParameterUpdateFromInput] Matched cars: ${carCountMatch[1]}`);
-        return { field: "garage_type", value: `${carCountMatch[1]}-car` };
+        // Double-check it's not an addon context
+        const beforeCarCount = input.substring(0, carCountMatch.index);
+        if (!isAddonRequest(beforeCarCount)) {
+            logger.info(`[detectParameterUpdateFromInput] Matched cars: ${carCountMatch[1]}`);
+            return { field: "garage_type", value: `${carCountMatch[1]}-car` };
+        } else {
+            logger.info(`[detectParameterUpdateFromInput] Car count found but in addon context - skipping`);
+            return null;
+        }
     }
 
     const garageTypeMatch = input.match(/\b(truck|rv)\s*(?:garage|building)?\b/i);

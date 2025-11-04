@@ -2,97 +2,71 @@ import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
+import { getAddonsWithCache, getLimitedAddonsByType } from "@agents/tools/impl/AddonDatabaseService";
 
 const logger: pino.Logger = createLogger(module);
 
 /**
- * Extract pricing data from the price calculation response
- * Builds a structured addon menu from available options
+ * Transform database addons into menu format
  */
-export function buildAddonsMenuFromPricing(pricingData: any): Array<{
-    id: string;
-    label: string;
-    cost: number;
-    description: string;
-}> {
-    const addons: Array<{
-        id: string;
-        label: string;
-        cost: number;
-        description: string;
-    }> = [];
+function formatAddonsMenu(addons: any[]): string {
+    return addons
+        .map((addon, idx) => {
+            const costDisplay = addon.cost > 0 ? ` - ${addon.cost.toFixed(2)}` : " - Included";
+            const typeLabel = addon.type ? ` [${addon.type}]` : "";
+            return `${idx + 1}. ${addon.label}${typeLabel}${costDisplay}\n   ${addon.description || ""}`;
+        })
+        .join("\n\n");
+}
 
+/**
+ * Build addons menu from DATABASE
+ * ✅ Shows top 10 addons per type (80 total max) instead of 75K+
+ */
+async function buildAddonsMenu(): Promise<any[]> {
     try {
-        if (pricingData?.garage_door_frameout && Array.isArray(pricingData.garage_door_frameout)) {
-            pricingData.garage_door_frameout.forEach((door: any, idx: number) => {
-                addons.push({
-                    id: `garage_door_${idx}`,
-                    label: door.door_type || `Garage Door ${idx + 1}`,
-                    cost: door.cost || 0,
-                    description: door.description || "Garage door option",
-                });
-            });
+        logger.info("[buildAddonsMenu] Fetching addons from database");
+
+        const allAddons = await getAddonsWithCache();
+
+        if (allAddons.length === 0) {
+            logger.warn("[buildAddonsMenu] No addons available");
+            return [];
         }
 
-        if (pricingData?.window_frameout && Array.isArray(pricingData.window_frameout)) {
-            pricingData.window_frameout.forEach((window: any, idx: number) => {
-                addons.push({
-                    id: `window_${idx}`,
-                    label: window.door_type || `Window ${idx + 1}`,
-                    cost: window.cost || 0,
-                    description: window.description || "Window option",
-                });
-            });
-        }
+        // ✅ Limit to top 10 per type to avoid overwhelming user
+        const limited = getLimitedAddonsByType(allAddons, 10);
 
-        if (pricingData?.walkin_door_frameout && Array.isArray(pricingData.walkin_door_frameout)) {
-            pricingData.walkin_door_frameout.forEach((door: any, idx: number) => {
-                addons.push({
-                    id: `walkin_${idx}`,
-                    label: door.door_type || `Walk-in Door ${idx + 1}`,
-                    cost: door.cost || 0,
-                    description: door.description || "Walk-in door option",
-                });
-            });
-        }
+        // Transform to menu format
+        const menu = limited.map(addon => ({
+            id: addon.id,
+            label: addon.label,
+            type: addon.type,
+            cost: addon.cost,
+            description: addon.description || "",
+        }));
+
+        logger.info(`[buildAddonsMenu] ✅ Built menu with ${menu.length} addons (limited from ${allAddons.length} total)`);
+        return menu;
     } catch (error) {
-        logger.error("[buildAddonsMenuFromPricing] Error:", error);
+        logger.error("[buildAddonsMenu] Error:", error);
+        return [];
     }
-
-    return addons;
 }
 
 /**
  * NODE: Show available addons after price calculation
- *
- * This node:
- * 1. Validates pricing data was calculated
- * 2. Extracts available addon options from pricing response
- * 3. Formats addon menu for user display
- * 4. Returns prompt waiting for user addon selection
- * 5. Preserves pricing data for next node (processAddonsSelectionNode)
- *
- * Flow:
- * calculate_price → show_addons → [user responds] → process_addons
  */
-export const showAddonsNode = async (state: LeadAgentStateType) =>  {
+export const showAddonsNode = async (state: LeadAgentStateType) => {
     logger.info(`[ShowAddonsNode] Session ${state.sessionId} - Showing addon options`);
 
     try {
-        if (!state.pricingData) {
-            logger.warn(`[ShowAddonsNode] No pricing data available`);
-            return {
-                response: "✓ Price calculated. No additional options available.",
-                nextStep: "__end__",
-            };
-        }
-
-        const addonsMenu = buildAddonsMenuFromPricing(state.pricingData);
+        const addonsMenu = await buildAddonsMenu();
 
         if (addonsMenu.length === 0) {
             logger.info(`[ShowAddonsNode] No addons available`);
             return {
-                response: "✓ No additional options available at this time.",
+                response: "✓ Price calculated. No additional options available at this time.",
                 nextStep: "__end__",
             };
         }
@@ -108,14 +82,14 @@ export const showAddonsNode = async (state: LeadAgentStateType) =>  {
             `${addonDisplay}\n\n` +
             `**Examples:**\n` +
             `• "1" or "1, 2" - Select by number\n` +
-            `• "windows and doors" - Select by name\n` +
+            `• "2 windows" - Select by name and quantity\n` +
+            `• "add 3 doors and 2 windows" - Multiple addons\n` +
             `• "no" or "skip" - No addons\n\n` +
             `What would you like to add?`;
 
-        logger.info(`[ShowAddonsNode] Showing ${addonsMenu.length} addon options to user`);
-
         return {
             response: promptMessage,
+            addonsMenu,  // Pass menu to next node (ProcessAddonsNode)
             pricingData: state.pricingData,
             basePrice: state.basePrice,
             finalPrice: state.basePrice,
@@ -129,13 +103,3 @@ export const showAddonsNode = async (state: LeadAgentStateType) =>  {
         };
     }
 };
-
-
-function formatAddonsMenu(addons: any[]): string {
-    return addons
-        .map((addon, idx) => {
-            const costDisplay = addon.cost > 0 ? ` - $${addon.cost.toFixed(2)}` : " - Included";
-            return `${idx + 1}. ${addon.label}${costDisplay}\n   ${addon.description || ""}`;
-        })
-        .join("\n\n");
-}

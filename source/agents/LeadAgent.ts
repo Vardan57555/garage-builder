@@ -1,7 +1,3 @@
-// ============================================================================
-// FILE: LeadAgent.ts - FIXED PRICE CALCULATION
-// ============================================================================
-
 import { BufferMemory, ChatMessageHistory } from "langchain/memory";
 import { InstantiationError } from "@errors/InstantiationError";
 import { RedisCacheUtils } from "@utils/cache/RedisCacheUtils";
@@ -95,19 +91,18 @@ export class LeadAgent {
 
                 const userInput = input.toLowerCase().trim();
 
-                // ✅ FIX: When user declines addons, calculate FULL price with all service costs
+                // ✅ FIX #1: Check if user DECLINED addons FIRST
                 if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
-                    logger.info(`[LeadAgent] User declined addons, calculating final price with all services`);
+                    logger.info(`[LeadAgent] User declined addons, calculating final price`);
 
                     const basePrice = session.state.basePrice || 0;
                     const params = session.state.userFriendlyParams;
 
-                    // ✅ CRITICAL FIX: Calculate ALL service costs
                     const sqft = (params.width || 0) * (params.length || 0);
-                    const laborCost = basePrice * 0.5;  // 50% of kit price
-                    const foundationCost = sqft * 8.5;  // $8.50 per sq ft
-                    const deliveryCost = 750;  // Fixed delivery cost
-                    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;  // 5%
+                    const laborCost = basePrice * 0.5;
+                    const foundationCost = sqft * 8.5;
+                    const deliveryCost = 750;
+                    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
                     const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
 
                     logger.info(`[LeadAgent] Price breakdown:`);
@@ -164,46 +159,73 @@ Or say **"start over"** to create a new quote.`;
                     return response;
                 }
 
-                // Handle addon selections
-                const addonKeywords = /(add|window|door|brace|anchor|cupola|\d+)/i;
-                if (addonKeywords.test(userInput)) {
-                    logger.info(`[LeadAgent] User provided addon input: "${userInput}"`);
+                // ✅ FIX #2: Check if user is ADDING addons (BEFORE parameter extraction)
+                const isAddonRequest = this.detectAddonRequest(userInput);
 
-                    const result = await leadAgentGraph.invoke({
-                        sessionId,
-                        messages: await session.memory.chatHistory.getMessages(),
-                        userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
-                        hasGarageIntent: session.state.hasGarageIntent,
-                        priceCalculated: true,
-                        currentField: null,
-                        validationError: null,
-                        response: "",
-                        nextStep: "process_addons",
-                        stateMapCache: session.stateMapCache || new Map(),
-                        roofMapCache: session.roofMapCache || new Map(),
-                        pendingUpdates: [],
-                        pricingData: session.state.pricingData || null,
-                        basePrice: session.state.basePrice || 0,
-                        selectedAddons: session.state.selectedAddons || [],
-                        finalPrice: session.state.finalPrice || 0,
-                    });
+                if (isAddonRequest) {
+                    logger.info(`[LeadAgent] ✅ Detected addon request: "${userInput}"`);
+                    logger.info(`[LeadAgent] Routing directly to addon processing (NOT parameter extraction)`);
 
-                    const response = result.response;
-                    await session.memory.chatHistory.addAIChatMessage(response);
+                    try {
+                        // Get the addon menu
+                        const addonsMenu = await this.getAddonsMenuFromDatabase();
 
-                    session.state.selectedAddons = result.selectedAddons || [];
-                    session.state.finalPrice = result.finalPrice || 0;
+                        if (!addonsMenu || addonsMenu.length === 0) {
+                            logger.error(`[LeadAgent] No addons menu available`);
+                            return `❌ Error: Addon options not available`;
+                        }
 
-                    logger.info(`[LeadAgent] Addon processing completed`);
-                    return response;
+                        // Parse addon selections directly
+                        const selectedAddons = this.parseAddonSelections(userInput, addonsMenu);
+
+                        if (selectedAddons.length === 0) {
+                            logger.warn(`[LeadAgent] No addons matched`);
+                            return `I couldn't understand which addons you want. Please try:\n• "2 windows"\n• "add 1 door and 3 braces"\n• "no" to skip addons`;
+                        }
+
+                        // Calculate final price WITH addons
+                        const basePrice = session.state.basePrice || 0;
+                        const params = session.state.userFriendlyParams;
+
+                        const sqft = (params.width || 0) * (params.length || 0);
+                        const laborCost = basePrice * 0.5;
+                        const foundationCost = sqft * 8.5;
+                        const deliveryCost = 750;
+                        const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
+                        const contingency = (basePrice + laborCost + foundationCost + deliveryCost + addonTotal) * 0.05;
+                        const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency + addonTotal;
+
+                        logger.info(`[LeadAgent] ✅ Selected ${selectedAddons.length} addons`);
+                        logger.info(`[LeadAgent] ✅ Addon total: $${addonTotal.toFixed(2)}`);
+                        logger.info(`[LeadAgent] ✅ Final with addons: $${finalTotal.toFixed(2)}`);
+
+                        const response = this.formatFinalPriceWithAddons(
+                            params,
+                            basePrice,
+                            selectedAddons,
+                            addonTotal,
+                            finalTotal,
+                            laborCost,
+                            foundationCost,
+                            deliveryCost,
+                            contingency,
+                            sqft
+                        );
+
+                        await session.memory.chatHistory.addAIChatMessage(response);
+                        session.state.selectedAddons = selectedAddons;
+                        session.state.finalPrice = finalTotal;
+                        return response;
+                    } catch (error) {
+                        logger.error(`[LeadAgent] Error processing addons:`, error);
+                        return `❌ Error processing addons. Please try again or say "no" to skip.`;
+                    }
                 }
 
-                // Check for parameter updates
-                logger.info(`[LeadAgent] Checking for parameter updates`);
+                // ✅ If not addon request and not declined, check for parameter updates
                 const update = await detectParameterUpdateFromInput(input);
-
                 if (update) {
-                    logger.info(`[LeadAgent] Detected parameter update: ${update.field}=${update.value}`);
+                    logger.info(`[LeadAgent] User modified parameter: ${update.field}`);
 
                     const result = await leadAgentGraph.invoke({
                         sessionId,
@@ -240,7 +262,7 @@ Or say **"start over"** to create a new quote.`;
                     return response;
                 }
 
-                // If unclear, show addon menu again
+                // Default: show addon menu again
                 logger.info(`[LeadAgent] Unclear input, showing addon menu again`);
                 const result = await leadAgentGraph.invoke({
                     sessionId,
@@ -314,6 +336,146 @@ Or say **"start over"** to create a new quote.`;
             logger.error(`[LeadAgent] Error:`, error);
             return "❌ An error occurred. Please try again.";
         }
+    }
+
+    // ✅ NEW METHOD: Detect if input is addon request
+    private detectAddonRequest(input: string): boolean {
+        const addonPatterns = [
+            /\b(add|also|and)\s+(\d+\s+)?(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?/i,
+            /\b(\d+)\s+(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?/i,
+        ];
+
+        const isAddon = addonPatterns.some(pattern => pattern.test(input));
+        logger.info(`[LeadAgent.detectAddonRequest] Input: "${input}" → isAddon: ${isAddon}`);
+        return isAddon;
+    }
+
+    // ✅ NEW METHOD: Parse addon selections from user input
+    private parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
+        const selected: any[] = [];
+        const quantityPattern = /(?:add|also|and)?\s*(\d+)\s+(window|door|walkin|walk.?in|brace|anchor|cupola|truss)s?/gi;
+        const quantityMatches = [...userInput.matchAll(quantityPattern)];
+
+        logger.info(`[LeadAgent.parseAddonSelections] Found ${quantityMatches.length} addon matches`);
+
+        quantityMatches.forEach((match, idx) => {
+            const quantity = parseInt(match[1], 10);
+            const keyword = match[2].toLowerCase();
+
+            logger.info(`[LeadAgent.parseAddonSelections] Match ${idx}: quantity=${quantity}, keyword=${keyword}`);
+
+            const matchingAddons = addonsMenu.filter(addon => {
+                const type = addon.type?.toLowerCase() || "";
+                const label = addon.label?.toLowerCase() || "";
+                return type.includes(keyword) || label.includes(keyword);
+            });
+
+            logger.info(`[LeadAgent.parseAddonSelections] Found ${matchingAddons.length} addons for keyword "${keyword}"`);
+
+            for (let i = 0; i < quantity && i < matchingAddons.length; i++) {
+                selected.push(matchingAddons[i]);
+                logger.info(`[LeadAgent.parseAddonSelections] Added: ${matchingAddons[i].label} ($${matchingAddons[i].cost})`);
+            }
+        });
+
+        logger.info(`[LeadAgent.parseAddonSelections] Total selected: ${selected.length} addons`);
+        return selected;
+    }
+
+    // ✅ NEW METHOD: Get addons menu from database
+    private async getAddonsMenuFromDatabase(): Promise<any[]> {
+        try {
+            const { getAddonsWithCache, getLimitedAddonsByType } =
+                await import("@agents/tools/impl/AddonDatabaseService");
+
+            logger.info(`[LeadAgent.getAddonsMenuFromDatabase] Fetching addons...`);
+            const allAddons = await getAddonsWithCache();
+            logger.info(`[LeadAgent.getAddonsMenuFromDatabase] Found ${allAddons.length} total addons`);
+
+            const limited = getLimitedAddonsByType(allAddons, 10);
+            logger.info(`[LeadAgent.getAddonsMenuFromDatabase] Limited to ${limited.length} addons`);
+
+            return limited.map(addon => ({
+                id: addon.id,
+                label: addon.label,
+                type: addon.type,
+                cost: addon.cost,
+                description: addon.description || "",
+            }));
+        } catch (error) {
+            logger.error(`[LeadAgent.getAddonsMenuFromDatabase] Error:`, error);
+            throw error;
+        }
+    }
+
+    // ✅ NEW METHOD: Format final price with addons
+    private formatFinalPriceWithAddons(
+        params: any,
+        basePrice: number,
+        selectedAddons: any[],
+        addonTotal: number,
+        finalTotal: number,
+        laborCost: number,
+        foundationCost: number,
+        deliveryCost: number,
+        contingency: number,
+        sqft: number
+    ): string {
+        const currentParams = LeadAgentHelpers.formatCurrentParams(params);
+
+        let response = `✅ **FINAL PRICE QUOTE WITH ADD-ONS**
+
+${currentParams}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 **DETAILED PRICE BREAKDOWN:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Building Kit & Materials:**
+• Base Building Package: $${basePrice.toFixed(2)}
+
+**Installation & Construction:**
+• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
+• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
+• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
+• Contingency & Misc (5%): $${contingency.toFixed(2)}`;
+
+        if (selectedAddons.length > 0) {
+            response += `
+
+**Selected Add-ons:** ✅ ADDONS INCLUDED!`;
+            selectedAddons.forEach((addon) => {
+                response += `\n  • ${addon.label}: $${(addon.cost || 0).toFixed(2)}`;
+            });
+            response += `\n\nAdd-ons Total: +$${addonTotal.toFixed(2)}`;
+        }
+
+        response += `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 **FINAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}** ✅ WITH ${selectedAddons.length} ADD-ONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ **What's Included:**
+  • Building kit and all materials
+  • Professional installation labor
+  • Foundation slab preparation (concrete)
+  • Delivery & site preparation
+  • ${selectedAddons.length} add-on(s) selected
+  • 5% contingency for unforeseen costs
+
+📞 **Next Steps:**
+Contact us to finalize your order and discuss:
+  • Custom modifications
+  • Financing options
+  • Installation timeline
+  • Warranty details
+
+🔧 **Want to modify anything?**
+(e.g., "change width to 30", "add more windows")
+Or say **"start over"** to create a new quote.`;
+
+        return response;
     }
 
     private getOrCreateSession(sessionId: string): LeadAgentSessionMetadata {
