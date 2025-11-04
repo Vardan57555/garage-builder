@@ -98,7 +98,6 @@ export async function getAddonsWithCache(): Promise<AddonFromDB[]> {
 export function getLimitedAddonsByType(addons: AddonFromDB[], limitPerType: number = 10): AddonFromDB[] {
     const grouped = new Map<string, AddonFromDB[]>();
 
-    // Group addons by type
     addons.forEach(addon => {
         if (!grouped.has(addon.type)) {
             grouped.set(addon.type, []);
@@ -106,7 +105,6 @@ export function getLimitedAddonsByType(addons: AddonFromDB[], limitPerType: numb
         grouped.get(addon.type)!.push(addon);
     });
 
-    // Sort by cost and take top N from each type
     const limited: AddonFromDB[] = [];
     grouped.forEach((items, type) => {
         const sorted = items.sort((a, b) => a.cost - b.cost).slice(0, limitPerType);

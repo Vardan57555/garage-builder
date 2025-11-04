@@ -11,6 +11,7 @@ import { handleParameterUpdateNode } from "@agents/tools/impl/ParameterUpdateNod
 import { handleResetNode } from "@agents/tools/impl/ResetNode";
 import { showAddonsNode } from "@agents/tools/impl/ShowAddonsNode";
 import { processAddonsSelectionNode } from "@agents/tools/impl/ProcessAddonsNode";
+import { generateGarageVisualizationNode } from "@agents/tools/impl/VisualizationNode";
 import { LeadAgentState } from "@agents/LeadAgentState";
 
 const logger: pino.Logger = createLogger(module);
@@ -29,6 +30,7 @@ export function buildLeadAgentGraph() {
         .addNode("process_addons", processAddonsSelectionNode)
         .addNode("handle_update", handleParameterUpdateNode)
         .addNode("handle_reset", handleResetNode)
+        .addNode("generate_visualization", generateGarageVisualizationNode) // ✅ NEW NODE
 
         .addEdge("__start__", "detect_intent")
 
@@ -122,18 +124,23 @@ export function buildLeadAgentGraph() {
             }
         )
 
+        // ✅ UPDATED: Route to visualization after addon processing
         .addConditionalEdges(
             "process_addons",
             (state) => {
                 logger.debug(`[process_addons] nextStep=${state.nextStep}`);
-                return state.nextStep || "__end__";
+                return state.nextStep || "generate_visualization"; // ✅ CHANGED: Default to visualization
             },
             {
+                "generate_visualization": "generate_visualization", // ✅ NEW ROUTE
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
                 "__end__": "__end__",
             }
         )
+
+        // ✅ NEW: Visualization node edge
+        .addEdge("generate_visualization", "__end__")
 
         .addConditionalEdges(
             "handle_update",

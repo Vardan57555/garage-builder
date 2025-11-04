@@ -10,7 +10,7 @@ import {
     detectParameterUpdateFromInput,
     detectResetIntent
 } from "@agents/tools/impl/DetectionHelpers";
-import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
+import {LeadAgentStateType} from "@agents/LeadAgentState";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -93,69 +93,31 @@ export class LeadAgent {
 
                 // ✅ FIX #1: Check if user DECLINED addons FIRST
                 if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
-                    logger.info(`[LeadAgent] User declined addons, calculating final price`);
+                    logger.info(`[LeadAgent] User declined addons, routing to visualization`);
 
-                    const basePrice = session.state.basePrice || 0;
-                    const params = session.state.userFriendlyParams;
+                    // Route through graph to visualization node
+                    const result = await leadAgentGraph.invoke({
+                        sessionId,
+                        messages: await session.memory.chatHistory.getMessages(),
+                        userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
+                        hasGarageIntent: session.state.hasGarageIntent,
+                        priceCalculated: true,
+                        currentField: null,
+                        validationError: null,
+                        response: "",
+                        nextStep: "generate_visualization", // ✅ ROUTE TO VISUALIZATION
+                        stateMapCache: session.stateMapCache || new Map(),
+                        roofMapCache: session.roofMapCache || new Map(),
+                        pendingUpdates: [],
+                        pricingData: session.state.pricingData || null,
+                        basePrice: session.state.basePrice || 0,
+                        selectedAddons: [], // ✅ No addons selected
+                        finalPrice: session.state.basePrice || 0,
+                    });
 
-                    const sqft = (params.width || 0) * (params.length || 0);
-                    const laborCost = basePrice * 0.5;
-                    const foundationCost = sqft * 8.5;
-                    const deliveryCost = 750;
-                    const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
-                    const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
-
-                    logger.info(`[LeadAgent] Price breakdown:`);
-                    logger.info(`  - Base kit: $${basePrice.toFixed(2)}`);
-                    logger.info(`  - Labor: $${laborCost.toFixed(2)}`);
-                    logger.info(`  - Foundation: $${foundationCost.toFixed(2)}`);
-                    logger.info(`  - Delivery: $${deliveryCost.toFixed(2)}`);
-                    logger.info(`  - Contingency: $${contingency.toFixed(2)}`);
-                    logger.info(`  - FINAL TOTAL: $${finalTotal.toFixed(2)}`);
-
-                    const currentParams = LeadAgentHelpers.formatCurrentParams(params);
-
-                    const response = `✅ **FINAL PRICE QUOTE**
-
-${currentParams}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 **DETAILED PRICE BREAKDOWN:**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Building Kit & Materials:**
-• Base Building Package: $${basePrice.toFixed(2)}
-
-**Installation & Construction:**
-• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
-• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
-• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
-• Contingency & Misc (5%): $${contingency.toFixed(2)}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **TOTAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✅ **What's Included:**
-  • Building kit and all materials
-  • Professional installation labor
-  • Foundation slab preparation (concrete)
-  • Delivery & site preparation
-  • 5% contingency for unforeseen costs
-
-📞 **Next Steps:**
-Contact us to finalize your order and discuss:
-  • Custom modifications
-  • Financing options
-  • Installation timeline
-  • Warranty details
-
-🔧 **Want to modify anything?**
-(e.g., "change width to 30", "make it 3 cars")
-Or say **"start over"** to create a new quote.`;
-
+                    const response = result.response;
                     await session.memory.chatHistory.addAIChatMessage(response);
-                    session.state.finalPrice = finalTotal;
+                    session.state.finalPrice = result.finalPrice || session.state.basePrice || 0;
                     return response;
                 }
 
@@ -199,23 +161,38 @@ Or say **"start over"** to create a new quote.`;
                         logger.info(`[LeadAgent] ✅ Addon total: $${addonTotal.toFixed(2)}`);
                         logger.info(`[LeadAgent] ✅ Final with addons: $${finalTotal.toFixed(2)}`);
 
-                        const response = this.formatFinalPriceWithAddons(
-                            params,
-                            basePrice,
-                            selectedAddons,
-                            addonTotal,
-                            finalTotal,
-                            laborCost,
-                            foundationCost,
-                            deliveryCost,
-                            contingency,
-                            sqft
-                        );
+                        // ✅ CHANGE: Route to visualization node instead of formatting directly
+                        const { generateGarageVisualizationNode } = await import("@agents/tools/impl/VisualizationNode");
+
+                        const visualizationState: LeadAgentStateType = {
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: params as Partial<UserFriendlyParams>,
+                            hasGarageIntent: true,
+                            priceCalculated: true,
+                            currentField: null,
+                            validationError: null,
+                            response: "",
+                            nextStep: null,
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: session.state.pricingData || null,
+                            basePrice: basePrice,
+                            selectedAddons: selectedAddons, // ✅ Pass selected addons
+                            finalPrice: finalTotal,
+                        };
+
+                        const result = await generateGarageVisualizationNode(visualizationState);
+                        const response = result.response;
 
                         await session.memory.chatHistory.addAIChatMessage(response);
                         session.state.selectedAddons = selectedAddons;
                         session.state.finalPrice = finalTotal;
+
+                        logger.info(`[LeadAgent] ✅ Visualization with addons generated`);
                         return response;
+
                     } catch (error) {
                         logger.error(`[LeadAgent] Error processing addons:`, error);
                         return `❌ Error processing addons. Please try again or say "no" to skip.`;
@@ -408,75 +385,75 @@ Or say **"start over"** to create a new quote.`;
         }
     }
 
-    // ✅ NEW METHOD: Format final price with addons
-    private formatFinalPriceWithAddons(
-        params: any,
-        basePrice: number,
-        selectedAddons: any[],
-        addonTotal: number,
-        finalTotal: number,
-        laborCost: number,
-        foundationCost: number,
-        deliveryCost: number,
-        contingency: number,
-        sqft: number
-    ): string {
-        const currentParams = LeadAgentHelpers.formatCurrentParams(params);
-
-        let response = `✅ **FINAL PRICE QUOTE WITH ADD-ONS**
-
-${currentParams}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 **DETAILED PRICE BREAKDOWN:**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Building Kit & Materials:**
-• Base Building Package: $${basePrice.toFixed(2)}
-
-**Installation & Construction:**
-• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
-• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
-• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
-• Contingency & Misc (5%): $${contingency.toFixed(2)}`;
-
-        if (selectedAddons.length > 0) {
-            response += `
-
-**Selected Add-ons:** ✅ ADDONS INCLUDED!`;
-            selectedAddons.forEach((addon) => {
-                response += `\n  • ${addon.label}: $${(addon.cost || 0).toFixed(2)}`;
-            });
-            response += `\n\nAdd-ons Total: +$${addonTotal.toFixed(2)}`;
-        }
-
-        response += `
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **FINAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}** ✅ WITH ${selectedAddons.length} ADD-ONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✅ **What's Included:**
-  • Building kit and all materials
-  • Professional installation labor
-  • Foundation slab preparation (concrete)
-  • Delivery & site preparation
-  • ${selectedAddons.length} add-on(s) selected
-  • 5% contingency for unforeseen costs
-
-📞 **Next Steps:**
-Contact us to finalize your order and discuss:
-  • Custom modifications
-  • Financing options
-  • Installation timeline
-  • Warranty details
-
-🔧 **Want to modify anything?**
-(e.g., "change width to 30", "add more windows")
-Or say **"start over"** to create a new quote.`;
-
-        return response;
-    }
+//     // ✅ NEW METHOD: Format final price with addons
+//     private formatFinalPriceWithAddons(
+//         params: any,
+//         basePrice: number,
+//         selectedAddons: any[],
+//         addonTotal: number,
+//         finalTotal: number,
+//         laborCost: number,
+//         foundationCost: number,
+//         deliveryCost: number,
+//         contingency: number,
+//         sqft: number
+//     ): string {
+//         const currentParams = LeadAgentHelpers.formatCurrentParams(params);
+//
+//         let response = `✅ **FINAL PRICE QUOTE WITH ADD-ONS**
+//
+// ${currentParams}
+//
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 📊 **DETAILED PRICE BREAKDOWN:**
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// **Building Kit & Materials:**
+// • Base Building Package: $${basePrice.toFixed(2)}
+//
+// **Installation & Construction:**
+// • Installation Labor (50% of kit): $${laborCost.toFixed(2)}
+// • Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
+// • Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
+// • Contingency & Misc (5%): $${contingency.toFixed(2)}`;
+//
+//         if (selectedAddons.length > 0) {
+//             response += `
+//
+// **Selected Add-ons:** ✅ ADDONS INCLUDED!`;
+//             selectedAddons.forEach((addon) => {
+//                 response += `\n  • ${addon.label}: $${(addon.cost || 0).toFixed(2)}`;
+//             });
+//             response += `\n\nAdd-ons Total: +$${addonTotal.toFixed(2)}`;
+//         }
+//
+//         response += `
+//
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 💰 **FINAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}** ✅ WITH ${selectedAddons.length} ADD-ONS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//
+// ✅ **What's Included:**
+//   • Building kit and all materials
+//   • Professional installation labor
+//   • Foundation slab preparation (concrete)
+//   • Delivery & site preparation
+//   • ${selectedAddons.length} add-on(s) selected
+//   • 5% contingency for unforeseen costs
+//
+// 📞 **Next Steps:**
+// Contact us to finalize your order and discuss:
+//   • Custom modifications
+//   • Financing options
+//   • Installation timeline
+//   • Warranty details
+//
+// 🔧 **Want to modify anything?**
+// (e.g., "change width to 30", "add more windows")
+// Or say **"start over"** to create a new quote.`;
+//
+//         return response;
+//     }
 
     private getOrCreateSession(sessionId: string): LeadAgentSessionMetadata {
         const existing: any = this.sessionManager.getSession(sessionId);

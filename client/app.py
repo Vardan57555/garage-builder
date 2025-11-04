@@ -1,14 +1,15 @@
-"""Streamlit chat UI with PROPER tab isolation using query parameters."""
+"""Streamlit chat UI - Simple SVG rendering fix."""
 
 import os
 import json
 import uuid
 from typing import Any, Optional, Tuple
+import re
 
 import httpx
 import streamlit as st
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000/api/v1/chat")
 
 st.set_page_config(
     page_title="Garage Builder Assistant",
@@ -16,13 +17,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ✅ CRITICAL FIX: Generate unique tab ID from URL query parameter
-# This ensures each browser tab has a UNIQUE identifier
 def get_or_create_tab_id():
     """Get tab ID from URL query params, or create new one if missing."""
-    from urllib.parse import urlparse, parse_qs
     try:
-        # Try to get tabId from URL query parameters
         query_params = st.query_params
         if "tabId" in query_params:
             tab_id = query_params["tabId"]
@@ -32,19 +29,31 @@ def get_or_create_tab_id():
     except:
         pass
 
-    # Generate new tab ID if not in URL
     new_tab_id = str(uuid.uuid4())
-
-    # ✅ IMPORTANT: Update URL with tabId parameter so it persists
     st.query_params["tabId"] = new_tab_id
-
     return new_tab_id
 
 TAB_ID = get_or_create_tab_id()
-
-# ✅ Use TAB_ID directly (not cached) for session state keys
 SESSION_STATE_KEY = f"sessionId_{TAB_ID}"
 MESSAGES_STATE_KEY = f"messages_{TAB_ID}"
+
+
+def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
+    """
+    Split content into SVG and text parts.
+    Returns (svg_string, remaining_text)
+    """
+    # Find SVG using simple regex
+    svg_pattern = r'<svg[^>]*>.*?</svg>'
+    match = re.search(svg_pattern, content, re.DOTALL)
+    
+    if match:
+        svg = match.group(0)
+        # Remove SVG from text
+        text = content[:match.start()] + content[match.end():]
+        return svg, text.strip()
+    
+    return None, content
 
 
 def format_pricing_response(payload: Any) -> str:
@@ -123,7 +132,7 @@ def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
     return session_id, format_pricing_response(answer_source)
 
 
-# ✅ INITIALIZE: Use tab-specific keys (not cached)
+# ✅ INITIALIZE: Use tab-specific keys
 if SESSION_STATE_KEY not in st.session_state:
     st.session_state[SESSION_STATE_KEY] = None
 
@@ -132,18 +141,29 @@ if MESSAGES_STATE_KEY not in st.session_state:
         {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
     ]
 
-st.title("Garage Builder Chat")
+st.title("🏗️ Garage Builder Chat")
 
-# ✅ DEBUG INFO: Show tab identification
+# ✅ DEBUG INFO
 with st.sidebar:
     st.header("🔹 Tab Info")
     st.info(f"**Tab ID:** `{TAB_ID[:16]}...`")
     st.caption("Each tab has a unique ID. Open a new tab and see a different ID!")
 
-# Display conversation history
+# ✅ DISPLAY CONVERSATION
 for msg in st.session_state[MESSAGES_STATE_KEY]:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        content = msg["content"]
+        
+        # ✅ NEW: Split SVG from text
+        svg, text_part = split_svg_and_text(content)
+        
+        # Display text
+        if text_part:
+            st.markdown(text_part)
+        
+        # Display SVG using HTML
+        if svg:
+            st.write(svg, unsafe_allow_html=True)
 
 # Get user input
 if prompt := st.chat_input("Type your question…"):
@@ -153,16 +173,17 @@ if prompt := st.chat_input("Type your question…"):
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
-        placeholder.markdown("⏳ Sending request to backend…")
-
+        
         try:
             timeout = httpx.Timeout(60.0)
             with httpx.Client(timeout=timeout) as client:
                 request_body = {"question": prompt}
 
-                # ✅ CRITICAL: Use tab-specific session ID
                 if st.session_state[SESSION_STATE_KEY]:
                     request_body["sessionId"] = st.session_state[SESSION_STATE_KEY]
+
+                with placeholder.container():
+                    st.markdown("⏳ Sending request to backend…")
 
                 response = client.post(BACKEND_URL, json=request_body)
                 response.raise_for_status()
@@ -174,12 +195,21 @@ if prompt := st.chat_input("Type your question…"):
 
             session_id, reply = parse_chat_response(raw_payload)
             if session_id:
-                st.session_state[SESSION_STATE_KEY] = session_id  # ✅ Store in tab-specific key
+                st.session_state[SESSION_STATE_KEY] = session_id
 
         except Exception as exc:
             reply = f"⚠️ Request failed: {exc}"
 
-        placeholder.markdown(reply)
+        # ✅ RENDER RESPONSE
+        svg, text_part = split_svg_and_text(reply)
+        
+        with placeholder.container():
+            if text_part:
+                st.markdown(text_part)
+            
+            if svg:
+                st.write(svg, unsafe_allow_html=True)
+        
         st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
 
 
@@ -215,7 +245,6 @@ def end_session(session_id: str) -> bool:
 with st.sidebar:
     st.header("Session Info")
 
-    # ✅ Use tab-specific session ID
     if st.session_state[SESSION_STATE_KEY]:
         st.info(f"**Session ID:** `{st.session_state[SESSION_STATE_KEY][:16]}...`")
         st.success("✅ Session is active")

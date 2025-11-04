@@ -20,13 +20,24 @@ export function detectResetIntent(input: string): boolean {
  * This prevents "2 windows" from being interpreted as "2 cars"
  */
 function isAddonRequest(input: string): boolean {
+    // ✅ PRIORITY: Specific addon patterns with quantities
     const addonPatterns = [
-        /\b(add|also|and)\s+(\d+\s+)?(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)/i,
-        /\b(\d+)\s+(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
-        /\b(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
+        // "add 2 doors", "2 windows", "3 braces"
+        /\b(?:add|also|get|want|need)?\s*(\d+)\s+(window|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
+        // Just the keywords without quantity
+        /\b(window|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
     ];
 
-    return addonPatterns.some(pattern => pattern.test(input));
+    const isAddon = addonPatterns.some(p => p.test(input));
+
+    // ✅ CRITICAL: If contains "car" or "garage" as primary subject, NOT an addon
+    const isCarRelated = /\b(\d+)\s*(?:car|cars)\s*(?:garage)?\b/i.test(input);
+
+    if (isCarRelated && !input.match(/\b(?:add|also)\s+\d+\s+(?:window|door|brace)/i)) {
+        return false; // "2 cars" or "3 car garage" = NOT addon
+    }
+
+    return isAddon;
 }
 
 /**

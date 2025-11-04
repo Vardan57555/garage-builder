@@ -4,7 +4,6 @@ exports.PriceParamsExtractorTool = void 0;
 const InstantiationError_1 = require("../../../errors/InstantiationError");
 const SharedLLM_1 = require("../../../llm/SharedLLM");
 const BaseTool_1 = require("../../tools/BaseTool");
-const PriceServiceImpl_1 = require("../../../modules/price-service/services/impl/PriceServiceImpl");
 const messages_1 = require("@langchain/core/messages");
 const Log_1 = require("../../../utils/logger/Log");
 const Constants_1 = require("../../../common/io/Constants");
@@ -41,31 +40,6 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
             return JSON.stringify({});
         }
     }
-    async calculatePriceWithParams(params) {
-        try {
-            logger.info({
-                width: params.width,
-                length: params.length,
-                height: params.height,
-                roofId: params.roof_id
-            }, "[PriceParamsExtractorTool] Calculating price with params");
-            const result = await PriceServiceImpl_1.PriceServiceImpl.getInstance().fetchBuildingPricingWithUtility(params);
-            if (!result) {
-                logger.warn("[PriceParamsExtractorTool] Empty result from pricing service");
-                return "⚠️ Pricing service returned empty result.";
-            }
-            if (!result.status && result.message) {
-                logger.warn(`[PriceParamsExtractorTool] Pricing service error ${result.message}`);
-                return `⚠️ ${result.message}`;
-            }
-            logger.info("[PriceParamsExtractorTool] Price calculated successfully");
-            return this.formatPricingResult(result, params);
-        }
-        catch (error) {
-            logger.error(`[PriceParamsExtractorTool] calculatePriceWithParams failed ${error.message}`);
-            return "⚠️ Failed to calculate price with the given parameters.";
-        }
-    }
     validateAndInferMissingParams(params, userInput) {
         const input = userInput.toLowerCase();
         if (!this.hasDimensions(params)) {
@@ -76,16 +50,9 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
                 width: standardDims.width,
                 length: standardDims.length,
                 height: standardDims.height
-            }, "[validateAndInferMissingParams] Missing dimensions, inferred from type");
+            }, "[validateAndInferMissingParams] Inferred dimensions from garage type");
             Object.assign(params, standardDims);
             params.garage_type = garageType;
-        }
-        if (!params.state_name) {
-            const extractedState = this.extractState(input);
-            if (extractedState) {
-                logger.info({ state: extractedState }, "[validateAndInferMissingParams] Inferred state");
-                params.state_name = extractedState;
-            }
         }
         logger.debug({ keys: Object.keys(params) }, "[validateAndInferMissingParams] Final params");
         return params;
@@ -110,19 +77,21 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         logger.debug("[detectGarageType] No pattern matched, defaulting to garage");
         return "garage";
     }
-    extractState(input) {
-        for (const [pattern, stateName] of Object.entries(Constants_1.Constants.STATE_PATTERNS)) {
-            if (new RegExp(`\\b(?:${pattern})\\b`, "i").test(input)) {
-                logger.debug({ stateName }, "[extractState] Matched state");
-                return stateName;
-            }
-        }
-        logger.debug("[extractState] No state pattern matched");
-        return null;
-    }
     formatPricingResult(pricing, params) {
         logger.info("[formatPricingResult] Formatting price quote");
+        logger.info("[formatPricingResult] Input pricing keys:", Object.keys(pricing || {}));
+        logger.info("[formatPricingResult] Base prices:", {
+            vertical: pricing.base_price_vertical,
+            box: pricing.base_price_box,
+            regular: pricing.base_price_regular
+        });
+        logger.info("[formatPricingResult] Params roof_id:", params.roof_id);
+        if (!pricing || Object.keys(pricing).length === 0) {
+            logger.warn("[formatPricingResult] Empty pricing data, using fallback");
+            return this.formatFallbackPrice(params);
+        }
         const { total: kitPrice, roofPrice } = this.calculateTotalPrice(pricing, params);
+        logger.info("[formatPricingResult] Calculated:", { kitPrice, roofPrice });
         const { total: finalTotal, breakdown: serviceBreakdown } = this.addServiceCosts(kitPrice, params);
         const breakdownLines = [
             ...this.buildBreakdownLines(pricing, params, roofPrice),
@@ -190,6 +159,34 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
         }
         return lines;
     }
+    formatFallbackPrice(params) {
+        const sqft = params.width * params.length;
+        const basePrice = sqft * 120;
+        const laborCost = basePrice * 0.5;
+        const foundationCost = sqft * 8.5;
+        const deliveryCost = 750;
+        const contingency = (basePrice + laborCost + foundationCost + deliveryCost) * 0.05;
+        const finalTotal = basePrice + laborCost + foundationCost + deliveryCost + contingency;
+        const roofName = Constants_1.Constants.ROOF_NAMES[params.roof_id] || "Standard";
+        return `✅ **Price Quote Generated!**
+
+📐 **Building Specifications:**
+   • Dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft (${sqft} sq ft)
+   • Roof Style: ${roofName}
+   • Gauge: ${params.gauge}GA
+
+💰 **ESTIMATED TOTAL PRICE: $${this.formatCurrency(finalTotal)}**
+
+📊 **Price Breakdown:**
+   • Base Building: $${this.formatCurrency(basePrice)}
+   • Installation Labor (50%): $${this.formatCurrency(laborCost)}
+   • Concrete Foundation: $${this.formatCurrency(foundationCost)}
+   • Delivery & Site Prep: $${this.formatCurrency(deliveryCost)}
+   • Contingency (5%): $${this.formatCurrency(contingency)}
+
+💡 *This is an estimate based on standard pricing.*
+*Actual pricing may vary by location and specific options.*`;
+    }
     calculateTotalPrice(pricing, params) {
         const roofPrice = this.selectRoofPrice(params.roof_id, pricing);
         let total = roofPrice;
@@ -207,12 +204,17 @@ class PriceParamsExtractorTool extends BaseTool_1.BaseTool {
     selectRoofPrice(roofId, pricing) {
         const fieldMap = {
             1: "base_price_vertical",
-            2: "base_price_box",
-            3: "base_price_regular",
+            2: "base_price_regular",
+            3: "base_price_box",
         };
         const field = fieldMap[roofId] ?? "base_price_regular";
         const price = pricing[field] ?? pricing.base_price_regular ?? 0;
-        logger.debug({ roofId, field, price }, "[selectRoofPrice] Selected roof price");
+        logger.debug({
+            roofId,
+            field,
+            price,
+            availableFields: Object.keys(pricing).filter(k => k.includes('base_price'))
+        }, "[selectRoofPrice] Selected roof price");
         return price;
     }
     calculateSideClosureCosts(pricing, _params) {
@@ -370,11 +372,9 @@ ${dimensionExplanation}
 6. Extract state if mentioned in input
 
 EXAMPLES:
-- Input: "5 car garage" → {"garage_type": "5-car", "width": 38, "length": 20, "height": 10}
-- Input: "10 cars" → {"garage_type": "10-car", "width": 68, "length": 20, "height": 10}
-- Input: "3 cars in texas" → {"garage_type": "3-car", "width": 26, "length": 20, "height": 10, "state_name": "texas"}
-- Input: "20x25x10 garage" → {"width": 20, "length": 25, "height": 10, "garage_type": null}
-- Input: "truck garage" → {"garage_type": "truck", "width": varies, "length": 24, "height": 12}
+- Input: "5 car garage" → {"garage_type": "5-car", "width": 38, "length": 20, "height": 10, "state_name": null, "roof_type": null, "gauge": null, "building_type": "garage"}
+- Input: "3 cars in texas with box roof" → {"garage_type": "3-car", "width": 26, "length": 20, "height": 10, "state_name": "Texas", "roof_type": "box", "gauge": null, "building_type": "garage"}
+- Input: "20x25x10" → {"width": 20, "length": 25, "height": 10, "state_name": null, "roof_type": null, "gauge": null, "building_type": null}
 
 OUTPUT FORMAT - Return ONLY valid JSON (no markdown, no explanation):
 {
