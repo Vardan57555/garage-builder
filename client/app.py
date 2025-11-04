@@ -9,7 +9,7 @@ import re
 import httpx
 import streamlit as st
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:3000/api/v1/chat")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 
 st.set_page_config(
     page_title="Garage Builder Assistant",
@@ -46,13 +46,13 @@ def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
     # Find SVG using simple regex
     svg_pattern = r'<svg[^>]*>.*?</svg>'
     match = re.search(svg_pattern, content, re.DOTALL)
-    
+
     if match:
         svg = match.group(0)
         # Remove SVG from text
         text = content[:match.start()] + content[match.end():]
         return svg, text.strip()
-    
+
     return None, content
 
 
@@ -153,14 +153,14 @@ with st.sidebar:
 for msg in st.session_state[MESSAGES_STATE_KEY]:
     with st.chat_message(msg["role"]):
         content = msg["content"]
-        
+
         # ✅ NEW: Split SVG from text
         svg, text_part = split_svg_and_text(content)
-        
+
         # Display text
         if text_part:
             st.markdown(text_part)
-        
+
         # Display SVG using HTML
         if svg:
             st.write(svg, unsafe_allow_html=True)
@@ -173,7 +173,7 @@ if prompt := st.chat_input("Type your question…"):
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
-        
+
         try:
             timeout = httpx.Timeout(60.0)
             with httpx.Client(timeout=timeout) as client:
@@ -202,14 +202,14 @@ if prompt := st.chat_input("Type your question…"):
 
         # ✅ RENDER RESPONSE
         svg, text_part = split_svg_and_text(reply)
-        
+
         with placeholder.container():
             if text_part:
                 st.markdown(text_part)
-            
+
             if svg:
                 st.write(svg, unsafe_allow_html=True)
-        
+
         st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
 
 
