@@ -31,7 +31,6 @@ const SessionManager_1 = require("../utils/session/SessionManager");
 const Log_1 = require("../utils/logger/Log");
 const LeadAgentGraph_1 = require("./LeadAgentGraph");
 const DetectionHelpers_1 = require("./tools/impl/DetectionHelpers");
-const LeadAgentHelpers_1 = require("./LeadAgentHelpers");
 const logger = (0, Log_1.createLogger)(module);
 class LeadAgent {
     static instance;
@@ -146,10 +145,31 @@ class LeadAgent {
                         logger.info(`[LeadAgent] ✅ Selected ${selectedAddons.length} addons`);
                         logger.info(`[LeadAgent] ✅ Addon total: $${addonTotal.toFixed(2)}`);
                         logger.info(`[LeadAgent] ✅ Final with addons: $${finalTotal.toFixed(2)}`);
-                        const response = this.formatFinalPriceWithAddons(params, basePrice, selectedAddons, addonTotal, finalTotal, laborCost, foundationCost, deliveryCost, contingency, sqft);
+                        const { generateGarageVisualizationNode } = await Promise.resolve().then(() => __importStar(require("./tools/impl/VisualizationNode")));
+                        const visualizationState = {
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: params,
+                            hasGarageIntent: true,
+                            priceCalculated: true,
+                            currentField: null,
+                            validationError: null,
+                            response: "",
+                            nextStep: null,
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: session.state.pricingData || null,
+                            basePrice: basePrice,
+                            selectedAddons: selectedAddons,
+                            finalPrice: finalTotal,
+                        };
+                        const result = await generateGarageVisualizationNode(visualizationState);
+                        const response = result.response;
                         await session.memory.chatHistory.addAIChatMessage(response);
                         session.state.selectedAddons = selectedAddons;
                         session.state.finalPrice = finalTotal;
+                        logger.info(`[LeadAgent] ✅ Visualization with addons generated`);
                         return response;
                     }
                     catch (error) {
@@ -307,59 +327,6 @@ class LeadAgent {
             logger.error(`[LeadAgent.getAddonsMenuFromDatabase] Error:`, error);
             throw error;
         }
-    }
-    formatFinalPriceWithAddons(params, basePrice, selectedAddons, addonTotal, finalTotal, laborCost, foundationCost, deliveryCost, contingency, sqft) {
-        const currentParams = LeadAgentHelpers_1.LeadAgentHelpers.formatCurrentParams(params);
-        let response = `✅ **FINAL PRICE QUOTE WITH ADD-ONS**
-
-${currentParams}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 **DETAILED PRICE BREAKDOWN:**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Building Kit & Materials:**
-• Base Building Package: $${basePrice.toFixed(2)}
-
-**Installation & Construction:**
-• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
-• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
-• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
-• Contingency & Misc (5%): $${contingency.toFixed(2)}`;
-        if (selectedAddons.length > 0) {
-            response += `
-
-**Selected Add-ons:** ✅ ADDONS INCLUDED!`;
-            selectedAddons.forEach((addon) => {
-                response += `\n  • ${addon.label}: $${(addon.cost || 0).toFixed(2)}`;
-            });
-            response += `\n\nAdd-ons Total: +$${addonTotal.toFixed(2)}`;
-        }
-        response += `
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **FINAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}** ✅ WITH ${selectedAddons.length} ADD-ONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✅ **What's Included:**
-  • Building kit and all materials
-  • Professional installation labor
-  • Foundation slab preparation (concrete)
-  • Delivery & site preparation
-  • ${selectedAddons.length} add-on(s) selected
-  • 5% contingency for unforeseen costs
-
-📞 **Next Steps:**
-Contact us to finalize your order and discuss:
-  • Custom modifications
-  • Financing options
-  • Installation timeline
-  • Warranty details
-
-🔧 **Want to modify anything?**
-(e.g., "change width to 30", "add more windows")
-Or say **"start over"** to create a new quote.`;
-        return response;
     }
     getOrCreateSession(sessionId) {
         const existing = this.sessionManager.getSession(sessionId);

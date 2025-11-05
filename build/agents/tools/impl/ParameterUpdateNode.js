@@ -178,6 +178,7 @@ async function validateParameterValue(field, value, stateMapCache) {
 }
 function applyParameterUpdate(currentParams, field, value) {
     logger.info(`[applyParameterUpdate] Updating ${field} = ${value}`);
+    logger.info(`[applyParameterUpdate] Current garage_type: ${currentParams.garage_type}`);
     const updatedParams = {
         ...currentParams
     };
@@ -187,14 +188,21 @@ function applyParameterUpdate(currentParams, field, value) {
         if (numCars && numCars > 0) {
             const calculation = DimensionCalculator_1.DynamicGarageDimensionCalculator.calculateDimensionsFromInput(`${numCars} cars`);
             if (calculation.width && calculation.length) {
+                logger.info(`[applyParameterUpdate] 🔄 garage_type changing from "${currentParams.garage_type}" to "${value}"`);
+                logger.info(`[applyParameterUpdate] OLD dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
+                delete updatedParams.width;
+                delete updatedParams.length;
+                delete updatedParams.height;
+                logger.info(`[applyParameterUpdate] ✅ Deleted old dimensions`);
                 updatedParams.width = calculation.width;
                 updatedParams.length = calculation.length;
                 updatedParams.height = calculation.height;
                 updatedParams.garage_type = calculation.garageType;
+                logger.info(`[applyParameterUpdate] ✅ NEW dimensions set: ${calculation.width}×${calculation.length}×${calculation.height}`);
                 logger.info(`[applyParameterUpdate] Updated garage_type:`, updatedParams);
                 return {
                     success: true,
-                    message: `✓ Updated to ${calculation.numCars}-car garage`,
+                    message: `✓ Updated to ${calculation.numCars}-car garage (${calculation.width}×${calculation.length}×${calculation.height}ft)`,
                     updatedParams: updatedParams,
                 };
             }

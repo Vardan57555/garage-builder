@@ -23,9 +23,6 @@ start:
 	echo "Starting phpMyAdmin..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d phpmyadmin
 
-	echo "Starting loki..."
-	docker compose -f $(MAIN_COMPOSE_FILE) up -d loki grafana
-
 	echo "Installing dependencies..."
 	sh ./scripts/initialize_services/initialize.sh
 
