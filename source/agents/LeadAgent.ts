@@ -91,11 +91,9 @@ export class LeadAgent {
 
                 const userInput = input.toLowerCase().trim();
 
-                // ✅ FIX #1: Check if user DECLINED addons FIRST
                 if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
                     logger.info(`[LeadAgent] User declined addons, routing to visualization`);
 
-                    // Route through graph to visualization node
                     const result = await leadAgentGraph.invoke({
                         sessionId,
                         messages: await session.memory.chatHistory.getMessages(),
@@ -105,13 +103,13 @@ export class LeadAgent {
                         currentField: null,
                         validationError: null,
                         response: "",
-                        nextStep: "generate_visualization", // ✅ ROUTE TO VISUALIZATION
+                        nextStep: "generate_visualization",
                         stateMapCache: session.stateMapCache || new Map(),
                         roofMapCache: session.roofMapCache || new Map(),
                         pendingUpdates: [],
                         pricingData: session.state.pricingData || null,
                         basePrice: session.state.basePrice || 0,
-                        selectedAddons: [], // ✅ No addons selected
+                        selectedAddons: [],
                         finalPrice: session.state.basePrice || 0,
                     });
 
@@ -121,7 +119,6 @@ export class LeadAgent {
                     return response;
                 }
 
-                // ✅ FIX #2: Check if user is ADDING addons (BEFORE parameter extraction)
                 const isAddonRequest = this.detectAddonRequest(userInput);
 
                 if (isAddonRequest) {
@@ -129,7 +126,6 @@ export class LeadAgent {
                     logger.info(`[LeadAgent] Routing directly to addon processing (NOT parameter extraction)`);
 
                     try {
-                        // Get the addon menu
                         const addonsMenu = await this.getAddonsMenuFromDatabase();
 
                         if (!addonsMenu || addonsMenu.length === 0) {
@@ -137,7 +133,6 @@ export class LeadAgent {
                             return `❌ Error: Addon options not available`;
                         }
 
-                        // Parse addon selections directly
                         const selectedAddons = this.parseAddonSelections(userInput, addonsMenu);
 
                         if (selectedAddons.length === 0) {
@@ -145,7 +140,6 @@ export class LeadAgent {
                             return `I couldn't understand which addons you want. Please try:\n• "2 windows"\n• "add 1 door and 3 braces"\n• "no" to skip addons`;
                         }
 
-                        // Calculate final price WITH addons
                         const basePrice = session.state.basePrice || 0;
                         const params = session.state.userFriendlyParams;
 
@@ -161,7 +155,6 @@ export class LeadAgent {
                         logger.info(`[LeadAgent] ✅ Addon total: $${addonTotal.toFixed(2)}`);
                         logger.info(`[LeadAgent] ✅ Final with addons: $${finalTotal.toFixed(2)}`);
 
-                        // ✅ CHANGE: Route to visualization node instead of formatting directly
                         const { generateGarageVisualizationNode } = await import("@agents/tools/impl/VisualizationNode");
 
                         const visualizationState: LeadAgentStateType = {
@@ -179,7 +172,7 @@ export class LeadAgent {
                             pendingUpdates: [],
                             pricingData: session.state.pricingData || null,
                             basePrice: basePrice,
-                            selectedAddons: selectedAddons, // ✅ Pass selected addons
+                            selectedAddons: selectedAddons,
                             finalPrice: finalTotal,
                         };
 
@@ -199,7 +192,6 @@ export class LeadAgent {
                     }
                 }
 
-                // ✅ If not addon request and not declined, check for parameter updates
                 const update = await detectParameterUpdateFromInput(input);
                 if (update) {
                     logger.info(`[LeadAgent] User modified parameter: ${update.field}`);
@@ -239,7 +231,6 @@ export class LeadAgent {
                     return response;
                 }
 
-                // Default: show addon menu again
                 logger.info(`[LeadAgent] Unclear input, showing addon menu again`);
                 const result = await leadAgentGraph.invoke({
                     sessionId,
@@ -265,7 +256,6 @@ export class LeadAgent {
                 return response;
             }
 
-            // INITIAL QUOTE FLOW
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
             const update = await detectParameterUpdateFromInput(input);
@@ -315,7 +305,6 @@ export class LeadAgent {
         }
     }
 
-    // ✅ NEW METHOD: Detect if input is addon request
     private detectAddonRequest(input: string): boolean {
         const addonPatterns = [
             /\b(add|also|and)\s+(\d+\s+)?(window|door|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?/i,
@@ -327,7 +316,6 @@ export class LeadAgent {
         return isAddon;
     }
 
-    // ✅ NEW METHOD: Parse addon selections from user input
     private parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
         const selected: any[] = [];
         const quantityPattern = /(?:add|also|and)?\s*(\d+)\s+(window|door|walkin|walk.?in|brace|anchor|cupola|truss)s?/gi;
@@ -359,7 +347,6 @@ export class LeadAgent {
         return selected;
     }
 
-    // ✅ NEW METHOD: Get addons menu from database
     private async getAddonsMenuFromDatabase(): Promise<any[]> {
         try {
             const { getAddonsWithCache, getLimitedAddonsByType } =

@@ -33,7 +33,6 @@ export async function generateGarageImageWithOllama(
 
         logger.info(`[generateGarageImageWithOllama] Sending to Ollama...`);
 
-        // ✅ Call Ollama API (default: localhost:11434)
         const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
 
         const response = await axios.post(
@@ -42,7 +41,6 @@ export async function generateGarageImageWithOllama(
                 model: process.env.OLLAMA_IMAGE_MODEL || "stable-diffusion",
                 prompt,
                 stream: false,
-                // Image-specific parameters
                 parameters: {
                     height: 512,
                     width: 768,
@@ -52,14 +50,13 @@ export async function generateGarageImageWithOllama(
                 }
             },
             {
-                timeout: 120000 // 2 minute timeout for image generation
+                timeout: 120000
             }
         );
 
         if (response.data.response) {
             logger.info(`[generateGarageImageWithOllama] ✅ Image generated successfully`);
 
-            // Ollama returns base64 image data
             const imageData = response.data.response;
             const base64Image = `data:image/png;base64,${imageData}`;
 
@@ -74,17 +71,6 @@ export async function generateGarageImageWithOllama(
         return null;
     }
 }
-
-// ============================================================================
-// OPTION 2: LOCAL STABLE DIFFUSION (BEST FOR LOCAL)
-// ============================================================================
-// Requirements:
-// 1. Install: git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui
-// 2. Run: ./webui.sh (starts on localhost:7860)
-// 3. Use API at: http://localhost:7860/api
-//
-// This is faster and more reliable than Ollama for images
-// ============================================================================
 
 /**
  * Generate image using Stable Diffusion WebUI (LOCAL)
@@ -146,13 +132,6 @@ text, watermark, cartoon, anime, drawing`;
         return null;
     }
 }
-
-// ============================================================================
-// OPTION 3: COMBINE OLLAMA + PROMPTING (RECOMMENDED FOR YOUR CASE)
-// ============================================================================
-// Use Ollama to GENERATE TEXT DESCRIPTION → then generate image
-// Better results than raw prompt
-// ============================================================================
 
 /**
  * Generate enhanced prompt using Ollama, then create image
@@ -230,10 +209,6 @@ Start with: "Create a photorealistic architectural rendering of..."`;
         return null;
     }
 }
-
-// ============================================================================
-// OPTION 4: UPDATED VISUALIZATION NODE (USE ANY GENERATOR)
-// ============================================================================
 
 /**
  * Try multiple image generation methods in order of preference

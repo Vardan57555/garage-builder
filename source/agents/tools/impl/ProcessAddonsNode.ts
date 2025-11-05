@@ -13,7 +13,6 @@ function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
 
     logger.info(`[parseAddonSelections] Parsing: "${userInput}"`);
 
-    // METHOD 1: Number selection (e.g., "1" or "1, 2")
     const numberMatches = userInput.match(/\d+/g);
     if (numberMatches && numberMatches.length > 0) {
         const potentialIndices = numberMatches.map(n => parseInt(n) - 1);
@@ -28,7 +27,6 @@ function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
         }
     }
 
-    // METHOD 2: Quantity + keyword selection
     const quantityPattern = /(?:add|also|and)?\s*(\d+)\s+(window|door|walkin|walk.?in|brace|anchor|cupola|truss)s?/gi;
     const quantityMatches = [...userInput.matchAll(quantityPattern)];
 
@@ -90,7 +88,6 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // Check if user declined addons
         if (/(no|skip|none|without|don't|nope|nah|nothing)/i.test(userInput)) {
             logger.info(`[ProcessAddonsNode] User declined addons`);
 
@@ -98,11 +95,10 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
                 selectedAddons: [],
                 finalPrice: state.basePrice || 0,
                 priceCalculated: true,
-                nextStep: "generate_visualization", // ✅ Route to visualization
+                nextStep: "generate_visualization",
             };
         }
 
-        // Get addons menu from state (passed from showAddonsNode)
         let addonsMenu = (state as any).addonsMenu || [];
 
         if (!addonsMenu || addonsMenu.length === 0) {
@@ -127,7 +123,6 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
             };
         }
 
-        // Calculate final price with addons
         const basePrice = state.basePrice || 0;
         const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
         const finalTotal = basePrice + addonTotal;

@@ -27,7 +27,6 @@ async function extractFieldValueWithLLM(
     try {
         logger.info(`[extractFieldValueWithLLM] Extracting ${field} from: "${userInput}"`);
 
-        // ✅ Check for indecision patterns FIRST
         const indecisionPatterns = [
             /\b(any|whatever|anyways|idk|i don't know|doesn't matter|don't care|idc|no preference|surprise me|you pick|all the same|doesn't matter|whatever's fine)\b/i,
             /^(any|whatever|idk|hmm|um|uh)$/i,
@@ -38,12 +37,11 @@ async function extractFieldValueWithLLM(
         if (isIndecisive) {
             logger.info(`[extractFieldValueWithLLM] ✅ Detected indecision: "${userInput}"`);
 
-            // Return balanced defaults
             const defaults: Record<keyof UserFriendlyParams, any> = {
-                roof_type: "regular",      // Most balanced (middle option)
-                gauge: 16,                 // Most common gauge
-                building_type: "garage",   // Most common building type
-                state_name: null,          // Can't default for state - needs user input
+                roof_type: "regular",
+                gauge: 16,
+                building_type: "garage",
+                state_name: null,
                 width: null,
                 length: null,
                 height: null,
@@ -64,7 +62,6 @@ async function extractFieldValueWithLLM(
             return defaultValue;
         }
 
-        // Build locked fields context
         let lockedContext = "Already extracted (do NOT override):";
         if (currentParams.width) lockedContext += `\n  - width: ${currentParams.width}ft`;
         if (currentParams.length) lockedContext += `\n  - length: ${currentParams.length}ft`;
@@ -140,7 +137,6 @@ RETURN ONLY THE VALUE:`;
 
         logger.info(`[extractFieldValueWithLLM] Raw response: "${value}"`);
 
-        // ✅ STRICT VALIDATION - reject if response contains code/markdown indicators
         if (
             value.includes("def ") ||
             value.includes("import ") ||
@@ -152,7 +148,7 @@ RETURN ONLY THE VALUE:`;
             value.includes(".replace") ||
             value.includes("pattern ") ||
             value.includes("regex") ||
-            value.length > 100  // Values should be short
+            value.length > 100
         ) {
             logger.warn(
                 `[extractFieldValueWithLLM] Invalid response (looks like code): "${value.substring(0, 50)}..."`
@@ -160,7 +156,6 @@ RETURN ONLY THE VALUE:`;
             return null;
         }
 
-        // Parse the response
         if (value === "null" || value === "" || value === "undefined" || value === "none") {
             logger.info(`[extractFieldValueWithLLM] No value extracted for ${field}`);
             return null;
@@ -210,7 +205,6 @@ async function validateParameterValue(
             return `❌ Invalid ${field}: must be a positive number`;
         }
 
-        // Gauge validation
         if (field === "gauge" && ![14, 16, 18, 20].includes(numValue)) {
             return `❌ Invalid gauge. Must be 14, 16, 18, or 20`;
         }
@@ -227,7 +221,6 @@ function applyParameterUpdate(
     logger.info(`[applyParameterUpdate] Updating ${field} = ${value}`);
     logger.info(`[applyParameterUpdate] Current garage_type: ${currentParams.garage_type}`);
 
-    // ✅ Create NEW object - Use Record to avoid type inference issues
     const updatedParams: Record<keyof UserFriendlyParams, any> = {
         ...currentParams
     } as Record<keyof UserFriendlyParams, any>;
@@ -242,17 +235,14 @@ function applyParameterUpdate(
             );
 
             if (calculation.width && calculation.length) {
-                // ✅ CRITICAL FIX: CLEAR old dimensions BEFORE setting new ones
                 logger.info(`[applyParameterUpdate] 🔄 garage_type changing from "${currentParams.garage_type}" to "${value}"`);
                 logger.info(`[applyParameterUpdate] OLD dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
 
-                // ✅ DELETE old dimensions
                 delete updatedParams.width;
                 delete updatedParams.length;
                 delete updatedParams.height;
                 logger.info(`[applyParameterUpdate] ✅ Deleted old dimensions`);
 
-                // ✅ SET new dimensions from calculator
                 updatedParams.width = calculation.width;
                 updatedParams.length = calculation.length;
                 updatedParams.height = calculation.height;
@@ -275,7 +265,6 @@ function applyParameterUpdate(
         };
     }
 
-    // Numeric fields
     if (["width", "length", "height", "gauge", "utility_length"].includes(field as string)) {
         let numValue: number;
         if (typeof value === "string") {
@@ -301,7 +290,6 @@ function applyParameterUpdate(
         };
     }
 
-    // String fields
     updatedParams[field] = String(value).trim();
 
     logger.info(`[applyParameterUpdate] Set ${field} = ${String(value).trim()}`);
@@ -324,14 +312,11 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
 
         const updateMessages: string[] = [];
 
-        // ✅ Get current user input
         const userInput = state.messages[state.messages.length - 1]?.content as string;
 
         for (const update of state.pendingUpdates) {
             logger.info(`[UpdateNode] Processing: ${update.field} = ${update.value}`);
 
-            // ✅ NEW: Use LLM to extract field-specific value
-            // This prevents "Vertical" from being interpreted as state_name
             const extractedValue = await extractFieldValueWithLLM(
                 userInput,
                 update.field,
@@ -343,10 +328,8 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
                 continue;
             }
 
-            // Use extracted value instead of detection value
             update.value = extractedValue;
 
-            // Validate
             const validationError = await validateParameterValue(
                 update.field,
                 update.value,
@@ -364,7 +347,6 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
                 };
             }
 
-            // Handle roof choice
             if (update.field === "roof_type") {
                 const isExplicit = /^(vertical|regular|box|a-frame)$/i.test(String(update.value));
                 if (!isExplicit) {
@@ -373,7 +355,6 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
                 }
             }
 
-            // Apply update
             const result = applyParameterUpdate(
                 updatedParams as Partial<UserFriendlyParams>,
                 update.field,
@@ -399,7 +380,6 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[UpdateNode] All updates applied, checking missing fields`);
 
-        // Check what's missing now
         const missingFields = LeadAgentHelpers.getMissingFields(updatedParams as Partial<UserFriendlyParams>);
 
         if (missingFields.length === 0) {
@@ -426,7 +406,6 @@ export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
         };
     }
 
-    // No pending updates, check if we should calculate price
     const missingFields = LeadAgentHelpers.getMissingFields(state.userFriendlyParams);
     if (missingFields.length === 0) {
         return {

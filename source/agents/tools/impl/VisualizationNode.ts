@@ -30,7 +30,6 @@ function generateGarageSVG(spec: {
 
     logger.info(`[generateGarageSVG] Generating: ${width}x${length}x${height}`);
 
-    // ✅ CRITICAL: Return SVG as single line, wrapped in specific markers
     const svg = `<svg width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}" xmlns="http://www.w3.org/2000/svg" style="background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 60%, #90EE90 60%, #7CB342 100%); border: 1px solid #ddd; border-radius: 4px;"><defs><linearGradient id="wallGradient" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:${wallColor};stop-opacity:1" /><stop offset="100%" style="stop-color:#A73D38;stop-opacity:1" /></linearGradient><linearGradient id="roofGradient" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:${roofColor};stop-opacity:1" /><stop offset="100%" style="stop-color:#1B3A52;stop-opacity:1" /></linearGradient><filter id="shadow"><feDropShadow dx="2" dy="4" stdDeviation="3" flood-opacity="0.3"/></filter></defs><ellipse cx="${svgWidth / 2}" cy="${svgHeight * 0.68}" rx="${length * scale * 0.45}" ry="20" fill="#00000020"/><g id="building" filter="url(#shadow)"><rect x="60" y="100" width="${length * scale}" height="${height * scale}" fill="url(#wallGradient)" stroke="#5B2E2E" stroke-width="2"/>${roofType === "vertical" ? `<polygon points="60,100 ${60 + length * scale},100 ${60 + length * scale / 2},${100 - height * scale * 0.3}" fill="url(#roofGradient)" stroke="#1B3A52" stroke-width="2"/>` : `<rect x="60" y="80" width="${length * scale}" height="20" fill="url(#roofGradient)" stroke="#1B3A52" stroke-width="2"/>`}${Array.from({ length: doorCount }).map((_, idx) => {
         const doorX = doorSpacing + idx * (doorWidth + doorSpacing);
         return `<g id="door-${idx + 1}"><rect x="${doorX}" y="${100 + height * scale * 0.15}" width="${doorWidth}" height="${doorHeight}" fill="#8B6914" stroke="#654321" stroke-width="1"/>${Array.from({ length: 3 }).map((_, panel) => {
@@ -62,7 +61,6 @@ function formatFinalQuoteWithVisualization(
 
     const line = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 
-    // ✅ CRITICAL: SVG comes FIRST, separated by clear markers
     let response = `✅ YOUR FINAL GARAGE QUOTE
 
 ${currentParams}

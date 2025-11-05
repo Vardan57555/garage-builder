@@ -34,10 +34,8 @@ async function buildAddonsMenu(): Promise<any[]> {
             return [];
         }
 
-        // ✅ Limit to top 10 per type to avoid overwhelming user
         const limited = getLimitedAddonsByType(allAddons, 10);
 
-        // Transform to menu format
         const menu = limited.map(addon => ({
             id: addon.id,
             label: addon.label,
@@ -89,7 +87,7 @@ export const showAddonsNode = async (state: LeadAgentStateType) => {
 
         return {
             response: promptMessage,
-            addonsMenu,  // Pass menu to next node (ProcessAddonsNode)
+            addonsMenu,
             pricingData: state.pricingData,
             basePrice: state.basePrice,
             finalPrice: state.basePrice,

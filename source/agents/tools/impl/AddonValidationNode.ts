@@ -1,10 +1,3 @@
-/**
- * ============================================================================
- * ADDON SYSTEM VALIDATION SCRIPT
- * ============================================================================
- * Run this to verify everything is working end-to-end
- */
-
 import { getAddonsWithCache, getLimitedAddonsByType, clearAddonCache } from "@agents/tools/impl/AddonDatabaseService";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
@@ -124,7 +117,6 @@ async function validateAddonSystem() {
     }
 }
 
-// Run validation
 validateAddonSystem().then(success => {
     if (!success) {
         process.exit(1);
