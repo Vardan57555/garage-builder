@@ -195,25 +195,57 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[ExtractNode] Merged params (before dimension preservation):`, mergedParams);
 
-        if (currentParams.width && !extractedParams.width) {
-            mergedParams.width = currentParams.width;
-            logger.info(`[ExtractNode] ✅ Preserved width from current params: ${currentParams.width}`);
-        }
-        if (currentParams.length && !extractedParams.length) {
-            mergedParams.length = currentParams.length;
-            logger.info(`[ExtractNode] ✅ Preserved length from current params: ${currentParams.length}`);
-        }
-        if (currentParams.height && !extractedParams.height) {
-            mergedParams.height = currentParams.height;
-            logger.info(`[ExtractNode] ✅ Preserved height from current params: ${currentParams.height}`);
-        }
-        if (currentParams.garage_type && !extractedParams.garage_type) {
-            mergedParams.garage_type = currentParams.garage_type;
-            logger.info(`[ExtractNode] ✅ Preserved garage_type from current params: ${currentParams.garage_type}`);
+        // ✅ KEY FIX #1: Check if garage_type CHANGED
+        const garageTypeChanged = extractedParams.garage_type &&
+            extractedParams.garage_type !== currentParams.garage_type;
+
+        if (garageTypeChanged) {
+            logger.info(`[ExtractNode] 🔄 GARAGE_TYPE CHANGED from "${currentParams.garage_type}" to "${extractedParams.garage_type}"`);
+            logger.info(`[ExtractNode] OLD dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
+
+            // ✅ CRITICAL: DELETE old dimensions FIRST
+            delete mergedParams.width;
+            delete mergedParams.length;
+            delete mergedParams.height;
+            logger.info(`[ExtractNode] ✅ Deleted old dimensions`);
+
+            // Now recalculate with new garage_type
+            const calc = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(
+                extractedParams.garage_type
+            );
+
+            logger.info(`[ExtractNode] Calculator result for "${extractedParams.garage_type}":`, {
+                numCars: calc.numCars,
+                width: calc.width,
+                length: calc.length,
+                height: calc.height,
+            });
+
+            if (calc.width && calc.length && calc.height) {
+                logger.info(`[ExtractNode] ✅ Setting FRESH dimensions from calculator`);
+                mergedParams.width = calc.width;
+                mergedParams.length = calc.length;
+                mergedParams.height = calc.height;
+            } else {
+                logger.warn(`[ExtractNode] ❌ Calculator did not return complete dimensions`);
+            }
+        } else {
+            // ✅ KEY FIX #2: Preserve existing dimensions if garage_type didn't change
+            if (currentParams.width && !extractedParams.width) {
+                mergedParams.width = currentParams.width;
+                logger.info(`[ExtractNode] ✅ Preserved width from current params: ${currentParams.width}`);
+            }
+            if (currentParams.length && !extractedParams.length) {
+                mergedParams.length = currentParams.length;
+                logger.info(`[ExtractNode] ✅ Preserved length from current params: ${currentParams.length}`);
+            }
+            if (currentParams.height && !extractedParams.height) {
+                mergedParams.height = currentParams.height;
+                logger.info(`[ExtractNode] ✅ Preserved height from current params: ${currentParams.height}`);
+            }
         }
 
-        logger.info(`[ExtractNode] Merged params (after preservation):`, mergedParams);
-
+        // ✅ KEY FIX #3: If garage_type exists and dimensions are still missing, calculate them
         if (mergedParams.garage_type && !mergedParams.width) {
             logger.info(`[ExtractNode] Calculating dimensions for garage_type: ${mergedParams.garage_type}`);
 
@@ -236,6 +268,11 @@ export const extractParametersNode = async (state: LeadAgentStateType) => {
             } else {
                 logger.warn(`[ExtractNode] ❌ Calculator did not return complete dimensions`);
             }
+        }
+
+        if (currentParams.garage_type && !extractedParams.garage_type) {
+            mergedParams.garage_type = currentParams.garage_type;
+            logger.info(`[ExtractNode] ✅ Preserved garage_type from current params: ${currentParams.garage_type}`);
         }
 
         logger.info(`[ExtractNode] Final dimensions AFTER calculation:`, {

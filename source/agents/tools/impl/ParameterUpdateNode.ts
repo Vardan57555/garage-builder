@@ -219,13 +219,13 @@ async function validateParameterValue(
     return null;
 }
 
-// ✅ FIX: Use 'any' type or Record to avoid TypeScript inference issues
 function applyParameterUpdate(
     currentParams: Partial<UserFriendlyParams>,
     field: keyof UserFriendlyParams,
     value: any
 ): UpdateResult {
     logger.info(`[applyParameterUpdate] Updating ${field} = ${value}`);
+    logger.info(`[applyParameterUpdate] Current garage_type: ${currentParams.garage_type}`);
 
     // ✅ Create NEW object - Use Record to avoid type inference issues
     const updatedParams: Record<keyof UserFriendlyParams, any> = {
@@ -242,16 +242,28 @@ function applyParameterUpdate(
             );
 
             if (calculation.width && calculation.length) {
+                // ✅ CRITICAL FIX: CLEAR old dimensions BEFORE setting new ones
+                logger.info(`[applyParameterUpdate] 🔄 garage_type changing from "${currentParams.garage_type}" to "${value}"`);
+                logger.info(`[applyParameterUpdate] OLD dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
+
+                // ✅ DELETE old dimensions
+                delete updatedParams.width;
+                delete updatedParams.length;
+                delete updatedParams.height;
+                logger.info(`[applyParameterUpdate] ✅ Deleted old dimensions`);
+
+                // ✅ SET new dimensions from calculator
                 updatedParams.width = calculation.width;
                 updatedParams.length = calculation.length;
                 updatedParams.height = calculation.height;
                 updatedParams.garage_type = calculation.garageType;
 
+                logger.info(`[applyParameterUpdate] ✅ NEW dimensions set: ${calculation.width}×${calculation.length}×${calculation.height}`);
                 logger.info(`[applyParameterUpdate] Updated garage_type:`, updatedParams);
 
                 return {
                     success: true,
-                    message: `✓ Updated to ${calculation.numCars}-car garage`,
+                    message: `✓ Updated to ${calculation.numCars}-car garage (${calculation.width}×${calculation.length}×${calculation.height}ft)`,
                     updatedParams: updatedParams as Partial<UserFriendlyParams>,
                 };
             }
@@ -300,6 +312,7 @@ function applyParameterUpdate(
         updatedParams: updatedParams as Partial<UserFriendlyParams>,
     };
 }
+
 
 export const handleParameterUpdateNode = async (state: LeadAgentStateType) => {
     logger.info(`[UpdateNode] Pending updates: ${state.pendingUpdates.length}`);
