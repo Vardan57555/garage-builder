@@ -1,15 +1,18 @@
-"""Streamlit chat UI - Simple SVG rendering fix."""
+"""Streamlit chat UI - Enhanced with better error handling and diagnostics."""
 
 import os
 import json
 import uuid
 from typing import Any, Optional, Tuple
 import re
+import time
 
 import httpx
 import streamlit as st
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120.0"))  # Configurable timeout
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "1"))  # Number of retries on timeout
 
 st.set_page_config(
     page_title="Garage Builder Assistant",
@@ -43,13 +46,11 @@ def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
     Split content into SVG and text parts.
     Returns (svg_string, remaining_text)
     """
-    # Find SVG using simple regex
     svg_pattern = r'<svg[^>]*>.*?</svg>'
     match = re.search(svg_pattern, content, re.DOTALL)
 
     if match:
         svg = match.group(0)
-        # Remove SVG from text
         text = content[:match.start()] + content[match.end():]
         return svg, text.strip()
 
@@ -58,7 +59,6 @@ def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
 
 def format_pricing_response(payload: Any) -> str:
     """Extract a human-readable message from backend payload fragments."""
-
     if payload is None:
         return "⚠️ Empty response received from pricing service."
 
@@ -93,7 +93,6 @@ def format_pricing_response(payload: Any) -> str:
 
 def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
     """Parse full backend response and return session ID with formatted answer."""
-
     if payload is None:
         return None, "⚠️ Empty response received from pricing service."
 
@@ -132,7 +131,23 @@ def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
     return session_id, format_pricing_response(answer_source)
 
 
-# ✅ INITIALIZE: Use tab-specific keys
+def test_backend_health() -> Tuple[bool, str]:
+    """Test if backend is reachable."""
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            # Try to reach the base URL
+            base_url = BACKEND_URL.replace('/api/v1/chat', '')
+            response = client.get(f"{base_url}/health", follow_redirects=True)
+            return True, f"Backend reachable (status: {response.status_code})"
+    except httpx.ConnectError:
+        return False, "Cannot connect to backend - is it running?"
+    except httpx.TimeoutException:
+        return False, "Backend health check timed out"
+    except Exception as e:
+        return False, f"Backend check failed: {str(e)}"
+
+
+# Initialize session state
 if SESSION_STATE_KEY not in st.session_state:
     st.session_state[SESSION_STATE_KEY] = None
 
@@ -141,27 +156,79 @@ if MESSAGES_STATE_KEY not in st.session_state:
         {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
     ]
 
+if "last_error" not in st.session_state:
+    st.session_state.last_error = None
+
 st.title("🏗️ Garage Builder Chat")
 
-# ✅ DEBUG INFO
+# Sidebar with diagnostics
 with st.sidebar:
-    st.header("🔹 Tab Info")
+    st.header("🔹 Connection Info")
     st.info(f"**Tab ID:** `{TAB_ID[:16]}...`")
-    st.caption("Each tab has a unique ID. Open a new tab and see a different ID!")
+    st.caption(f"**Backend:** {BACKEND_URL}")
+    st.caption(f"**Timeout:** {REQUEST_TIMEOUT}s")
 
-# ✅ DISPLAY CONVERSATION
+    # Health check
+    if st.button("🔍 Test Backend Connection"):
+        with st.spinner("Testing..."):
+            healthy, message = test_backend_health()
+            if healthy:
+                st.success(message)
+            else:
+                st.error(message)
+
+    st.divider()
+
+    # Session info
+    st.header("Session Info")
+    if st.session_state[SESSION_STATE_KEY]:
+        st.info(f"**Session ID:** `{st.session_state[SESSION_STATE_KEY][:16]}...`")
+        st.success("✅ Session is active")
+
+        if st.button("🔴 End Session", key="end_session"):
+            try:
+                with httpx.Client(timeout=10.0) as client:
+                    response = client.post(
+                        f"{BACKEND_URL.replace('/chat', '')}/end",
+                        json={"sessionId": st.session_state[SESSION_STATE_KEY]},
+                    )
+                    response.raise_for_status()
+
+                st.session_state[SESSION_STATE_KEY] = None
+                st.session_state[MESSAGES_STATE_KEY] = [
+                    {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
+                ]
+                st.success("Session cleared!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to end session: {e}")
+    else:
+        st.warning("⏳ Waiting for first response...")
+
+    if st.button("↻ New Conversation", key="new_conversation"):
+        st.session_state[SESSION_STATE_KEY] = None
+        st.session_state[MESSAGES_STATE_KEY] = [
+            {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
+        ]
+        st.session_state.last_error = None
+        st.rerun()
+
+    # Show last error if any
+    if st.session_state.last_error:
+        st.divider()
+        st.header("⚠️ Last Error")
+        with st.expander("View Details"):
+            st.code(st.session_state.last_error)
+
+# Display conversation
 for msg in st.session_state[MESSAGES_STATE_KEY]:
     with st.chat_message(msg["role"]):
         content = msg["content"]
-
-        # ✅ NEW: Split SVG from text
         svg, text_part = split_svg_and_text(content)
 
-        # Display text
         if text_part:
             st.markdown(text_part)
 
-        # Display SVG using HTML
         if svg:
             st.write(svg, unsafe_allow_html=True)
 
@@ -173,98 +240,72 @@ if prompt := st.chat_input("Type your question…"):
 
     with st.chat_message("assistant"):
         placeholder = st.empty()
+        reply = None
 
-        try:
-            timeout = httpx.Timeout(60.0)
-            with httpx.Client(timeout=timeout) as client:
-                request_body = {"question": prompt}
-
-                if st.session_state[SESSION_STATE_KEY]:
-                    request_body["sessionId"] = st.session_state[SESSION_STATE_KEY]
-
-                with placeholder.container():
-                    st.markdown("⏳ Sending request to backend…")
-
-                response = client.post(BACKEND_URL, json=request_body)
-                response.raise_for_status()
-
-                try:
-                    raw_payload = response.json()
-                except ValueError:
-                    raw_payload = response.text
-
-            session_id, reply = parse_chat_response(raw_payload)
-            if session_id:
-                st.session_state[SESSION_STATE_KEY] = session_id
-
-        except Exception as exc:
-            reply = f"⚠️ Request failed: {exc}"
-
-        # ✅ RENDER RESPONSE
-        svg, text_part = split_svg_and_text(reply)
-
-        with placeholder.container():
-            if text_part:
-                st.markdown(text_part)
-
-            if svg:
-                st.write(svg, unsafe_allow_html=True)
-
-        st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
-
-
-def end_session(session_id: str) -> bool:
-    """Call backend to end a session."""
-    if not session_id:
-        return False
-
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(
-                f"{BACKEND_URL.replace('/chat', '')}/end",
-                json={"sessionId": session_id},
-            )
-            response.raise_for_status()
-
+        # Attempt request with retries
+        for attempt in range(MAX_RETRIES + 1):
             try:
-                result = response.json()
-            except ValueError:
-                return False
+                timeout = httpx.Timeout(REQUEST_TIMEOUT, connect=10.0)
+                with httpx.Client(timeout=timeout) as client:
+                    request_body = {"question": prompt}
 
-            if isinstance(result, dict):
-                data = result.get("data") if isinstance(result.get("data"), dict) else None
-                if data and "success" in data:
-                    return bool(data.get("success"))
-                return bool(result.get("success"))
+                    if st.session_state[SESSION_STATE_KEY]:
+                        request_body["sessionId"] = st.session_state[SESSION_STATE_KEY]
 
-            return False
-    except Exception:
-        return False
+                    with placeholder.container():
+                        if attempt > 0:
+                            st.markdown(f"⏳ Retry {attempt}/{MAX_RETRIES}...")
+                        else:
+                            st.markdown("⏳ Sending request to backend…")
 
+                        start_time = time.time()
 
-with st.sidebar:
-    st.header("Session Info")
+                    response = client.post(BACKEND_URL, json=request_body)
+                    elapsed = time.time() - start_time
 
-    if st.session_state[SESSION_STATE_KEY]:
-        st.info(f"**Session ID:** `{st.session_state[SESSION_STATE_KEY][:16]}...`")
-        st.success("✅ Session is active")
+                    response.raise_for_status()
 
-        if st.button("🔴 End Session", key="end_session"):
-            if end_session(st.session_state[SESSION_STATE_KEY]):
-                st.session_state[SESSION_STATE_KEY] = None
-                st.session_state[MESSAGES_STATE_KEY] = [
-                    {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
-                ]
-                st.success("Session cleared!")
-                st.rerun()
-            else:
-                st.error("Failed to end session")
-    else:
-        st.warning("⏳ Waiting for first response...")
+                    try:
+                        raw_payload = response.json()
+                    except ValueError:
+                        raw_payload = response.text
 
-    if st.button("↻ New Conversation", key="new_conversation"):
-        st.session_state[SESSION_STATE_KEY] = None
-        st.session_state[MESSAGES_STATE_KEY] = [
-            {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
-        ]
-        st.rerun()
+                session_id, reply = parse_chat_response(raw_payload)
+                if session_id:
+                    st.session_state[SESSION_STATE_KEY] = session_id
+
+                st.session_state.last_error = None
+                break  # Success, exit retry loop
+
+            except httpx.TimeoutException as exc:
+                error_msg = f"Request timed out after {REQUEST_TIMEOUT}s"
+                if attempt < MAX_RETRIES:
+                    continue  # Retry
+                else:
+                    reply = f"⚠️ {error_msg}\n\n**Troubleshooting:**\n- Check if backend is running\n- Try a simpler question\n- Increase timeout in environment variables"
+                    st.session_state.last_error = f"{error_msg}\nAttempt: {attempt + 1}/{MAX_RETRIES + 1}\nBackend: {BACKEND_URL}"
+
+            except httpx.ConnectError as exc:
+                error_msg = "Cannot connect to backend"
+                reply = f"⚠️ {error_msg}\n\n**Please verify:**\n- Backend service is running on {BACKEND_URL}\n- Port 3000 is accessible\n- No firewall blocking the connection"
+                st.session_state.last_error = f"{error_msg}\nBackend: {BACKEND_URL}\nError: {str(exc)}"
+                break  # Don't retry connection errors
+
+            except Exception as exc:
+                error_msg = f"Request failed: {type(exc).__name__}"
+                reply = f"⚠️ {error_msg}: {str(exc)}"
+                st.session_state.last_error = f"{error_msg}\n{str(exc)}\nBackend: {BACKEND_URL}"
+                break
+
+        # Render response
+        if reply:
+            svg, text_part = split_svg_and_text(reply)
+
+            with placeholder.container():
+                if text_part:
+                    st.markdown(text_part)
+
+                if svg:
+                    st.write(svg, unsafe_allow_html=True)
+
+            st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})

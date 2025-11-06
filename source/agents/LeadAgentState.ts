@@ -85,6 +85,12 @@ export const LeadAgentState = Annotation.Root({
         value: (_, update) => update ?? 0,
         default: () => 0,
     }),
+
+    // ✅ NEW: Add this field to store generated image URL
+    generatedImageUrl: Annotation<string | null>({
+        value: (_, update) => update ?? null,
+        default: () => null,
+    }),
 });
 
 export type LeadAgentStateType = typeof LeadAgentState.State;

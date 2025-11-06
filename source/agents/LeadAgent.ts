@@ -174,6 +174,7 @@ export class LeadAgent {
                             basePrice: basePrice,
                             selectedAddons: selectedAddons,
                             finalPrice: finalTotal,
+                            generatedImageUrl: null,
                         };
 
                         const result = await generateGarageVisualizationNode(visualizationState);
