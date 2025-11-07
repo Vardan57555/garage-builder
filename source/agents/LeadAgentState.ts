@@ -86,7 +86,6 @@ export const LeadAgentState = Annotation.Root({
         default: () => 0,
     }),
 
-    // ✅ NEW: Add this field to store generated image URL
     generatedImageUrl: Annotation<string | null>({
         value: (_, update) => update ?? null,
         default: () => null,

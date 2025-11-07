@@ -10,12 +10,10 @@ async function validateAddonSystem() {
     logger.info("════════════════════════════════════════════════════════════════");
 
     try {
-        // TEST 1: Clear cache
         logger.info("\n[TEST 1] Clearing addon cache...");
         clearAddonCache();
         logger.info("✅ Cache cleared");
 
-        // TEST 2: Fetch all addons
         logger.info("\n[TEST 2] Fetching all addons from database...");
         const allAddons = await getAddonsWithCache();
 
@@ -26,7 +24,6 @@ async function validateAddonSystem() {
 
         logger.info(`✅ Fetched ${allAddons.length} addons total`);
 
-        // TEST 3: Verify addon structure
         logger.info("\n[TEST 3] Verifying addon data structure...");
         const firstAddon = allAddons[0];
         if (!firstAddon.id || !firstAddon.label || !firstAddon.type || firstAddon.cost === undefined) {
@@ -96,7 +93,6 @@ async function validateAddonSystem() {
         const totalCost = withCost.reduce((sum, a) => sum + a.cost, 0);
         logger.info(`✅ Total addon inventory value: $${totalCost.toFixed(2)}`);
 
-        // FINAL RESULT
         logger.info("\n════════════════════════════════════════════════════════════════");
         logger.info("✅ ALL TESTS PASSED - Addon system is working!");
         logger.info("════════════════════════════════════════════════════════════════");

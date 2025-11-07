@@ -30,7 +30,7 @@ export function buildLeadAgentGraph() {
         .addNode("process_addons", processAddonsSelectionNode)
         .addNode("handle_update", handleParameterUpdateNode)
         .addNode("handle_reset", handleResetNode)
-        .addNode("generate_visualization", generateGarageVisualizationNode) // ✅ NEW NODE
+        .addNode("generate_visualization", generateGarageVisualizationNode)
 
         .addEdge("__start__", "detect_intent")
 
@@ -124,22 +124,20 @@ export function buildLeadAgentGraph() {
             }
         )
 
-        // ✅ UPDATED: Route to visualization after addon processing
         .addConditionalEdges(
             "process_addons",
             (state) => {
                 logger.debug(`[process_addons] nextStep=${state.nextStep}`);
-                return state.nextStep || "generate_visualization"; // ✅ CHANGED: Default to visualization
+                return state.nextStep || "generate_visualization";
             },
             {
-                "generate_visualization": "generate_visualization", // ✅ NEW ROUTE
+                "generate_visualization": "generate_visualization",
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
                 "__end__": "__end__",
             }
         )
 
-        // ✅ NEW: Visualization node edge
         .addEdge("generate_visualization", "__end__")
 
         .addConditionalEdges(

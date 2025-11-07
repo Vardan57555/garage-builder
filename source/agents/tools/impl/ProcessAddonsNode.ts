@@ -133,7 +133,7 @@ export const processAddonsSelectionNode = async (state: LeadAgentStateType) => {
             selectedAddons,
             finalPrice: finalTotal,
             priceCalculated: true,
-            nextStep: "generate_visualization", // ✅ Route to visualization
+            nextStep: "generate_visualization",
         };
     } catch (error) {
         logger.error(`[ProcessAddonsNode] Error:`, error);

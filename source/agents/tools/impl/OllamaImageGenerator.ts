@@ -1,4 +1,3 @@
-// ✅ FIXED: VisualizationNode with proper async handling and fallback logic
 
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
@@ -19,7 +18,6 @@ async function generateWithPollinations(params: UserFriendlyParams): Promise<str
         const height = params.height || 10;
         const roofType = params.roof_type || "regular";
 
-        // ✅ OPTIMIZED PROMPT for better results
         const prompt = `professional photorealistic garage building exterior, 
 ${width} feet wide by ${length} feet long by ${height} feet tall, 
 ${roofType} roof style metal building, 
@@ -73,7 +71,7 @@ async function generateGarageImageWithRetry(
             const result = await Promise.race([
                 generateWithPollinations(params),
                 new Promise<null>((resolve) =>
-                    setTimeout(() => resolve(null), 90000) // 90 second timeout
+                    setTimeout(() => resolve(null), 90000)
                 )
             ]);
 
@@ -87,7 +85,6 @@ async function generateGarageImageWithRetry(
             logger.warn(`[generateGarageImageWithRetry] Attempt ${attempt} error: ${error}`);
         }
 
-        // Wait before retry (exponential backoff)
         if (attempt < maxRetries) {
             const delay = 1000 * Math.pow(2, attempt - 1);
             logger.info(`[generateGarageImageWithRetry] Waiting ${delay}ms before retry...`);
@@ -118,10 +115,8 @@ function generateSVGFallback(spec: {
     const w = spec.length * scale;
     const h = spec.height * scale;
 
-    // Main building body
     let svg = `<svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg" style="background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%); border: 2px solid #333; border-radius: 8px;">`;
 
-    // Sky gradient background
     svg += `<defs>
     <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
         <stop offset="0%" style="stop-color:#87CEEB;stop-opacity:1" />
@@ -134,42 +129,32 @@ function generateSVGFallback(spec: {
     </linearGradient>
 </defs>`;
 
-    // Sky
     svg += `<rect width="${svgWidth}" height="${svgHeight}" fill="url(#skyGrad)"/>`;
 
-    // Roof (roof_type specific)
     if (spec.roofType === "vertical") {
-        // Peaked vertical roof
         const roofPoints = `${x},${y} ${x + w / 2},${y - roofHeight} ${x + w},${y}`;
         svg += `<polygon points="${roofPoints}" fill="#8B4513" stroke="#333" stroke-width="2"/>`;
     } else if (spec.roofType === "box") {
-        // Flat box roof
         svg += `<rect x="${x}" y="${y - roofHeight / 2}" width="${w}" height="${roofHeight / 2}" fill="#505050" stroke="#333" stroke-width="2"/>`;
     } else if (spec.roofType === "a-frame") {
-        // A-frame peaked roof
         const roofPoints = `${x},${y} ${x + w / 2},${y - roofHeight * 1.2} ${x + w},${y}`;
         svg += `<polygon points="${roofPoints}" fill="#A52A2A" stroke="#333" stroke-width="2"/>`;
     } else {
-        // Regular/default horizontal roof with slight peak
         svg += `<path d="M ${x} ${y} L ${x + w / 2} ${y - roofHeight * 0.5} L ${x + w} ${y}" fill="#696969" stroke="#333" stroke-width="2"/>`;
     }
 
-    // Main building walls
     svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#metalGrad)" stroke="#333" stroke-width="2"/>`;
 
-    // Corrugated metal lines (vertical ribs)
     for (let i = 0; i < w; i += 40) {
         svg += `<line x1="${x + i}" y1="${y}" x2="${x + i}" y2="${y + h}" stroke="#555" stroke-width="1" opacity="0.6"/>`;
     }
 
-    // Garage door
     const doorX = x + w * 0.15;
     const doorY = y + h * 0.1;
     const doorW = w * 0.7;
     const doorH = h * 0.75;
     svg += `<rect x="${doorX}" y="${doorY}" width="${doorW}" height="${doorH}" fill="#D4A574" stroke="#333" stroke-width="2"/>`;
 
-    // Door panels
     for (let i = 0; i < 4; i++) {
         const panelY = doorY + (i * doorH / 4);
         svg += `<line x1="${doorX}" y1="${panelY}" x2="${doorX + doorW}" y2="${panelY}" stroke="#333" stroke-width="1"/>`;
@@ -179,13 +164,10 @@ function generateSVGFallback(spec: {
         svg += `<line x1="${panelX}" y1="${doorY}" x2="${panelX}" y2="${doorY + doorH}" stroke="#333" stroke-width="1"/>`;
     }
 
-    // Door windows
     svg += `<rect x="${doorX + doorW * 0.15}" y="${doorY + doorH * 0.1}" width="${doorW * 0.7}" height="${doorH * 0.15}" fill="#87CEEB" stroke="#333" stroke-width="1" opacity="0.7"/>`;
 
-    // Foundation
     svg += `<rect x="${x - 10}" y="${y + h}" width="${w + 20}" height="20" fill="#8B7355" stroke="#333" stroke-width="2"/>`;
 
-    // Dimensions with better positioning
     const labelY = y + h + 50;
 
     svg += `<text x="${x + w / 2}" y="${labelY}" text-anchor="middle" font-size="16" font-weight="bold" fill="#333">
@@ -200,7 +182,6 @@ ${spec.height}' Tall
 ${spec.width}'
 </text>`;
 
-    // Title
     svg += `<text x="${svgWidth / 2}" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#333">
 ${spec.roofType.toUpperCase()} ROOF GARAGE
 </text>`;
@@ -241,7 +222,6 @@ ${line}
 
 `;
 
-    // Priority 1: AI-generated image
     if (imageUrl && imageUrl.startsWith('data:image')) {
         response += `![Garage Rendering](${imageUrl})
 
@@ -249,7 +229,6 @@ ${line}
 Professional architectural visualization quality
 `;
     }
-    // Priority 2: SVG diagram
     else if (svgFallback) {
         response += `${svgFallback}
 
@@ -329,7 +308,6 @@ export const generateGarageVisualizationNode = async (state: LeadAgentStateType)
         let imageUrl: string | null = null;
         let svgFallback: string | null = null;
 
-        // ✅ Try AI generation with retries
         logger.info("[VisualizationNode] Attempting AI image generation with retries...");
         try {
             imageUrl = await generateGarageImageWithRetry(params, 3);
@@ -343,7 +321,6 @@ export const generateGarageVisualizationNode = async (state: LeadAgentStateType)
             logger.warn(`[VisualizationNode] AI generation failed: ${error}`);
         }
 
-        // ✅ Always generate SVG fallback as backup
         logger.info("[VisualizationNode] Generating SVG fallback...");
         svgFallback = generateSVGFallback({
             width: params.width,
@@ -352,7 +329,6 @@ export const generateGarageVisualizationNode = async (state: LeadAgentStateType)
             roofType: params.roof_type || "regular"
         });
 
-        // Calculate costs
         const sqft = params.width * params.length;
         const laborCost = basePrice * 0.5;
         const foundationCost = sqft * 8.5;

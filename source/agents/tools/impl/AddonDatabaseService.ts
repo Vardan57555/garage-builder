@@ -42,12 +42,10 @@ async function fetchAddonsFromDB(): Promise<AddonFromDB[]> {
                 description: row.description || "",
                 category: row.category || "",
             }))
-            // ✅ Filter out zero-cost addons
             .filter(addon => addon.cost > 0);
 
         logger.info(`[fetchAddonsFromDB] ✅ Fetched ${addons.length} paid addons`);
 
-        // Log breakdown by type
         const typeCount = new Map<string, number>();
         addons.forEach(addon => {
             typeCount.set(addon.type, (typeCount.get(addon.type) || 0) + 1);
@@ -70,7 +68,7 @@ async function fetchAddonsFromDB(): Promise<AddonFromDB[]> {
  */
 let addonCache: AddonFromDB[] | null = null;
 let cacheTimestamp = 0;
-const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
+const CACHE_DURATION = 15 * 60 * 1000;
 
 /**
  * ✅ PRIMARY EXPORT: Get all addons with caching
@@ -79,7 +77,6 @@ const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes
 export async function getAddonsWithCache(): Promise<AddonFromDB[]> {
     const now = Date.now();
 
-    // Return cached if still valid
     if (addonCache && (now - cacheTimestamp) < CACHE_DURATION) {
         logger.debug(`[getAddonsWithCache] Using cached addons (${addonCache.length} items)`);
         return addonCache;

@@ -19,7 +19,7 @@ export const askForFieldNode = async (state: LeadAgentStateType) => {
             return {
                 currentField: missing[0],
                 userFriendlyParams: state.userFriendlyParams,
-                nextStep: "ask_for_field",  // ✅ Ask again with field set
+                nextStep: "ask_for_field",
             };
         }
 

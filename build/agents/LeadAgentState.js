@@ -71,5 +71,9 @@ exports.LeadAgentState = langgraph_1.Annotation.Root({
         value: (_, update) => update ?? 0,
         default: () => 0,
     }),
+    generatedImageUrl: (0, langgraph_1.Annotation)({
+        value: (_, update) => update ?? null,
+        default: () => null,
+    }),
 });
 //# sourceMappingURL=LeadAgentState.js.map
