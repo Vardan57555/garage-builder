@@ -1,186 +1,477 @@
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
-import { LeadAgentStateType } from "@agents/LeadAgentState";
+import axios, { AxiosInstance } from "axios";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
-import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
-import axios from "axios";
 
 const logger: pino.Logger = createLogger(module);
 
+interface ComfyUIWorkflow {
+    [key: string]: {
+        class_type: string;
+        inputs: Record<string, any>;
+    };
+}
+
+interface ComfyUIResponse {
+    prompt_id: string;
+}
+
+interface GenerationResult {
+    success: boolean;
+    imageUrl?: string;
+    imageData?: Buffer;
+    error?: string;
+    base64?: string;
+}
+
 /**
- * ✅ HELPER: Generate image from Pollinations.ai
+ * ComfyUI Image Generator
+ * Handles communication with ComfyUI API for professional garage visualizations
  */
-async function generateGarageImage(params: UserFriendlyParams): Promise<string | null> {
-    try {
+class ComfyUIGenerator {
+    private axios: AxiosInstance;
+    private pollInterval: number = 2000; // 2 seconds
+    private maxRetries: number = 3;
+
+    constructor(comfyuiUrl: string = "http://localhost:8188") {
+        logger.info(`[ComfyUI] Initializing with URL: ${comfyuiUrl}`);
+        this.axios = axios.create({
+            baseURL: comfyuiUrl,
+            timeout: 120000,
+        });
+    }
+
+    /**
+     * Build ComfyUI workflow for garage visualization
+     */
+    private buildGarageWorkflow(
+        prompt: string,
+        width: number = 1024,
+        height: number = 768,
+        seed: number = -1
+    ): ComfyUIWorkflow {
+        return {
+            "1": {
+                class_type: "CheckpointLoaderSimple",
+                inputs: {
+                    ckpt_name: "put_checkpoints_here/sd_xl_base_1.0.safetensors",
+                },
+            },
+            "2": {
+                class_type: "CLIPTextEncode",
+                inputs: {
+                    text: prompt,
+                    clip: ["1", 1],
+                },
+            },
+            "3": {
+                class_type: "CLIPTextEncode",
+                inputs: {
+                    text: "blurry, low quality, distorted, deformed, ugly, bad anatomy, watermark, text, signature, cartoon, sketch",
+                    clip: ["1", 1],
+                },
+            },
+            "4": {
+                class_type: "EmptyLatentImage",
+                inputs: {
+                    width: width,
+                    height: height,
+                    batch_size: 1,
+                },
+            },
+            "5": {
+                class_type: "KSampler",
+                inputs: {
+                    seed: seed,
+                    steps: 20,
+                    cfg: 7.5,
+                    sampler_name: "euler",
+                    scheduler: "normal",
+                    denoise: 1.0,
+                    model: ["1", 0],
+                    positive: ["2", 0],
+                    negative: ["3", 0],
+                    latent_image: ["4", 0],
+                },
+            },
+            "6": {
+                class_type: "VAEDecode",
+                inputs: {
+                    samples: ["5", 0],
+                    vae: ["1", 2],
+                },
+            },
+            "7": {
+                class_type: "SaveImage",
+                inputs: {
+                    filename_prefix: "garage_gen",
+                    images: ["6", 0],
+                },
+            },
+        };
+    }
+
+    /**
+     * Build detailed garage prompt from parameters
+     */
+    private buildGaragePrompt(params: UserFriendlyParams): string {
         const width = params.width || 20;
         const length = params.length || 20;
         const height = params.height || 10;
-        const roofType = params.roof_type || "regular";
+        const roofType = params.roof_type || "gable";
 
-        const prompt = `professional photorealistic garage building exterior, 
-${width} feet wide by ${length} feet long by ${height} feet tall, 
-${roofType} roof style metal building, 
-modern roll-up garage door with windows, 
-dark gray or burgundy metal siding with light trim,
-corrugated metal panels, 
-suburban residential setting,
-golden hour lighting, clear blue sky,
-concrete pad foundation, green lawn,
-3/4 front corner view,
-architectural visualization,
-professional real estate photography,
-8k quality, sharp focus,
-no people, no text, no watermarks`;
+        return `Professional photorealistic exterior architectural visualization of a metal garage building.
 
-        const encodedPrompt = encodeURIComponent(prompt);
-        const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=768&model=flux-pro&seed=${Date.now()}`;
+Dimensions: ${width} feet wide by ${length} feet long by ${height} feet tall.
+Roof style: ${roofType} roof with clean modern lines.
 
-        logger.info("[generateGarageImage] Calling Pollinations.ai...");
+Features:
+- Metal roll-up garage doors with windows and modern handles
+- Professional metal siding with corrugated panels
+- Concrete foundation pad
+- Suburban residential setting with landscaping
+- Green lawn and trees in background
 
-        const response = await axios.get(imageUrl, {
-            responseType: 'arraybuffer',
-            timeout: 120000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
+Lighting: Golden hour lighting, warm and professional, clear blue sky with subtle clouds.
+Perspective: 3/4 front corner architectural view
+Quality: Professional real estate photography, 8k, sharp focus, detailed textures
+Realistic materials, accurate proportions, professional rendering.
 
-        const base64 = Buffer.from(response.data).toString('base64');
-        logger.info("[generateGarageImage] ✅ Success!");
-        return `data:image/png;base64,${base64}`;
-
-    } catch (error) {
-        logger.warn(`[generateGarageImage] Failed: ${error}`);
-        return null;
+Exclude: people, text, watermarks, signs, vehicles`;
     }
-}
 
-/**
- * ✅ HELPER: Retry with exponential backoff
- */
-async function generateWithRetry(
-    params: UserFriendlyParams,
-    maxRetries: number = 3
-): Promise<string | null> {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        logger.info(`[generateWithRetry] Attempt ${attempt}/${maxRetries}...`);
-
+    /**
+     * Queue image generation with ComfyUI
+     */
+    private async queuePrompt(
+        workflow: ComfyUIWorkflow
+    ): Promise<string> {
         try {
-            const result = await Promise.race([
-                generateGarageImage(params),
-                new Promise<null>((resolve) =>
-                    setTimeout(() => resolve(null), 90000)
-                )
-            ]);
+            logger.info("[ComfyUI] Queueing prompt...");
+            const requestBody = {
+                prompt: workflow,
+                client_id: `client_${Date.now()}_${Math.random()}`,
+            };
+            logger.info("[ComfyUI] Request body:", JSON.stringify(requestBody, null, 2));
 
-            if (result) {
-                logger.info(`[generateWithRetry] ✅ Success on attempt ${attempt}`);
-                return result;
+            const response = await this.axios.post<ComfyUIResponse>(
+                "/prompt",
+                requestBody
+            );
+
+            if (response.status !== 200) {
+                throw new Error(
+                    `ComfyUI queue failed with status ${response.status}`
+                );
             }
 
-            logger.warn(`[generateWithRetry] Attempt ${attempt} returned null`);
+            const promptId = response.data.prompt_id;
+            logger.info(`[ComfyUI] Prompt queued: ${promptId}`);
+
+            return promptId;
+        } catch (error: any) {
+            logger.error("[ComfyUI] Queue error:", error.message);
+            if (error.response?.data) {
+                logger.error("[ComfyUI] Response status:", error.response.status);
+                logger.error("[ComfyUI] Response data:", JSON.stringify(error.response.data));
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Poll for generation completion
+     */
+    private async pollForCompletion(
+        promptId: string,
+        timeout: number = 120000
+    ): Promise<string> {
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < timeout) {
+            try {
+                const response = await this.axios.get(`/history/${promptId}`);
+
+                if (response.status === 200 && response.data[promptId]) {
+                    const history = response.data[promptId];
+
+                    // Check for errors
+                    if (history.status?.status_str === "error") {
+                        const errorMsg = history.status?.messages || "Unknown error";
+                        throw new Error(`Generation error: ${errorMsg}`);
+                    }
+
+                    // Check for outputs
+                    if (history.outputs) {
+                        for (const output of Object.values(history.outputs)) {
+                            const nodeOutput = output as any;
+                            if (nodeOutput.images && nodeOutput.images.length > 0) {
+                                const image = nodeOutput.images[0];
+                                logger.info(
+                                    `[ComfyUI] Generation complete. Image: ${image.filename}`
+                                );
+                                return image.filename;
+                            }
+                        }
+                    }
+                }
+
+                await new Promise((resolve) =>
+                    setTimeout(resolve, this.pollInterval)
+                );
+            } catch (error) {
+                if (error instanceof Error && error.message.includes("Generation error")) {
+                    throw error;
+                }
+                logger.warn("[ComfyUI] Poll error:", error);
+            }
+        }
+
+        throw new Error(`Generation timeout after ${timeout}ms`);
+    }
+
+    /**
+     * Retrieve generated image
+     */
+    private async getImage(filename: string): Promise<Buffer> {
+        try {
+            logger.info(`[ComfyUI] Fetching image: ${filename}`);
+
+            const response = await this.axios.get("/view", {
+                params: {
+                    filename: filename,
+                    type: "output",
+                },
+                responseType: "arraybuffer",
+            });
+
+            if (response.status !== 200) {
+                throw new Error(
+                    `Failed to fetch image: ${response.status}`
+                );
+            }
+
+            logger.info("[ComfyUI] Image retrieved successfully");
+            return Buffer.from(response.data);
         } catch (error) {
-            logger.warn(`[generateWithRetry] Attempt ${attempt} error: ${error}`);
-        }
-
-        if (attempt < maxRetries) {
-            const delay = 1000 * Math.pow(2, attempt - 1);
-            logger.info(`[generateWithRetry] Waiting ${delay}ms before retry...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            logger.error("[ComfyUI] Image fetch error:", error);
+            throw error;
         }
     }
 
-    logger.error("[generateWithRetry] All retries exhausted");
-    return null;
+    /**
+     * Generate garage image with retry logic
+     */
+    async generateGarageImage(
+        params: UserFriendlyParams,
+        retries: number = this.maxRetries
+    ): Promise<GenerationResult> {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                logger.info(
+                    `[ComfyUI] Generation attempt ${attempt}/${retries}...`
+                );
+
+                const prompt = this.buildGaragePrompt(params);
+                logger.debug("[ComfyUI] Prompt:", prompt);
+
+                const seed = Math.floor(Math.random() * (2 ** 32 - 1));
+                const workflow = this.buildGarageWorkflow(prompt, 1024, 768, seed);
+
+                const promptId = await this.queuePrompt(workflow);
+                const filename = await this.pollForCompletion(promptId);
+                const imageBuffer = await this.getImage(filename);
+
+                const base64 = imageBuffer.toString("base64");
+
+                logger.info(
+                    `[ComfyUI] ✅ Success on attempt ${attempt}`
+                );
+
+                return {
+                    success: true,
+                    imageData: imageBuffer,
+                    base64: `data:image/png;base64,${base64}`,
+                    imageUrl: `/generated/${filename}`,
+                };
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                logger.warn(
+                    `[ComfyUI] Attempt ${attempt} failed: ${errorMsg}`
+                );
+
+                if (attempt < retries) {
+                    const delay = 1000 * Math.pow(2, attempt - 1);
+                    logger.info(
+                        `[ComfyUI] Waiting ${delay}ms before retry...`
+                    );
+                    await new Promise((resolve) =>
+                        setTimeout(resolve, delay)
+                    );
+                }
+            }
+        }
+
+        return {
+            success: false,
+            error: `Generation failed after ${retries} attempts`,
+        };
+    }
+
+    /**
+     * Check ComfyUI health
+     */
+    async checkHealth(): Promise<{
+        healthy: boolean;
+        message: string;
+    }> {
+        try {
+            logger.info("[ComfyUI] Checking health...");
+            const response = await this.axios.get("/system_stats", {
+                timeout: 5000,
+            });
+
+            if (response.status === 200) {
+                logger.info("[ComfyUI] ✅ Health check passed");
+                return {
+                    healthy: true,
+                    message: "ComfyUI is running and healthy",
+                };
+            }
+
+            logger.warn(`[ComfyUI] Health check failed with status ${response.status}`);
+            return {
+                healthy: false,
+                message: `ComfyUI returned status ${response.status}`,
+            };
+        } catch (error) {
+            logger.error("[ComfyUI] Health check failed:", error instanceof Error ? error.message : error);
+            return {
+                healthy: false,
+                message: `ComfyUI is unreachable: ${error}`,
+            };
+        }
+    }
 }
 
 /**
- * ✅ HELPER: Generate SVG fallback diagram
+ * Generate visualization node for garage quotes
  */
-function generateSimpleSVGFallback(spec: {
-    width: number;
-    length: number;
-    height: number;
-    roofType: string;
-}): string {
-    const scale = 20;
-    const svgWidth = spec.length * scale + 100;
-    const svgHeight = spec.height * scale + 150;
-    const roofHeight = spec.height * scale * 0.3;
+export const generateGarageVisualizationNode = async (state: any) => {
+    logger.info(
+        `[VisualizationNode] Session ${state.sessionId} - Generating ComfyUI visualization`
+    );
 
-    const x = 50;
-    const y = 80;
-    const w = spec.length * scale;
-    const h = spec.height * scale;
+    try {
+        const params = state.userFriendlyParams as UserFriendlyParams;
+        const selectedAddons = state.selectedAddons || [];
+        const basePrice = state.basePrice || 0;
+        const finalTotal = state.finalPrice || basePrice;
 
-    let svg = `<svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg" style="background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%); border: 2px solid #333; border-radius: 8px;">`;
+        if (!params.width || !params.length || !params.height) {
+            logger.error(
+                "[VisualizationNode] Missing required dimensions"
+            );
+            return {
+                response: "Error: Missing building dimensions",
+                nextStep: "__end__",
+            };
+        }
 
-    svg += `<defs>
-    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%" style="stop-color:#87CEEB;stop-opacity:1" />
-        <stop offset="100%" style="stop-color:#E0F6FF;stop-opacity:1" />
-    </linearGradient>
-    <linearGradient id="metalGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-        <stop offset="0%" style="stop-color:#A9A9A9;stop-opacity:1" />
-        <stop offset="50%" style="stop-color:#696969;stop-opacity:1" />
-        <stop offset="100%" style="stop-color:#505050;stop-opacity:1" />
-    </linearGradient>
-</defs>`;
+        // Initialize ComfyUI generator
+        const comfyuiUrl = process.env.COMFYUI_URL || "http://127.0.0.1:8188";
+        logger.info(`[VisualizationNode] Using ComfyUI URL: ${comfyuiUrl}`);
+        const generator = new ComfyUIGenerator(comfyuiUrl);
 
-    svg += `<rect width="${svgWidth}" height="${svgHeight}" fill="url(#skyGrad)"/>`;
+        // Check ComfyUI health
+        const health = await generator.checkHealth();
+        if (!health.healthy) {
+            logger.warn(
+                `[VisualizationNode] ComfyUI not available: ${health.message}`
+            );
+        }
 
-    if (spec.roofType === "vertical") {
-        const roofPoints = `${x},${y} ${x + w / 2},${y - roofHeight} ${x + w},${y}`;
-        svg += `<polygon points="${roofPoints}" fill="#8B4513" stroke="#333" stroke-width="2"/>`;
-    } else if (spec.roofType === "box") {
-        svg += `<rect x="${x}" y="${y - roofHeight / 2}" width="${w}" height="${roofHeight / 2}" fill="#505050" stroke="#333" stroke-width="2"/>`;
-    } else if (spec.roofType === "a-frame") {
-        const roofPoints = `${x},${y} ${x + w / 2},${y - roofHeight * 1.2} ${x + w},${y}`;
-        svg += `<polygon points="${roofPoints}" fill="#A52A2A" stroke="#333" stroke-width="2"/>`;
-    } else {
-        svg += `<path d="M ${x} ${y} L ${x + w / 2} ${y - roofHeight * 0.5} L ${x + w} ${y}" fill="#696969" stroke="#333" stroke-width="2"/>`;
+        let imageUrl: string | null = null;
+        let base64Image: string | null = null;
+
+        logger.info(
+            "[VisualizationNode] Starting ComfyUI image generation..."
+        );
+
+        try {
+            const result = await generator.generateGarageImage(params, 3);
+
+            if (result.success && result.base64) {
+                logger.info("[VisualizationNode] ✅ ComfyUI image generated");
+                base64Image = result.base64;
+                imageUrl = result.imageUrl;
+            } else {
+                logger.warn(
+                    `[VisualizationNode] Generation failed: ${result.error}`
+                );
+            }
+        } catch (error) {
+            logger.error(
+                "[VisualizationNode] ComfyUI generation error:",
+                error
+            );
+        }
+
+        // Format response with image
+        const sqft = params.width * params.length;
+        const laborCost = basePrice * 0.5;
+        const foundationCost = sqft * 8.5;
+        const deliveryCost = 750;
+        const addonTotal = selectedAddons.reduce(
+            (sum: number, addon: any) => sum + (addon.cost || 0),
+            0
+        );
+        const contingency =
+            (basePrice +
+                laborCost +
+                foundationCost +
+                deliveryCost +
+                addonTotal) *
+            0.05;
+
+        const response = formatFinalQuoteWithComfyUIImage(
+            params,
+            basePrice,
+            selectedAddons,
+            finalTotal,
+            laborCost,
+            foundationCost,
+            deliveryCost,
+            contingency,
+            sqft,
+            base64Image
+        );
+
+        return {
+            response,
+            finalPrice: finalTotal,
+            generatedImageUrl: imageUrl,
+            generatedImageBase64: base64Image,
+            nextStep: "__end__",
+        };
+    } catch (error) {
+        logger.error("[VisualizationNode] Error:", error);
+
+        return {
+            response: `FINAL QUOTE\n\nFinal Price: $${(
+                state.finalPrice || state.basePrice || 0
+            ).toFixed(2)}`,
+            finalPrice: state.finalPrice || state.basePrice || 0,
+            nextStep: "__end__",
+        };
     }
-
-    svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#metalGrad)" stroke="#333" stroke-width="2"/>`;
-
-    for (let i = 0; i < w; i += 40) {
-        svg += `<line x1="${x + i}" y1="${y}" x2="${x + i}" y2="${y + h}" stroke="#555" stroke-width="1" opacity="0.6"/>`;
-    }
-
-    const doorX = x + w * 0.15;
-    const doorY = y + h * 0.1;
-    const doorW = w * 0.7;
-    const doorH = h * 0.75;
-    svg += `<rect x="${doorX}" y="${doorY}" width="${doorW}" height="${doorH}" fill="#D4A574" stroke="#333" stroke-width="2"/>`;
-
-    for (let i = 0; i < 4; i++) {
-        const panelY = doorY + (i * doorH / 4);
-        svg += `<line x1="${doorX}" y1="${panelY}" x2="${doorX + doorW}" y2="${panelY}" stroke="#333" stroke-width="1"/>`;
-    }
-    for (let i = 0; i < 3; i++) {
-        const panelX = doorX + ((i + 1) * doorW / 3);
-        svg += `<line x1="${panelX}" y1="${doorY}" x2="${panelX}" y2="${doorY + doorH}" stroke="#333" stroke-width="1"/>`;
-    }
-
-    svg += `<rect x="${doorX + doorW * 0.15}" y="${doorY + doorH * 0.1}" width="${doorW * 0.7}" height="${doorH * 0.15}" fill="#87CEEB" stroke="#333" stroke-width="1" opacity="0.7"/>`;
-
-    svg += `<rect x="${x - 10}" y="${y + h}" width="${w + 20}" height="20" fill="#8B7355" stroke="#333" stroke-width="2"/>`;
-
-    const labelY = y + h + 50;
-    svg += `<text x="${x + w / 2}" y="${labelY}" text-anchor="middle" font-size="16" font-weight="bold" fill="#333">${spec.length}' Long</text>`;
-    svg += `<text x="${x - 35}" y="${y + h / 2}" text-anchor="end" font-size="14" font-weight="bold" fill="#333" transform="rotate(-90 ${x - 35} ${y + h / 2})">${spec.height}' Tall</text>`;
-    svg += `<text x="${x + w + 35}" y="${y + h / 2 + 10}" font-size="14" font-weight="bold" fill="#333">${spec.width}'</text>`;
-
-    svg += `<text x="${svgWidth / 2}" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#333">${spec.roofType.toUpperCase()} ROOF GARAGE</text>`;
-
-    svg += `</svg>`;
-
-    return svg;
-}
+};
 
 /**
- * ✅ HELPER: Format final quote
+ * Format final quote with ComfyUI-generated image
  */
-function formatFinalQuoteWithImage(
-    params: any,
+function formatFinalQuoteWithComfyUIImage(
+    params: UserFriendlyParams,
     basePrice: number,
     selectedAddons: any[],
     finalTotal: number,
@@ -189,16 +480,20 @@ function formatFinalQuoteWithImage(
     deliveryCost: number,
     contingency: number,
     sqft: number,
-    imageUrl: string | null,
-    svgFallback: string | null
+    imageBase64: string | null
 ): string {
-    const currentParams = LeadAgentHelpers.formatCurrentParams(params);
-    const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
-    const line = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    const line =
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    const addonTotal = selectedAddons.reduce(
+        (sum: number, addon: any) => sum + (addon.cost || 0),
+        0
+    );
 
     let response = `✅ YOUR FINAL GARAGE QUOTE
 
-${currentParams}
+📐 Building Specifications:
+• Width: ${params.width}' | Length: ${params.length}' | Height: ${params.height}'
+• Roof Type: ${params.roof_type || "Standard"}
 
 ${line}
 🎨 BUILDING VISUALIZATION:
@@ -206,22 +501,21 @@ ${line}
 
 `;
 
-    if (imageUrl && imageUrl.startsWith('data:image')) {
-        response += `![Garage Rendering](${imageUrl})
+    if (imageBase64) {
+        response += `![Garage Rendering](${imageBase64})
 
-✨ **AI-Generated photorealistic rendering**
-Professional architectural visualization quality
-
+✨ **Professional ComfyUI-generated photorealistic rendering**
+High-quality architectural visualization
+Stable Diffusion XL rendering with professional post-processing
 `;
-    } else if (svgFallback) {
-        response += `${svgFallback}
-
-📐 **Building Diagram** (${params.width}' × ${params.length}' × ${params.height}')
+    } else {
+        response += `📐 **Visualization unavailable** - Contact support for rendering
 
 `;
     }
 
-    response += `${line}
+    response += `
+${line}
 📊 DETAILED PRICE BREAKDOWN:
 ${line}
 
@@ -236,7 +530,7 @@ ${line}
 
     if (selectedAddons.length > 0) {
         response += `\n\n**Selected Add-ons:**`;
-        selectedAddons.forEach(a => {
+        selectedAddons.forEach((a: any) => {
             response += `\n• ${a.label}: $${(a.cost || 0).toFixed(2)}`;
         });
         response += `\n• Add-ons Total: +$${addonTotal.toFixed(2)}`;
@@ -255,108 +549,16 @@ ${line}
 • Delivery and site setup
 ${selectedAddons.length > 0 ? `• ${selectedAddons.length} add-on(s)` : ""}
 • 5% contingency buffer
+• Professional visualization
 
 📞 Ready to Order?
 Contact us to discuss:
 • Custom modifications
 • Financing options
 • Installation timeline (2-4 weeks)
-• Warranty details
-
-🔧 Want to modify anything?
-Say "change width to 30" or "start over" for a new quote.`;
+• Warranty details`;
 
     return response;
 }
 
-/**
- * ✅ FIXED: Main visualization node
- * - Line 24 now calls generateWithRetry() instead of generateGarageVisualizationNode()
- * - Return type is now Partial<LeadAgentStateType> not string
- */
-export const generateGarageVisualizationNode = async (
-    state: LeadAgentStateType
-): Promise<Partial<LeadAgentStateType>> => {
-    logger.info(`[VisualizationNode] Session ${state.sessionId} - Generating visualization`);
-
-    try {
-        const params = state.userFriendlyParams as UserFriendlyParams;
-        const selectedAddons = state.selectedAddons || [];
-        const basePrice = state.basePrice || 0;
-        const finalTotal = state.finalPrice || basePrice;
-
-        if (!params.width || !params.length || !params.height) {
-            logger.error(`[VisualizationNode] Missing required dimensions`);
-            return {
-                response: "Error: Missing building dimensions",
-                nextStep: "__end__",
-            };
-        }
-
-        let imageUrl: string | null = null;
-        let svgFallback: string | null = null;
-
-        logger.info("[VisualizationNode] Attempting AI image generation with retries...");
-        try {
-            imageUrl = await generateWithRetry(params, 3);
-
-            if (imageUrl) {
-                logger.info(`[VisualizationNode] ✅ AI image generated successfully`);
-            } else {
-                logger.warn("[VisualizationNode] AI generation exhausted retries, using fallback");
-            }
-        } catch (error) {
-            logger.warn(`[VisualizationNode] AI generation error: ${error}`);
-        }
-
-        logger.info("[VisualizationNode] Generating SVG fallback...");
-        svgFallback = generateSimpleSVGFallback({
-            width: params.width,
-            length: params.length,
-            height: params.height,
-            roofType: params.roof_type || "regular"
-        });
-
-        const sqft = params.width * params.length;
-        const laborCost = basePrice * 0.5;
-        const foundationCost = sqft * 8.5;
-        const deliveryCost = 750;
-        const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
-        const contingency = (basePrice + laborCost + foundationCost + deliveryCost + addonTotal) * 0.05;
-
-        const response = formatFinalQuoteWithImage(
-            params,
-            basePrice,
-            selectedAddons,
-            finalTotal,
-            laborCost,
-            foundationCost,
-            deliveryCost,
-            contingency,
-            sqft,
-            imageUrl,
-            svgFallback
-        );
-
-        logger.info(`[VisualizationNode] ✅ Visualization complete (${imageUrl ? 'AI' : 'SVG'})`);
-
-        return {
-            response,
-            finalPrice: finalTotal,
-            generatedImageUrl: imageUrl,
-            nextStep: "__end__",
-        };
-
-    } catch (error) {
-        logger.error(`[VisualizationNode] Error:`, error);
-
-        const finalTotal = state.finalPrice || state.basePrice || 0;
-        const currentParams = LeadAgentHelpers.formatCurrentParams(state.userFriendlyParams);
-
-        return {
-            response: `FINAL QUOTE\n\n${currentParams}\n\nFinal Price: $${finalTotal.toFixed(2)}`,
-            finalPrice: finalTotal,
-            nextStep: "__end__",
-        };
-    }
-};
+export { ComfyUIGenerator };
