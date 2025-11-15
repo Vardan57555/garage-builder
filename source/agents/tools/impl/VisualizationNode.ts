@@ -33,7 +33,7 @@ class ComfyUIGenerator {
     private pollInterval: number = 2000; // 2 seconds
     private maxRetries: number = 3;
 
-    constructor(comfyuiUrl: string = "http://localhost:8188") {
+    constructor(comfyuiUrl: string = "http://comfyui:8188") {
         logger.info(`[ComfyUI] Initializing with URL: ${comfyuiUrl}`);
         this.axios = axios.create({
             baseURL: comfyuiUrl,
@@ -54,7 +54,9 @@ class ComfyUIGenerator {
             "1": {
                 class_type: "CheckpointLoaderSimple",
                 inputs: {
-                    ckpt_name: "put_checkpoints_here/sd_xl_base_1.0.safetensors",
+                    // File is saved directly to /app/models/checkpoints/
+                    // ComfyUI will find it there
+                    ckpt_name: "sd_xl_base_1.0.safetensors",
                 },
             },
             "2": {

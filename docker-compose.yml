@@ -1,4 +1,29 @@
 services:
+  comfyui:
+    build:
+      context: .
+      dockerfile: ComfyUI/Dockerfile
+    container_name: comfyui
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui-models:/app/models
+      - comfyui-output:/app/output
+    networks:
+      - garage-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8188/system_stats" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8g
+
   garage-backend:
     build: .
     container_name: garage-backend
@@ -9,6 +34,7 @@ services:
       APP_HOST: http://localhost:5000
       NODE_ENV: development
       OLLAMA_API_HOST: http://ollama:11434
+      COMFYUI_URL: http://comfyui:8188
       TEST_MODE: "true"
       CORS_ENABLED: "true"
       CORS_DOMAINS: http://localhost:5200
@@ -29,7 +55,10 @@ services:
       - garage-network
     restart: always
     depends_on:
-      - ollama
+      comfyui:
+        condition: service_healthy
+      ollama:
+        condition: service_started
 
   ollama:
     image: ollama/ollama:latest
@@ -88,6 +117,8 @@ services:
 
 volumes:
   ollama-data:
+  comfyui-models:
+  comfyui-output:
 
 networks:
   garage-network:

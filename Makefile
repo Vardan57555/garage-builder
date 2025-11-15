@@ -4,31 +4,35 @@ IMAGE_GEN_DIR = garage-image-service
 
 .PHONY: start down dock_down dock_up restart logs run-migrations run-seeders undo-migrations undo-seeders
 .PHONY: image-gen-build image-gen-start image-gen-stop image-gen-restart image-gen-logs image-gen-test image-gen-health
-.PHONY: image-gen-demo image-gen-demo-stop image-gen-demo-logs
+.PHONY: image-gen-demo image-gen-demo-stop image-gen-demo-logs comfyui-health comfyui-logs
 
 start:
-	echo "Building services..."
+	@echo "🚀 Building services..."
 	docker compose build --no-cache
 
-	echo "Starting databases..."
+	@echo "🗄️  Starting databases..."
 	docker compose -f $(DB_COMPOSE_FILE) up -d
 
 	chmod +x ./scripts
 
 	sh ./scripts/initialize_services/wait-for-db.sh
 
-	echo "Starting Ollama service..."
+	@echo "🎨 Starting ComfyUI service..."
+	docker compose -f $(MAIN_COMPOSE_FILE) up -d comfyui
+
+	@echo "🤖 Starting Ollama service..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d ollama
 
-	echo "Starting phpMyAdmin..."
+	@echo "📊 Starting phpMyAdmin..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d phpmyadmin
 
-	echo "Installing dependencies..."
+	@echo "📦 Installing dependencies..."
 	sh ./scripts/initialize_services/initialize.sh
 
-	echo "Starting main services..."
+	@echo "🔧 Starting main services..."
 	docker compose -f $(MAIN_COMPOSE_FILE) up -d garage-backend streamlit-client
 
+	@echo "✅ All services started!"
 
 db: down
 	docker compose -f $(DB_COMPOSE_FILE) up -d

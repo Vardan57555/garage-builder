@@ -10,6 +10,11 @@ else
     echo "⚠️ No package manager file found — skipping install/build"
 fi
 
+echo "================================================"
+echo "🎨 Initializing ComfyUI service..."
+sh ./scripts/initialize_services/wait-for-comfyui.sh
+sh ./scripts/initialize_services/comfyui-checkpoint.sh
+echo "================================================"
 
 echo "================================================"
 echo "🧠 Initializing Ollama service..."
