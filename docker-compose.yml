@@ -2,7 +2,7 @@ services:
   comfyui:
     build:
       context: .
-      dockerfile: ComfyUI/Dockerfile
+      dockerfile: Comfy/Dockerfile
     container_name: comfyui
     ports:
       - "8188:8188"
