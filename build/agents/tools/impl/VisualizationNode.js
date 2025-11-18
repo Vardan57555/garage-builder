@@ -11,7 +11,7 @@ class ComfyUIGenerator {
     axios;
     pollInterval = 2000;
     maxRetries = 3;
-    constructor(comfyuiUrl = "http://comfyui:8188") {
+    constructor(comfyuiUrl = "http://localhost:8188") {
         logger.info(`[ComfyUI] Initializing with URL: ${comfyuiUrl}`);
         this.axios = axios_1.default.create({
             baseURL: comfyuiUrl,

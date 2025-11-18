@@ -100,6 +100,7 @@ export class LeadAgentHelpers {
         if (params.roof_type) parts.push(`Roof: ${params.roof_type}`);
         if (params.state_name) parts.push(`State: ${params.state_name}`);
         if (params.gauge) parts.push(`Gauge: ${params.gauge}`);
+        if (params.color) parts.push(`Color: ${params.color}`);
 
         return parts.length > 0 ? `📋 Current parameters: ${parts.join(" | ")}` : "";
     }

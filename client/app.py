@@ -11,8 +11,8 @@ import httpx
 import streamlit as st
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
-REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "120.0"))  # Configurable timeout
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "1"))  # Number of retries on timeout
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "300.0"))  # Configurable timeout
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))  # Number of retries on timeout
 
 st.set_page_config(
     page_title="Garage Builder Assistant",

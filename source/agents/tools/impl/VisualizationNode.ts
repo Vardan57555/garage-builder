@@ -30,7 +30,7 @@ interface GenerationResult {
  */
 class ComfyUIGenerator {
     private axios: AxiosInstance;
-    private pollInterval: number = 2000; // 2 seconds
+    private pollInterval: number = 3000;
     private maxRetries: number = 3;
 
     constructor(comfyuiUrl: string = "http://comfyui:8188") {
@@ -54,8 +54,6 @@ class ComfyUIGenerator {
             "1": {
                 class_type: "CheckpointLoaderSimple",
                 inputs: {
-                    // File is saved directly to /app/models/checkpoints/
-                    // ComfyUI will find it there
                     ckpt_name: "sd_xl_base_1.0.safetensors",
                 },
             },
@@ -116,28 +114,55 @@ class ComfyUIGenerator {
     /**
      * Build detailed garage prompt from parameters
      */
+    /**
+     * Build detailed garage prompt from parameters
+     * ✅ NOW INCLUDES COLOR IN THE PROMPT
+     */
     private buildGaragePrompt(params: UserFriendlyParams): string {
         const width = params.width || 20;
         const length = params.length || 20;
         const height = params.height || 10;
         const roofType = params.roof_type || "gable";
 
+        const color = params.color || "gray";
+
+        const colorDescriptions: Record<string, string> = {
+            "Barn Red": "barn red, deep red metal panels",
+            "Burgundy": "burgundy, dark red wine color",
+            "Royal Blue": "royal blue, bright blue",
+            "Evergreen": "evergreen, dark forest green",
+            "Pewter Gray": "pewter gray, medium gray metallic",
+            "White": "white, clean white",
+            "Black": "black, matte black",
+            "Clay": "clay brown, tan earth tone",
+            "Pebble Beige": "pebble beige, light tan",
+            "Earth Brown": "earth brown, rich brown"
+        };
+
+        const colorDescription = colorDescriptions[color] || color.toLowerCase();
+
         return `Professional photorealistic exterior architectural visualization of a metal garage building.
 
 Dimensions: ${width} feet wide by ${length} feet long by ${height} feet tall.
 Roof style: ${roofType} roof with clean modern lines.
 
+COLOR: ${colorDescription} metal siding and roof panels - this is the PRIMARY color of the entire building.
+
 Features:
 - Metal roll-up garage doors with windows and modern handles
-- Professional metal siding with corrugated panels
+- Professional ${colorDescription} corrugated metal panels covering entire building
+- ${colorDescription} metal siding on all walls
+- ${colorDescription} metal roof panels
 - Concrete foundation pad
 - Suburban residential setting with landscaping
 - Green lawn and trees in background
 
 Lighting: Golden hour lighting, warm and professional, clear blue sky with subtle clouds.
-Perspective: 3/4 front corner architectural view
-Quality: Professional real estate photography, 8k, sharp focus, detailed textures
+Perspective: 3/4 front corner architectural view showing the ${colorDescription} metal exterior
+Quality: Professional real estate photography, 8k, sharp focus, detailed textures, accurate ${colorDescription} color rendering
 Realistic materials, accurate proportions, professional rendering.
+
+IMPORTANT: The building must be ${colorDescription} - make this color prominent and realistic.
 
 Exclude: people, text, watermarks, signs, vehicles`;
     }
@@ -197,13 +222,11 @@ Exclude: people, text, watermarks, signs, vehicles`;
                 if (response.status === 200 && response.data[promptId]) {
                     const history = response.data[promptId];
 
-                    // Check for errors
                     if (history.status?.status_str === "error") {
                         const errorMsg = history.status?.messages || "Unknown error";
                         throw new Error(`Generation error: ${errorMsg}`);
                     }
 
-                    // Check for outputs
                     if (history.outputs) {
                         for (const output of Object.values(history.outputs)) {
                             const nodeOutput = output as any;
@@ -380,12 +403,10 @@ export const generateGarageVisualizationNode = async (state: any) => {
             };
         }
 
-        // Initialize ComfyUI generator
         const comfyuiUrl = process.env.COMFYUI_URL || "http://127.0.0.1:8188";
         logger.info(`[VisualizationNode] Using ComfyUI URL: ${comfyuiUrl}`);
         const generator = new ComfyUIGenerator(comfyuiUrl);
 
-        // Check ComfyUI health
         const health = await generator.checkHealth();
         if (!health.healthy) {
             logger.warn(
@@ -419,7 +440,6 @@ export const generateGarageVisualizationNode = async (state: any) => {
             );
         }
 
-        // Format response with image
         const sqft = params.width * params.length;
         const laborCost = basePrice * 0.5;
         const foundationCost = sqft * 8.5;

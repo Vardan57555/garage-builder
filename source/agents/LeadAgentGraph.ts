@@ -11,6 +11,7 @@ import { handleParameterUpdateNode } from "@agents/tools/impl/ParameterUpdateNod
 import { handleResetNode } from "@agents/tools/impl/ResetNode";
 import { showAddonsNode } from "@agents/tools/impl/ShowAddonsNode";
 import { processAddonsSelectionNode } from "@agents/tools/impl/ProcessAddonsNode";
+import { askForColorNode } from "@agents/tools/impl/ColorChoiceNode";
 import { generateGarageVisualizationNode } from "@agents/tools/impl/VisualizationNode";
 import { LeadAgentState } from "@agents/LeadAgentState";
 
@@ -25,6 +26,7 @@ export function buildLeadAgentGraph() {
         .addNode("extract_parameters", extractParametersNode)
         .addNode("check_missing_fields", checkMissingFieldsNode)
         .addNode("ask_for_field", askForFieldNode)
+        .addNode("ask_for_color", askForColorNode)
         .addNode("calculate_price", calculatePriceNode)
         .addNode("show_addons", showAddonsNode)
         .addNode("process_addons", processAddonsSelectionNode)
@@ -38,7 +40,10 @@ export function buildLeadAgentGraph() {
             "detect_intent",
             (state) => {
                 logger.debug(`[detect_intent] nextStep=${state.nextStep}, intent=${state.hasGarageIntent}`);
-                if (state.nextStep) return state.nextStep;
+                if (state.nextStep) {
+                    logger.info(`[detect_intent] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
                 return state.hasGarageIntent ? "extract_parameters" : "__end__";
             },
             {
@@ -46,6 +51,7 @@ export function buildLeadAgentGraph() {
                 "detect_building_type": "detect_building_type",
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
+                "generate_visualization": "generate_visualization",
                 "__end__": "__end__",
             }
         )
@@ -83,13 +89,19 @@ export function buildLeadAgentGraph() {
             "check_missing_fields",
             (state) => {
                 logger.debug(`[check_missing_fields] nextStep=${state.nextStep}, missing=${!state.currentField}`);
-                return state.nextStep || (state.currentField ? "ask_for_field" : "calculate_price");
+                if (state.nextStep) {
+                    logger.info(`[check_missing_fields] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
+                return state.currentField ? "ask_for_field" : "ask_for_color";
             },
             {
-                "calculate_price": "calculate_price",
+                "ask_for_color": "ask_for_color",
                 "ask_for_field": "ask_for_field",
+                "calculate_price": "calculate_price",
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
+                "generate_visualization": "generate_visualization",
                 "__end__": "__end__",
             }
         )
@@ -97,15 +109,34 @@ export function buildLeadAgentGraph() {
         .addEdge("ask_for_field", "__end__")
 
         .addConditionalEdges(
+            "ask_for_color",
+            (state) => {
+                logger.debug(`[ask_for_color] nextStep=${state.nextStep}, color=${state.color}`);
+                return state.nextStep || "calculate_price";
+            },
+            {
+                "calculate_price": "calculate_price",
+                "handle_update": "handle_update",
+                "handle_reset": "handle_reset",
+                "__end__": "__end__",
+            }
+        )
+
+        .addConditionalEdges(
             "calculate_price",
             (state) => {
                 logger.debug(`[calculate_price] nextStep=${state.nextStep}`);
+                if (state.nextStep) {
+                    logger.info(`[calculate_price] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
                 return state.nextStep || "show_addons";
             },
             {
                 "show_addons": "show_addons",
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
+                "generate_visualization": "generate_visualization",
                 "__end__": "__end__",
             }
         )
@@ -114,12 +145,17 @@ export function buildLeadAgentGraph() {
             "show_addons",
             (state) => {
                 logger.debug(`[show_addons] nextStep=${state.nextStep}`);
+                if (state.nextStep) {
+                    logger.info(`[show_addons] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
                 return state.nextStep || "__end__";
             },
             {
                 "process_addons": "process_addons",
                 "handle_update": "handle_update",
                 "handle_reset": "handle_reset",
+                "generate_visualization": "generate_visualization",
                 "__end__": "__end__",
             }
         )
@@ -128,6 +164,10 @@ export function buildLeadAgentGraph() {
             "process_addons",
             (state) => {
                 logger.debug(`[process_addons] nextStep=${state.nextStep}`);
+                if (state.nextStep) {
+                    logger.info(`[process_addons] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
                 return state.nextStep || "generate_visualization";
             },
             {
@@ -144,6 +184,10 @@ export function buildLeadAgentGraph() {
             "handle_update",
             (state) => {
                 logger.debug(`[handle_update] nextStep=${state.nextStep}`);
+                if (state.nextStep) {
+                    logger.info(`[handle_update] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
                 return state.nextStep || "check_missing_fields";
             },
             {
@@ -151,6 +195,8 @@ export function buildLeadAgentGraph() {
                 "calculate_price": "calculate_price",
                 "show_addons": "show_addons",
                 "ask_for_field": "ask_for_field",
+                "ask_for_color": "ask_for_color",
+                "generate_visualization": "generate_visualization",
                 "__end__": "__end__",
             }
         )
@@ -159,13 +205,18 @@ export function buildLeadAgentGraph() {
             "handle_reset",
             (state) => {
                 logger.debug(`[handle_reset] nextStep=${state.nextStep}`);
+                if (state.nextStep) {
+                    logger.info(`[handle_reset] Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
                 return state.nextStep || "detect_intent";
             },
             {
                 "detect_intent": "detect_intent",
+                "generate_visualization": "generate_visualization",
                 "__end__": "__end__",
             }
-        );
+        )
 
     const compiled = workflow.compile();
     logger.info("[LeadAgentGraph] ✅ Graph compiled successfully");

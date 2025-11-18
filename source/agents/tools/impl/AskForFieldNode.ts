@@ -54,6 +54,54 @@ export const askForFieldNode = async (state: LeadAgentStateType) => {
         case "building_type":
             promptMessage = choiceManager.getPrompt("building_type");
             break;
+        case "color":
+            try {
+                const { getColorsWithCache, getGroupedColorsByCategory } = await import("@agents/tools/impl/ColorDatabaseService");
+
+                logger.info(`[AskNode] 🎨 Loading colors FROM DATABASE for display...`);
+                const allColors = await getColorsWithCache();
+
+                if (allColors.length === 0) {
+                    logger.error(`[AskNode] ❌ No colors loaded from database!`);
+                    promptMessage = `${currentParams}\n\n❌ ERROR: No colors available in database`;
+                    break;
+                }
+
+                logger.info(`[AskNode] ✅ Loaded ${allColors.length} colors from database`);
+
+                const groupedColors = getGroupedColorsByCategory(allColors, 5);
+                let colorMenu = "🎨 **CHOOSE YOUR BUILDING COLOR:**\n\n";
+                let colorIndex = 1;
+
+                for (const [category, colors] of groupedColors.entries()) {
+                    if (colors.length > 0) {
+                        colorMenu += `**${category}:**\n`;
+                        colors.forEach(color => {
+                            const colorBox = `■`;
+                            const costDisplay = color.cost > 0 ? ` +$${color.cost.toFixed(2)}` : " (included)";
+                            colorMenu += `  ${colorIndex}. ${colorBox} ${color.name} ${color.hex_value}${costDisplay}\n`;
+                            colorIndex++;
+                        });
+                        colorMenu += "\n";
+                    }
+                }
+
+                promptMessage =
+                    `${currentParams}\n\n` +
+                    colorMenu +
+                    `**Examples:**\n` +
+                    `• "1" or "2" - Select by number\n` +
+                    `• "Barn Red" or "barn red" - Select by exact name\n` +
+                    `• "red" - Search for color\n` +
+                    `• "any" or "skip" - Use default (White)\n\n` +
+                    `Which color do you prefer?`;
+
+                logger.info(`[AskNode] ✅ Color menu built with ${colorIndex - 1} options`);
+            } catch (error) {
+                logger.error(`[AskNode] Error loading colors:`, error);
+                promptMessage = `${currentParams}\n\n🎨 What color would you like?\n(e.g., "red", "white", "blue")`;
+            }
+            break;
         default:
             promptMessage = `${currentParams}\n\nProvide: ${LeadAgentHelpers.formatFieldName(state.currentField)}`;
     }

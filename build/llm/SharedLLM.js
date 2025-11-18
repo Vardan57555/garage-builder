@@ -25,7 +25,7 @@ class SharedLLMManager {
         return {
             model: process.env.OLLAMA_MODEL || "llama3.2:latest",
             temperature: parseFloat(process.env.OLLAMA_TEMPERATURE || "0.2"),
-            baseUrl: process.env.OLLAMA_BASE_URL || "http://ollama:11434",
+            baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
             streaming: process.env.OLLAMA_STREAMING === "true" ? true : false,
             timeout: parseInt(process.env.OLLAMA_TIMEOUT || "30000"),
         };

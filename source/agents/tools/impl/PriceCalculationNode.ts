@@ -87,8 +87,32 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[PriceNode] Kit price calculated: $${kitPrice.toFixed(2)}`);
 
-        const formattedPrice = formatCompletePrice(kitPrice, state.userFriendlyParams);
+        let colorCost = 0;
+        if (state.color) {
+            logger.info(`[PriceNode] Calculating color cost for: ${state.color}`);
 
+            try {
+                const { getColorsWithCache } = await import("@agents/tools/impl/ColorDatabaseService");
+                const allColors = await getColorsWithCache();
+                const selectedColor = allColors.find(c => c.name.toLowerCase() === state.color?.toLowerCase());
+
+                if (selectedColor && selectedColor.cost > 0) {
+                    colorCost = selectedColor.cost;
+                    logger.info(`[PriceNode] ✅ Color cost: $${colorCost.toFixed(2)}`);
+                } else {
+                    logger.info(`[PriceNode] Color "${state.color}" is included (no extra cost)`);
+                }
+            } catch (error) {
+                logger.error(`[PriceNode] Error calculating color cost:`, error);
+            }
+        }
+
+        const formattedPrice = formatCompletePrice(
+            kitPrice,
+            state.userFriendlyParams,
+            colorCost,
+            state.color
+        );
 
         return {
             response: formattedPrice,
@@ -99,7 +123,9 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
             currentField: null,
             nextStep: "show_addons",
             selectedAddons: [],
-            finalPrice: kitPrice,
+            finalPrice: kitPrice + colorCost,
+            color: state.color,
+            colorCost: colorCost,
         };
     } catch (error) {
         logger.error(`[PriceNode] Error:`, error);
@@ -111,21 +137,34 @@ export const calculatePriceNode = async (state: LeadAgentStateType) => {
     }
 };
 
-function formatCompletePrice(kitPrice: number, params: any): string {
+function formatCompletePrice(
+    kitPrice: number,
+    params: any,
+    colorCost: number = 0,
+    colorName: string | null = null
+): string {
     const sqft = params.width * params.length;
     const laborCost = kitPrice * 0.5;
     const foundationCost = sqft * 8.5;
     const deliveryCost = 750;
-    const contingency = (kitPrice + laborCost + foundationCost + deliveryCost) * 0.05;
-    const finalTotal = kitPrice + laborCost + foundationCost + deliveryCost + contingency;
+    const contingency = (kitPrice + laborCost + foundationCost + deliveryCost + colorCost) * 0.05;
+    const finalTotal = kitPrice + laborCost + foundationCost + deliveryCost + contingency + colorCost;
 
     const currentParams = LeadAgentHelpers.formatCurrentParams(params);
 
-    return `${currentParams}
+    let priceBreakdown = `${currentParams}
 
 📊 **PRICE BREAKDOWN:**
 
-• Base Building Kit: $${kitPrice.toFixed(2)}
+• Base Building Kit: $${kitPrice.toFixed(2)}`;
+
+    if (colorName && colorCost > 0) {
+        priceBreakdown += `\n• Color Upgrade (${colorName}): $${colorCost.toFixed(2)}`;
+    } else if (colorName) {
+        priceBreakdown += `\n• Color (${colorName}): Included`;
+    }
+
+    priceBreakdown += `
 • Installation Labor (50% of kit): $${laborCost.toFixed(2)}
 • Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
 • Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
@@ -134,5 +173,7 @@ function formatCompletePrice(kitPrice: number, params: any): string {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 💰 **TOTAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+
+    return priceBreakdown;
 }
 

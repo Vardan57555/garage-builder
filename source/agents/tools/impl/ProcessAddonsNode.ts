@@ -12,61 +12,149 @@ function parseAddonSelections(userInput: string, addonsMenu: any[]): any[] {
     const selected: any[] = [];
 
     logger.info(`[parseAddonSelections] Parsing: "${userInput}"`);
+    logger.info(`[parseAddonSelections] Available addons: ${addonsMenu.length}`);
 
-    const numberMatches = userInput.match(/\d+/g);
-    if (numberMatches && numberMatches.length > 0) {
-        const potentialIndices = numberMatches.map(n => parseInt(n) - 1);
-        const validIndices = potentialIndices.filter(idx => idx >= 0 && idx < addonsMenu.length);
+    if (addonsMenu.length > 0) {
+        logger.info(`[parseAddonSelections] Sample addons: ${addonsMenu.slice(0, 3).map(a => a.label).join(', ')}`);
+    }
 
-        if (validIndices.length > 0) {
-            validIndices.forEach(idx => {
-                selected.push(addonsMenu[idx]);
-            });
-            logger.info(`[parseAddonSelections] Selected ${selected.length} by number`);
-            return selected;
+    const normalizeForMatching = (text: string): string => {
+        return text
+            .toLowerCase()
+            .trim()
+            .replace(/[_\s-]+/g, '')
+            .replace(/s$/, '');
+    };
+
+    const looksLikeNumberSelection = /^[\d,\s]+$/.test(userInput.trim());
+
+    if (looksLikeNumberSelection) {
+        const numberMatches = userInput.match(/\d+/g);
+        if (numberMatches && numberMatches.length > 0) {
+            const potentialIndices = numberMatches.map(n => parseInt(n) - 1);
+            const validIndices = potentialIndices.filter(idx => idx >= 0 && idx < addonsMenu.length);
+
+            if (validIndices.length > 0) {
+                validIndices.forEach(idx => {
+                    selected.push(addonsMenu[idx]);
+                });
+                logger.info(`[parseAddonSelections] ✅ Selected ${selected.length} by number`);
+                return selected;
+            }
         }
     }
 
-    const quantityPattern = /(?:add|also|and)?\s*(\d+)\s+(window|door|walkin|walk.?in|brace|anchor|cupola|truss)s?/gi;
+    const quantityPattern = /(?:add|also|and|get|want|need)?\s*(\d+)\s+([\w_]+(?:\s+[\w_]+)*)/gi;
     const quantityMatches = [...userInput.matchAll(quantityPattern)];
 
+    logger.info(`[parseAddonSelections] Found ${quantityMatches.length} quantity patterns`);
+
     if (quantityMatches.length > 0) {
-        quantityMatches.forEach(match => {
+        quantityMatches.forEach((match, matchIdx) => {
             const quantity = parseInt(match[1], 10);
-            const keyword = match[2].toLowerCase();
+            const rawKeyword = match[2].trim();
+
+            logger.info(`[parseAddonSelections] Match ${matchIdx}: quantity=${quantity}, raw="${rawKeyword}"`);
+
+            const normalizedKeyword = normalizeForMatching(rawKeyword);
+            logger.info(`[parseAddonSelections] Normalized keyword: "${normalizedKeyword}"`);
 
             const matchingAddons = addonsMenu.filter(addon => {
-                const type = addon.type?.toLowerCase() || "";
-                const label = addon.label?.toLowerCase() || "";
+                const type = (addon.type || "").toLowerCase();
+                const label = (addon.label || "").toLowerCase();
+                const name = (addon.name || "").toLowerCase();
 
-                if (/window/i.test(keyword)) return /window/i.test(type) || /window/i.test(label);
-                if (/walk.?in/i.test(keyword)) return /walkin|walk.?in/i.test(type);
-                if (/door/i.test(keyword) && !/walk/i.test(keyword)) {
-                    return (/door/i.test(type) && !/walk/i.test(type));
+                const normalizedLabel = normalizeForMatching(label);
+                const normalizedName = normalizeForMatching(name);
+                const normalizedType = normalizeForMatching(type);
+
+                if (normalizedLabel === normalizedKeyword || normalizedName === normalizedKeyword) {
+                    logger.info(`[parseAddonSelections] ✅ EXACT MATCH: "${label}" = "${rawKeyword}"`);
+                    return true;
                 }
-                if (/brace|anchor/i.test(keyword)) return /brace|anchor/i.test(type);
-                if (/cupola/i.test(keyword)) return /cupola/i.test(type);
-                if (/truss/i.test(keyword)) return /truss/i.test(type);
+
+                if (normalizedLabel.includes(normalizedKeyword) || normalizedName.includes(normalizedKeyword)) {
+                    logger.info(`[parseAddonSelections] ✅ CONTAINS: "${label}" contains "${rawKeyword}"`);
+                    return true;
+                }
+
+                if (normalizedKeyword.includes(normalizedLabel) || normalizedKeyword.includes(normalizedName)) {
+                    logger.info(`[parseAddonSelections] ✅ REVERSE: "${rawKeyword}" contains "${label}"`);
+                    return true;
+                }
+
+                if (normalizedKeyword.includes('window') && normalizedType.includes('window')) {
+                    logger.info(`[parseAddonSelections] ✅ TYPE: window`);
+                    return true;
+                }
+                if (normalizedKeyword.includes('door') && !normalizedKeyword.includes('walkin') &&
+                    normalizedType.includes('door') && !normalizedType.includes('walkin')) {
+                    logger.info(`[parseAddonSelections] ✅ TYPE: door`);
+                    return true;
+                }
+                if (normalizedKeyword.includes('walkin') && normalizedType.includes('walkin')) {
+                    logger.info(`[parseAddonSelections] ✅ TYPE: walkin`);
+                    return true;
+                }
+                if (normalizedKeyword.includes('brace') && normalizedType.includes('brace')) {
+                    logger.info(`[parseAddonSelections] ✅ TYPE: brace`);
+                    return true;
+                }
+                if (normalizedKeyword.includes('cupola') && normalizedType.includes('cupola')) {
+                    logger.info(`[parseAddonSelections] ✅ TYPE: cupola`);
+                    return true;
+                }
+                if (normalizedKeyword.includes('sectional') && normalizedLabel.includes('sectional')) {
+                    logger.info(`[parseAddonSelections] ✅ TYPE: sectional`);
+                    return true;
+                }
+
                 return false;
             });
+
+            logger.info(`[parseAddonSelections] Found ${matchingAddons.length} matches for "${rawKeyword}"`);
 
             if (matchingAddons.length > 0) {
                 for (let i = 0; i < quantity; i++) {
                     const addon = matchingAddons[i % matchingAddons.length];
                     selected.push({
                         ...addon,
-                        id: `${addon.id}_${i}`,
+                        id: `${addon.id}_${Date.now()}_${i}`,
                     });
+                    logger.info(`[parseAddonSelections] Added: ${addon.label} ($${addon.cost})`);
                 }
+            } else {
+                logger.warn(`[parseAddonSelections] ❌ No matches found for: ${rawKeyword}`);
             }
         });
 
         if (selected.length > 0) {
-            logger.info(`[parseAddonSelections] Selected ${selected.length} by keyword`);
+            logger.info(`[parseAddonSelections] ✅ FINAL: Selected ${selected.length} addons by keyword`);
             return selected;
         }
     }
 
+    if (selected.length === 0) {
+        const normalizedInput = normalizeForMatching(userInput);
+
+        const keywordMatches = addonsMenu.filter(addon => {
+            const normalizedLabel = normalizeForMatching(addon.label || "");
+            const normalizedName = normalizeForMatching(addon.name || "");
+
+            return normalizedLabel.includes(normalizedInput) ||
+                normalizedName.includes(normalizedInput) ||
+                normalizedInput.includes(normalizedLabel) ||
+                normalizedInput.includes(normalizedName);
+        });
+
+        if (keywordMatches.length > 0) {
+            logger.info(`[parseAddonSelections] ✅ Found ${keywordMatches.length} keyword-only matches`);
+            selected.push(keywordMatches[0]);
+            return selected;
+        }
+    }
+
+    logger.warn(`[parseAddonSelections] ❌ No matches found for input: "${userInput}"`);
     return selected;
 }
 

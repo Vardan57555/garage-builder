@@ -49,6 +49,8 @@ async function extractFieldValueWithLLM(
                 manufacturer_name: null,
                 utility_length: null,
                 is_barn: null,
+                color: undefined,
+                color_hex: undefined
             };
 
             const defaultValue = defaults[field];

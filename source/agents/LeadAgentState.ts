@@ -21,6 +21,16 @@ export const LeadAgentState = Annotation.Root({
         default: () => ({}),
     }),
 
+    color: Annotation<string | null>({
+        value: (_, update) => update ?? null,
+        default: () => null,
+    }),
+
+    colorCost: Annotation<number>({
+        value: (_, update) => update ?? 0,
+        default: () => 0,
+    }),
+
     hasGarageIntent: Annotation<boolean>({
         value: (_, update) => update ?? false,
         default: () => false,

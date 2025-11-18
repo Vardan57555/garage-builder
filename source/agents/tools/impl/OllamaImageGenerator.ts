@@ -205,7 +205,9 @@ function formatFinalQuoteWithImage(
     contingency: number,
     sqft: number,
     imageUrl: string | null,
-    svgFallback: string | null
+    svgFallback: string | null,
+    colorCost: number = 0,
+    colorName: string | null = null
 ): string {
     const currentParams = LeadAgentHelpers.formatCurrentParams(params);
     const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
@@ -234,6 +236,16 @@ Professional architectural visualization quality
 
 📐 **Building Diagram** (${params.width}' × ${params.length}' × ${params.height}')
 `;
+    }
+
+    response += `
+**Building Kit & Materials:**
+• Base Building Package: $${basePrice.toFixed(2)}`;
+
+    if (colorName && colorCost > 0) {
+        response += `\n• Color Upgrade (${colorName}): $${colorCost.toFixed(2)}`;
+    } else if (colorName) {
+        response += `\n• Color (${colorName}): Included`;
     }
 
     response += `

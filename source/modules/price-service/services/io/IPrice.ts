@@ -1,7 +1,6 @@
 import { IManufacturer } from "@modules/manufacturer-service/service/io/IManufacturer";
 import { IBuildingStructure as IBuildingStructureFromService } from "@modules/building-service/services/io/IBuildingStructure";
 
-// Main Price interface - keep for DB operations if needed
 export interface IPrice
 {
     price_id: string;
@@ -9,7 +8,6 @@ export interface IPrice
     updated_at: string;
 }
 
-// PRIMARY PRICING PARAMETERS
 export interface IPricingParams
 {
     width: number;
@@ -17,7 +15,6 @@ export interface IPricingParams
     height: number;
     map_id: number;
     roof_id: number;
-    // Optional parameters
     single_slope_height?: number;
     pitch_height?: number;
     utility_length?: number;
@@ -27,7 +24,6 @@ export interface IPricingParams
     is_barn?: boolean;
     manufacturer_id?: number;
     state_name?: string;
-    // Central building parameters
     central_map_id?: number;
     central_height?: number;
     central_length?: number;
@@ -35,13 +31,11 @@ export interface IPricingParams
     central_utility_length?: number;
 }
 
-// USE the building-service interface, but extend it for price-service needs
 export type IBuildingStructure = IBuildingStructureFromService & {
     side_end_name?: string;
     conditions?: Record<string, any>;
 };
 
-// BASE PRICING
 export interface IBasePrice
 {
     id: number;
@@ -53,7 +47,6 @@ export interface IBasePrice
     gauge: number;
 }
 
-// SIDE/END COMPONENTS
 export interface ISideHeight
 {
     id: number;
@@ -97,7 +90,6 @@ export interface IEndCost
     three_fourth_vertical_ends_cost: number;
 }
 
-// ADD-ONS & ACCESSORIES
 export interface IAddon
 {
     id: number;
@@ -140,7 +132,6 @@ export interface ITrussItem
     height?: number;
 }
 
-// COMPONENT FETCHING
 export interface FetchComponentsParams
 {
     map_id: number;
@@ -148,12 +139,11 @@ export interface FetchComponentsParams
     height: number;
     length: number;
     roof_id?: number;
-    buildingStructureFull: IBuildingStructure[];  // Uses the extended type
+    buildingStructureFull: IBuildingStructure[];
     manufacturer: IManufacturer[];
     single_slope_height?: number;
     manufacturer_id?: number;
     side_end_name?: string | null;
-    // Insulation parameters
     both_side?: number;
     both_ends?: number;
     roof_only?: number;
@@ -165,14 +155,11 @@ export interface FetchComponentsParams
     pitch_type?: string;
     slope_side?: number;
     utility_slope_side?: number;
-    // Connection parameters
     length_without_wrap?: number;
     length_without_wrap_string?: string;
-    // Additional
     state_name?: string;
     utility_length?: number;
     componentKeys: string[];
-    // Generated during fetch
     structureString?: string;
     lengthArray?: number[];
 }
@@ -181,7 +168,6 @@ export type ProcedureConfig = (
     p: FetchComponentsParams & { structureString?: string; lengthArray?: number[] }
 ) => [any[], string];
 
-// PARAMETER STRUCTURES
 export interface IBaseStructureParams
 {
     map_id: number;
@@ -201,7 +187,7 @@ export interface GetUtilityPricingParams
     height: number;
     length: number;
     utility_length: number;
-    buildingStructureFull: IBuildingStructure[];  // Uses the extended type
+    buildingStructureFull: IBuildingStructure[];
     single_slope_height?: number;
 }
 
@@ -221,19 +207,15 @@ export interface IFetchPricesParams
     gauge: number;
 }
 
-// COMPLETE PRICING OBJECT
 export interface IPricing
 {
-    // Base pricing
     building_to_maxlength?: number;
     manufacturer?: IManufacturer[];
-    building_structure?: IBuildingStructure[];  // Uses the extended type
+    building_structure?: IBuildingStructure[];
     base_price_regular?: number;
     base_price_box?: number;
     base_price_vertical?: number;
     gauge?: number;
-
-    // Components
     base?: IBasePrice[];
     end?: IEndCost[];
     end_combo_v3?: IEndCost[];
@@ -263,74 +245,27 @@ export interface IPricing
     canopy?: any;
     delux_two_tone?: any[];
     utility_delux_two_tone?: any[];
-
-    // Side pricing
     full_length_side?: ISidePriceResult[];
     side?: ISidePriceResult[];
     side_combo_v3?: ISidePriceResult[];
     side_slope_height?: ISidePriceResult[];
     utility_side?: ISidePriceResult[];
     utility_slope_height?: ISidePriceResult[];
-
-    // Central building
-    central_building_structure?: IBuildingStructure[];  // Uses the extended type
+    central_building_structure?: IBuildingStructure[];
     central_side_full_length?: ISidePriceResult[];
     central_side?: ISidePriceResult[];
     central_end?: IEndCost[];
     central_trusses?: ITrussItem[];
     central_certificate?: any[];
     central_utility_side?: ISidePriceResult[];
-
-    // Add-ons
     anchors_cost?: IAnchor[];
     addons?: IAddon[];
     addons_width?: IAddon[];
     jtrim?: any[];
-
-    // Processing results
     column_status?: any[];
     extra_items?: any[];
     checkbox?: any[];
     checkbox_quantity?: any[];
     checkbox_quantity_dropdown?: any[];
-
-    // Flexible
     [key: string]: any;
-}
-
-// VALIDATION TYPES
-export enum ValidationTypes
-{
-    SINGLE = "SINGLE",
-    ALL = "ALL"
-}
-
-// STATE/ROOF MAPPING
-export interface StateMapping
-{
-    map_id: number;
-    manufacturer_id: number;
-}
-
-export interface RoofMappingResult
-{
-    roof_id: number;
-    roof_type?: string;
-    [key: string]: any;
-}
-
-// USER-FRIENDLY PARAMETERS (from chat)
-export interface UserFriendlyParams
-{
-    garage_type?: string;
-    width?: number;
-    length?: number;
-    height?: number;
-    state_name?: string;
-    roof_type?: string;
-    manufacturer_name?: string;
-    utility_length?: number;
-    building_type?: string;
-    gauge?: number;
-    is_barn?: boolean;
 }

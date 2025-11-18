@@ -299,7 +299,7 @@ export class Constants
                 if (!pricing.additional_features) return 0;
 
                 if (pricing.additional_features.cost_type === '%') {
-                    return 0; // Don't double-count; this is handled separately
+                    return 0;
                 }
 
                 if (Array.isArray(pricing.additional_features)) {
@@ -334,11 +334,29 @@ export class Constants
         "width",
         "length",
         "height",
-        "state_name",      // ← MUST include this
+        "state_name",
         "roof_type",
         "gauge",
-        "building_type"
+        "building_type",
+        "color"
     ];
+
+    public static readonly COLOR_NAME_MAPPING: {
+        "red": "Barn Red",
+        "burgundy": "Burgundy",
+        "barn": "Barn Red",
+        "white": "White",
+        "black": "Black",
+        "blue": "Royal Blue",
+        "green": "Evergreen",
+        "gray": "Pewter Gray",
+        "grey": "Pewter Gray",
+        "tan": "Tan",
+        "beige": "Pebble Beige",
+        "clay": "Clay",
+        "brown": "Earth Brown",
+    };
+
     public static readonly FIELD_PROMPTS: Record<keyof UserFriendlyParams, string> = {
         garage_type: "What type of garage do you need?",
         width: "What width do you need for your garage (in feet)?",
@@ -353,6 +371,8 @@ export class Constants
         building_type: "Building type? (garage/carport/barn)",
         gauge: "Metal gauge preference? (12/14 or blank for standard)",
         is_barn: "Is this a barn style? (yes/no)",
+        color: "What color would you like?",
+        color_hex: "Provide a custom color HEX code (optional)",
     };
     public static readonly INTENT_PROMPT: string = `You are an intent classifier for a garage/building pricing service.
          Analyze if the user wants pricing for a garage, carport, barn, metal building, or any similar structure.

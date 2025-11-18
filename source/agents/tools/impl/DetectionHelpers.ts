@@ -116,6 +116,27 @@ export async function detectParameterUpdateFromInput(input: string): Promise<{
         }
     }
 
+    const colorMatch = input.match(/(?:color|paint|change\s+color|make.*(?:color|red|blue|green|white|black))/i);
+    if (colorMatch) {
+        const colorKeywords = [
+            "red", "barn red", "burgundy", "crimson",
+            "blue", "royal blue", "navy",
+            "green", "evergreen",
+            "gray", "grey", "pewter",
+            "white", "black", "beige", "brown"
+        ];
+
+        for (const keyword of colorKeywords) {
+            if (input.toLowerCase().includes(keyword)) {
+                logger.info(`[detectParameterUpdateFromInput] ✅ COLOR update: ${keyword}`);
+                return { field: "color", value: keyword };
+            }
+        }
+
+        logger.info(`[detectParameterUpdateFromInput] ✅ Generic color change request`);
+        return { field: "color", value: "pending" };
+    }
+
     if (/^\d+$/.test(lowerInput)) {
         const gaugeValue = parseInt(lowerInput, 10);
         if ([14, 16, 18, 20].includes(gaugeValue)) {
