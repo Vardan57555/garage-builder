@@ -3,6 +3,7 @@
 import os
 import json
 import uuid
+import random
 from typing import Any, Optional, Tuple
 import re
 import time
@@ -13,6 +14,14 @@ import streamlit as st
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "300.0"))  # Configurable timeout
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))  # Number of retries on timeout
+
+# Initial greeting options
+INITIAL_GREETINGS = [
+    "Hi! Ask me about garage builds or pricing.",
+    "Welcome! Feel free to ask about garage designs, costs, or materials.",
+    "Hello! I'm here to help with garage construction questions.",
+    "Hey there! What would you like to know about building a garage?"
+]
 
 st.set_page_config(
     page_title="Garage Builder Assistant",
@@ -39,6 +48,11 @@ def get_or_create_tab_id():
 TAB_ID = get_or_create_tab_id()
 SESSION_STATE_KEY = f"sessionId_{TAB_ID}"
 MESSAGES_STATE_KEY = f"messages_{TAB_ID}"
+
+
+def get_random_greeting() -> str:
+    """Get a random initial greeting."""
+    return random.choice(INITIAL_GREETINGS)
 
 
 def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
@@ -153,7 +167,7 @@ if SESSION_STATE_KEY not in st.session_state:
 
 if MESSAGES_STATE_KEY not in st.session_state:
     st.session_state[MESSAGES_STATE_KEY] = [
-        {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
+        {"role": "assistant", "content": get_random_greeting()}
     ]
 
 if "last_error" not in st.session_state:
@@ -196,7 +210,7 @@ with st.sidebar:
 
                 st.session_state[SESSION_STATE_KEY] = None
                 st.session_state[MESSAGES_STATE_KEY] = [
-                    {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
+                    {"role": "assistant", "content": get_random_greeting()}
                 ]
                 st.success("Session cleared!")
                 st.rerun()
@@ -208,7 +222,7 @@ with st.sidebar:
     if st.button("↻ New Conversation", key="new_conversation"):
         st.session_state[SESSION_STATE_KEY] = None
         st.session_state[MESSAGES_STATE_KEY] = [
-            {"role": "assistant", "content": "Hi! Ask me about garage builds or pricing."}
+            {"role": "assistant", "content": get_random_greeting()}
         ]
         st.session_state.last_error = None
         st.rerun()
