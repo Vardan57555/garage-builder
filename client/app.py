@@ -1,4 +1,4 @@
-"""Streamlit chat UI - Enhanced with better error handling and diagnostics."""
+"""Streamlit chat UI - Enhanced with proper tab isolation."""
 
 import os
 import json
@@ -12,10 +12,9 @@ import httpx
 import streamlit as st
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
-REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "300.0"))  # Configurable timeout
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))  # Number of retries on timeout
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "300.0"))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))
 
-# Initial greeting options
 INITIAL_GREETINGS = [
     "Hi! Ask me about garage builds or pricing.",
     "Welcome! Feel free to ask about garage designs, costs, or materials.",
@@ -29,37 +28,38 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-def get_or_create_tab_id():
-    """Get tab ID from URL query params, or create new one if missing."""
-    try:
-        query_params = st.query_params
-        if "tabId" in query_params:
-            tab_id = query_params["tabId"]
-            if isinstance(tab_id, list):
-                tab_id = tab_id[0]
-            return tab_id
-    except:
-        pass
+def get_tab_specific_id():
+    """
+    Generate a unique ID for THIS browser tab using session storage.
+    Each tab gets its own isolated session.
+    """
+    # Use browser's sessionStorage via JavaScript injection
+    tab_id_script = """
+    <script>
+    if (!window.__STREAMLIT_TAB_ID__) {
+        window.__STREAMLIT_TAB_ID__ = 'tab_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        sessionStorage.setItem('streamlit_tab_id', window.__STREAMLIT_TAB_ID__);
+    }
+    </script>
+    """
+    st.html(tab_id_script)
 
-    new_tab_id = str(uuid.uuid4())
-    st.query_params["tabId"] = new_tab_id
-    return new_tab_id
+    # Fallback: use Streamlit's session state for Python-side tracking
+    if "tab_id" not in st.session_state:
+        st.session_state.tab_id = str(uuid.uuid4())
 
-TAB_ID = get_or_create_tab_id()
+    return st.session_state.tab_id
+
+TAB_ID = get_tab_specific_id()
 SESSION_STATE_KEY = f"sessionId_{TAB_ID}"
 MESSAGES_STATE_KEY = f"messages_{TAB_ID}"
-
 
 def get_random_greeting() -> str:
     """Get a random initial greeting."""
     return random.choice(INITIAL_GREETINGS)
 
-
 def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
-    """
-    Split content into SVG and text parts.
-    Returns (svg_string, remaining_text)
-    """
+    """Split content into SVG and text parts."""
     svg_pattern = r'<svg[^>]*>.*?</svg>'
     match = re.search(svg_pattern, content, re.DOTALL)
 
@@ -69,7 +69,6 @@ def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
         return svg, text.strip()
 
     return None, content
-
 
 def format_pricing_response(payload: Any) -> str:
     """Extract a human-readable message from backend payload fragments."""
@@ -103,7 +102,6 @@ def format_pricing_response(payload: Any) -> str:
             return str(payload)
 
     return str(payload)
-
 
 def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
     """Parse full backend response and return session ID with formatted answer."""
@@ -144,12 +142,10 @@ def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
 
     return session_id, format_pricing_response(answer_source)
 
-
 def test_backend_health() -> Tuple[bool, str]:
     """Test if backend is reachable."""
     try:
         with httpx.Client(timeout=5.0) as client:
-            # Try to reach the base URL
             base_url = BACKEND_URL.replace('/api/v1/chat', '')
             response = client.get(f"{base_url}/health", follow_redirects=True)
             return True, f"Backend reachable (status: {response.status_code})"
@@ -160,8 +156,7 @@ def test_backend_health() -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Backend check failed: {str(e)}"
 
-
-# Initialize session state
+# Initialize session state - NOW PER TAB
 if SESSION_STATE_KEY not in st.session_state:
     st.session_state[SESSION_STATE_KEY] = None
 
@@ -182,7 +177,6 @@ with st.sidebar:
     st.caption(f"**Backend:** {BACKEND_URL}")
     st.caption(f"**Timeout:** {REQUEST_TIMEOUT}s")
 
-    # Health check
     if st.button("🔍 Test Backend Connection"):
         with st.spinner("Testing..."):
             healthy, message = test_backend_health()
@@ -193,7 +187,6 @@ with st.sidebar:
 
     st.divider()
 
-    # Session info
     st.header("Session Info")
     if st.session_state[SESSION_STATE_KEY]:
         st.info(f"**Session ID:** `{st.session_state[SESSION_STATE_KEY][:16]}...`")
@@ -227,7 +220,6 @@ with st.sidebar:
         st.session_state.last_error = None
         st.rerun()
 
-    # Show last error if any
     if st.session_state.last_error:
         st.divider()
         st.header("⚠️ Last Error")
@@ -256,15 +248,16 @@ if prompt := st.chat_input("Type your question…"):
         placeholder = st.empty()
         reply = None
 
-        # Attempt request with retries
         for attempt in range(MAX_RETRIES + 1):
             try:
                 timeout = httpx.Timeout(REQUEST_TIMEOUT, connect=10.0)
                 with httpx.Client(timeout=timeout) as client:
-                    request_body = {"question": prompt}
-
-                    if st.session_state[SESSION_STATE_KEY]:
-                        request_body["sessionId"] = st.session_state[SESSION_STATE_KEY]
+                    # ✅ ALWAYS include sessionId - even if None on first message
+                    # Backend will create new session and return sessionId
+                    request_body = {
+                        "question": prompt,
+                        "sessionId": st.session_state[SESSION_STATE_KEY] or ""
+                    }
 
                     with placeholder.container():
                         if attempt > 0:
@@ -289,12 +282,12 @@ if prompt := st.chat_input("Type your question…"):
                     st.session_state[SESSION_STATE_KEY] = session_id
 
                 st.session_state.last_error = None
-                break  # Success, exit retry loop
+                break
 
             except httpx.TimeoutException as exc:
                 error_msg = f"Request timed out after {REQUEST_TIMEOUT}s"
                 if attempt < MAX_RETRIES:
-                    continue  # Retry
+                    continue
                 else:
                     reply = f"⚠️ {error_msg}\n\n**Troubleshooting:**\n- Check if backend is running\n- Try a simpler question\n- Increase timeout in environment variables"
                     st.session_state.last_error = f"{error_msg}\nAttempt: {attempt + 1}/{MAX_RETRIES + 1}\nBackend: {BACKEND_URL}"
@@ -303,7 +296,7 @@ if prompt := st.chat_input("Type your question…"):
                 error_msg = "Cannot connect to backend"
                 reply = f"⚠️ {error_msg}\n\n**Please verify:**\n- Backend service is running on {BACKEND_URL}\n- Port 3000 is accessible\n- No firewall blocking the connection"
                 st.session_state.last_error = f"{error_msg}\nBackend: {BACKEND_URL}\nError: {str(exc)}"
-                break  # Don't retry connection errors
+                break
 
             except Exception as exc:
                 error_msg = f"Request failed: {type(exc).__name__}"
@@ -311,7 +304,6 @@ if prompt := st.chat_input("Type your question…"):
                 st.session_state.last_error = f"{error_msg}\n{str(exc)}\nBackend: {BACKEND_URL}"
                 break
 
-        # Render response
         if reply:
             svg, text_part = split_svg_and_text(reply)
 

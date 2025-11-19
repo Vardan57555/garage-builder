@@ -28,6 +28,7 @@ export class ChatServiceImpl implements ChatService
      * Prevents concurrent requests on the same session
      * @private
      */
+
     private requestLocks: Map<string, { locked: boolean; timestamp: number; timeout: NodeJS.Timeout }> = new Map();
 
     private cleanupInterval: NodeJS.Timeout | null = null;
@@ -79,6 +80,7 @@ export class ChatServiceImpl implements ChatService
      * @param sessionId - The session to lock
      * @returns {boolean} true if lock acquired, false if already locked
      */
+
     private acquireLock(sessionId: string): boolean
     {
         const lockInfo = this.requestLocks.get(sessionId);
@@ -114,6 +116,7 @@ export class ChatServiceImpl implements ChatService
      *
      * @param sessionId - The session to unlock
      */
+
     private releaseLock(sessionId: string): void
     {
         const lockInfo = this.requestLocks.get(sessionId);
@@ -130,6 +133,7 @@ export class ChatServiceImpl implements ChatService
      * ✅ NEW: Cleanup stale locks every 2 minutes
      * Removes locks that have been held for too long
      */
+
     private startLockCleanup(): void
     {
         setInterval(() => {
@@ -164,15 +168,36 @@ export class ChatServiceImpl implements ChatService
 
     public async generateAssistantResponse(body: Record<string, string>, clientIp: string, userAgent: string): Promise<IAiAnswer>
     {
-        const { question } = body;
+        const { question, sessionId: clientProvidedSessionId } = body;
 
         if (!question || question.trim().length === 0)
         {
             throw new ServerError(ServerError.INTERNAL, "Question is required");
         }
 
-        const clientId: string = this.generateClientIdentifier(clientIp, userAgent);
-        const { sessionId } = this.getOrCreateSession(clientId, clientIp, userAgent);
+        /**
+         * ✅ KEY FIX: If client provides a sessionId, use it directly
+         * This ensures each browser tab uses its own backend session
+         */
+        let sessionId: string;
+
+        if (clientProvidedSessionId && this.sessionMetadata.has(clientProvidedSessionId))
+        {
+            sessionId = clientProvidedSessionId;
+            logger.info(`[ChatService] Using client-provided sessionId: ${sessionId}`);
+        }
+        else if (clientProvidedSessionId)
+        {
+            // Client provided an expired session ID - create new one
+            sessionId = uuidv4();
+            logger.info(`[ChatService] Client session expired, creating new: ${sessionId}`);
+        }
+        else
+        {
+            // First message from this browser tab - create new session
+            sessionId = uuidv4();
+            logger.info(`[ChatService] New session created: ${sessionId}`);
+        }
 
         if (!this.acquireLock(sessionId))
         {
@@ -188,6 +213,33 @@ export class ChatServiceImpl implements ChatService
         {
             const agent: LeadAgent = await LeadAgent.getInstance();
             pricingData = await agent.run(sessionId, question);
+
+            // Ensure session metadata exists
+            if (!this.sessionMetadata.has(sessionId))
+            {
+                const metadata: SessionMetadata = {
+                    sessionId: sessionId,
+                    clientIdentifier: `tab_${sessionId}`, // ✅ Now tied to backend sessionId
+                    createdAt: Date.now(),
+                    lastActivity: Date.now(),
+                    expiresAt: Date.now() + Constants.DEFAULT_CONFIG.SESSION_TIMEOUT,
+                    ip: clientIp,
+                    userAgent: userAgent,
+                    lastIp: clientIp,
+                    lastUserAgent: userAgent,
+                    deviceFingerprint: this.generateFingerprint(clientIp, userAgent),
+                    accessCount: 1
+                };
+                this.sessionMetadata.set(sessionId, metadata);
+                this.metrics.totalCreated++;
+            }
+            else
+            {
+                // Update existing session
+                const metadata = this.sessionMetadata.get(sessionId)!;
+                metadata.lastActivity = Date.now();
+                metadata.accessCount++;
+            }
 
             return {
                 answer: pricingData,
@@ -246,94 +298,9 @@ export class ChatServiceImpl implements ChatService
     }
 
     /**
-     * @param ip - The client's IP address.
-     * @param userAgent - The client's user-agent string.
-     * @returns {string} A deterministic hashed client identifier derived from the IP and user-agent.
-     */
-
-    private generateClientIdentifier(ip: string, userAgent: string): string
-    {
-        const combined = `${ip}:${userAgent}`;
-        let hash: number = 0;
-
-        for (let i = 0; i < combined.length; i++)
-        {
-            const char: number = combined.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash;
-        }
-
-        return `client-${Math.abs(hash)}`;
-    }
-
-    /**
-     * @param clientId - The unique identifier representing the client (derived from IP and user-agent).
-     * @param ip - The client's IP address.
-     * @param userAgent - The client's user-agent string.
-     * @returns {{ sessionId: string; isNew: boolean }} An object containing the active session ID and a flag indicating whether it was newly created.
-     */
-
-    private getOrCreateSession(clientId: string, ip: string, userAgent: string): { sessionId: string; isNew: boolean }
-    {
-        const now: number = Date.now();
-
-        if (this.clientSessions.has(clientId))
-        {
-            const existingSessionId: string = this.clientSessions.get(clientId)!;
-            const metadata: SessionMetadata = this.sessionMetadata.get(existingSessionId);
-
-            if (metadata && metadata.expiresAt > now)
-            {
-                metadata.lastActivity = now;
-                metadata.lastIp = ip;
-                metadata.lastUserAgent = userAgent;
-                metadata.accessCount++;
-
-                logger.debug(`[ChatService] Session reused ${clientId} ${existingSessionId}`);
-
-                return { sessionId: existingSessionId, isNew: false };
-            }
-            else
-            {
-                this.clientSessions.delete(clientId);
-                if (metadata)
-                {
-                    this.sessionMetadata.delete(existingSessionId);
-                    this.requestLocks.delete(existingSessionId);
-                    this.metrics.totalExpired++;
-
-                    logger.info(`[ChatService] Expired session cleaned up ${clientId} ${existingSessionId}`);
-                }
-            }
-        }
-
-        const newSessionId: string = uuidv4();
-        const expiresAt: number = now + Constants.DEFAULT_CONFIG.SESSION_TIMEOUT;
-
-        const metadata: SessionMetadata = {
-            sessionId: newSessionId,
-            clientIdentifier: clientId,
-            createdAt: now,
-            lastActivity: now,
-            expiresAt: expiresAt,
-            ip: ip,
-            userAgent: userAgent,
-            lastIp: ip,
-            lastUserAgent: userAgent,
-            deviceFingerprint: this.generateFingerprint(ip, userAgent),
-            accessCount: 1
-        };
-
-        this.sessionMetadata.set(newSessionId, metadata);
-        this.clientSessions.set(clientId, newSessionId);
-        this.metrics.totalCreated++;
-
-        return { sessionId: newSessionId, isNew: true };
-    }
-
-    /**
      * Generates a security fingerprint from IP and User-Agent
      */
+
     private generateFingerprint(ip: string, userAgent: string): string
     {
         const combined: string = `${ip}:${userAgent}`;
