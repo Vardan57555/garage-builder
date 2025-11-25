@@ -1,6 +1,10 @@
 import { GuidVersions } from "joi";
 import {Dimensions, UserFriendlyParams} from "@agents/tools/io/IChat";
 import {SessionConfig} from "@utils/session/io/ISession";
+import {ColorOption, DataSource} from "@agents/tools/io/IColorChoice";
+import {FieldConfig} from "@agents/tools/io/IChoiceHandler";
+import {DetectionPattern} from "@agents/tools/io/IDetectBuilding";
+import {FieldExtractionConfig} from "@agents/tools/impl/io/IParameterUpdate";
 
 /**
  * Global constants for the application.
@@ -317,10 +321,6 @@ export class Constants
         2: "Regular",
         3: "Boxed-Eave"
     };
-    public static readonly ROOF_PRICE_KEYS: Record<number, string> = {
-        1: 'vertical_roof_cost',
-        3: 'box_style_cost'
-    };
 
     public static readonly ROOF_TYPE_MAPPING: Record<string, number> = {
         vertical: 1,
@@ -341,77 +341,10 @@ export class Constants
         "color"
     ];
 
-    public static readonly COLOR_NAME_MAPPING: {
-        "red": "Barn Red",
-        "burgundy": "Burgundy",
-        "barn": "Barn Red",
-        "white": "White",
-        "black": "Black",
-        "blue": "Royal Blue",
-        "green": "Evergreen",
-        "gray": "Pewter Gray",
-        "grey": "Pewter Gray",
-        "tan": "Tan",
-        "beige": "Pebble Beige",
-        "clay": "Clay",
-        "brown": "Earth Brown",
-    };
-
-    public static readonly FIELD_PROMPTS: Record<keyof UserFriendlyParams, string> = {
-        garage_type: "What type of garage do you need?",
-        width: "What width do you need for your garage (in feet)?",
-        length: "What length do you need (in feet)?",
-        height: "What height do you need (in feet)?",
-        state_name: "Which state are you located in?",
-        roof_type:
-            "Which roof style would you prefer?\n  • Vertical (best weather protection)\n  • Regular (standard horizontal panels)\n  • Box (economy option)",
-        manufacturer_name:
-            "Do you have a preferred manufacturer? (optional, press Enter to use default)",
-        utility_length: "Utility/lean-to length? (optional)",
-        building_type: "Building type? (garage/carport/barn)",
-        gauge: "Metal gauge preference? (12/14 or blank for standard)",
-        is_barn: "Is this a barn style? (yes/no)",
-        color: "What color would you like?",
-        color_hex: "Provide a custom color HEX code (optional)",
-    };
-    public static readonly INTENT_PROMPT: string = `You are an intent classifier for a garage/building pricing service.
-         Analyze if the user wants pricing for a garage, carport, barn, metal building, or any similar structure.
-         Return ONLY "YES" if they want building pricing, or "NO" if it's just general chat.
-         User input: "{input}"
-         Answer (YES or NO):`.trim();
-
-    public static readonly INTENT_KEYWORDS: Set<string> = new Set(["garage", "carport", "barn", "building", "price", "quote", "cost"]);
     public static readonly DEFAULT_CONFIG: SessionConfig = {
         SESSION_TIMEOUT: 30 * 60 * 1000,
         CLEANUP_INTERVAL: 5 * 60 * 1000,
         WARNING_THRESHOLD: 5 * 60 * 1000,
-    };
-    public static readonly BUILDING_ID_MAP: Record<string, number> = {
-        'garage': 1,
-        'carport': 1,
-        'standard': 1,
-        '1': 1,
-        'lean': 2,
-        'lean-to': 2,
-        'leantos': 2,
-        '2': 2,
-        'triple': 3,
-        'triple wide': 3,
-        '3': 3,
-        'rv': 4,
-        'rv cover': 4,
-        '4': 4,
-        'commercial': 6,
-        '6': 6,
-        'custom': 7,
-        '7': 7,
-        'clear': 8,
-        'clear span': 8,
-        'free standing': 8,
-        '8': 8,
-        'risk': 9,
-        'risk ii': 9,
-        '9': 9,
     };
 
     public static readonly GARAGE_TYPE_PATTERNS = [
@@ -443,55 +376,288 @@ export class Constants
         garage: { width: 20, length: 20, height: 10 },
     };
 
-    public static readonly STATE_PATTERNS: Record<string, string> = {
-        "texas|tx": "Texas",
-        "california|ca": "California",
-        "florida|fl": "Florida",
-        "new york|ny": "New York",
-        "pennsylvania|pa": "Pennsylvania",
-        "illinois|il": "Illinois",
-        "ohio|oh": "Ohio",
-        "georgia|ga": "Georgia",
-        "north carolina|nc": "North Carolina",
-        "michigan|mi": "Michigan",
-        "new jersey|nj": "New Jersey",
-        "virginia|va": "Virginia",
-        "washington|wa": "Washington",
-        "arizona|az": "Arizona",
-        "massachusetts|ma": "Massachusetts",
-        "tennessee|tn": "Tennessee",
-        "maryland|md": "Maryland",
-        "missouri|mo": "Missouri",
-        "wisconsin|wi": "Wisconsin",
-        "colorado|co": "Colorado",
-        "minnesota|mn": "Minnesota",
-        "south carolina|sc": "South Carolina",
-        "alabama|al": "Alabama",
-        "louisiana|la": "Louisiana",
-        "kentucky|ky": "Kentucky",
-        "oregon|or": "Oregon",
-        "oklahoma|ok": "Oklahoma",
-        "connecticut|ct": "Connecticut",
-        "iowa|ia": "Iowa",
-        "nevada|nv": "Nevada",
-        "arkansas|ar": "Arkansas",
-        "mississippi|ms": "Mississippi",
-        "kansas|ks": "Kansas",
-        "utah|ut": "Utah",
-        "new mexico|nm": "New Mexico",
-        "nebraska|ne": "Nebraska",
-        "idaho|id": "Idaho",
-        "maine|me": "Maine",
-        "montana|mt": "Montana",
-        "rhode island|ri": "Rhode Island",
-        "delaware|de": "Delaware",
-        "south dakota|sd": "South Dakota",
-        "north dakota|nd": "North Dakota",
-        "alaska|ak": "Alaska",
-        "hawaii|hi": "Hawaii",
-        "wyoming|wy": "Wyoming",
-        "vermont|vt": "Vermont",
-        "new hampshire|nh": "New Hampshire",
-        "west virginia|wv": "West Virginia",
+    public static readonly FALLBACK_COLORS: ColorOption[] = [
+        {
+            id: 1,
+            name: "White",
+            hex_value: "#ffffff",
+            red_value: 255,
+            green_value: 255,
+            blue_value: 255,
+            cost: 0,
+        },
+        {
+            id: 2,
+            name: "Black",
+            hex_value: "#313232",
+            red_value: 49,
+            green_value: 50,
+            blue_value: 50,
+            cost: 0,
+        },
+        {
+            id: 3,
+            name: "Barn Red",
+            hex_value: "#6A2210",
+            red_value: 106,
+            green_value: 34,
+            blue_value: 16,
+            cost: 250,
+        },
+        {
+            id: 4,
+            name: "Burgundy",
+            hex_value: "#452210",
+            red_value: 69,
+            green_value: 34,
+            blue_value: 34,
+            cost: 200,
+        },
+        {
+            id: 5,
+            name: "Royal Blue",
+            hex_value: "#1D548B",
+            red_value: 29,
+            green_value: 84,
+            blue_value: 139,
+            cost: 250,
+        },
+        {
+            id: 6,
+            name: "Evergreen",
+            hex_value: "#1E3C22",
+            red_value: 30,
+            green_value: 60,
+            blue_value: 34,
+            cost: 200,
+        },
+        {
+            id: 7,
+            name: "Pewter Gray",
+            hex_value: "#979290",
+            red_value: 151,
+            green_value: 146,
+            blue_value: 144,
+            cost: 150,
+        },
+        {
+            id: 8,
+            name: "Clay",
+            hex_value: "#99846F",
+            red_value: 153,
+            green_value: 132,
+            blue_value: 111,
+            cost: 180,
+        },
+        {
+            id: 9,
+            name: "Pebble Beige",
+            hex_value: "#fae4bb",
+            red_value: 250,
+            green_value: 228,
+            blue_value: 187,
+            cost: 150,
+        },
+        {
+            id: 10,
+            name: "Earth Brown",
+            hex_value: "#4D331B",
+            red_value: 77,
+            green_value: 51,
+            blue_value: 27,
+            cost: 200,
+        },
+    ];
+
+    public static readonly COLOR_CATEGORIES: Record<string, string[]> = {
+        "🔴 Reds": ["Red", "Barn", "Burgundy", "Crimson", "Cardinal", "Pink"],
+        "🔵 Blues": ["Blue", "Navy", "Slate", "King", "Royal", "Hawaiian"],
+        "🟢 Greens": ["Green", "Evergreen", "Forest"],
+        "⚫ Grays": ["Gray", "Grey", "Pewter", "Quaker", "Charcoal", "Zinc"],
+        "⚪ Neutrals": ["White", "Black", "Beige", "Tan", "Sandstone", "Clay", "Brown"],
+        "🟤 Earth": ["Earth", "Rawhide", "Copper", "Koko"],
     };
+
+    public static readonly DATA_SOURCES: DataSource[] = [
+    { name: "getColor()", query: "CALL getColor()", context: "colors_from_procedure" },
+    { name: "data_colors", query: "SELECT * FROM data_colors ORDER BY name", context: "data_colors_direct" },
+    { name: "colors table", query: "SELECT * FROM colors ORDER BY name", context: "colors_table" },
+    ];
+
+    public static readonly DEFAULT_FIELDS: FieldConfig[] = [
+    {
+        name: "roof_type",
+        options: [
+            {
+                value: "vertical",
+                label: "Vertical",
+                description: "Best weather protection",
+            },
+            {
+                value: "regular",
+                label: "Regular",
+                description: "Standard horizontal panels",
+            },
+            { value: "box", label: "Box", description: "Economy option" },
+        ],
+    },
+    {
+        name: "building_type",
+        options: [
+            { value: "garage", label: "Garage", description: "Standard garage" },
+            { value: "shed", label: "Shed", description: "Storage shed" },
+            { value: "barn", label: "Barn", description: "Agricultural barn" },
+        ],
+    },
+    {
+        name: "garage_type",
+        options: [
+            {
+                value: "1-car",
+                label: "1-car",
+                description: "Single car garage",
+            },
+            { value: "2-car", label: "2-car", description: "Two car garage" },
+            { value: "3-car", label: "3-car", description: "Three car garage" },
+        ],
+    },
+];
+
+    /**
+     * Pattern library for building type detection
+     * High confidence: explicit type mentions (garage, shed, barn)
+     * Medium confidence: generic descriptors (structure, metallic building)
+     */
+
+    public static readonly DETECTION_PATTERNS: DetectionPattern[] = [
+        { pattern: /\bgarage\b/i, type: "garage", confidence: "high" },
+        { pattern: /\bshed\b/i, type: "shed", confidence: "high" },
+        { pattern: /\bbarn\b/i, type: "barn", confidence: "high" },
+        { pattern: /\bmetallic?\s+building\b/i, type: "garage", confidence: "medium" },
+        { pattern: /\bstructure\b/i, type: "garage", confidence: "medium" },
+    ];
+
+    static readonly INDECISION_PATTERNS = [
+        /\b(any|whatever|anyways|idk|i don't know|doesn't matter|don't care|idc|no preference|surprise me|you pick|all the same|doesn't matter|whatever's fine)\b/i,
+        /^(any|whatever|idk|hmm|um|uh)$/i,
+    ] as const;
+
+    static readonly CODE_INDICATORS = [
+        "def ",
+        "import ",
+        "```",
+        "function ",
+        "const ",
+        "let ",
+        "class ",
+        ".replace",
+        "pattern ",
+        "regex",
+    ] as const;
+
+    static readonly NULL_VALUES = ["null", "", "undefined", "none"] as const;
+
+    static readonly VALID_GAUGES = [14, 16, 18, 20] as const;
+
+    static readonly FIELD_DEFAULTS: Record<keyof UserFriendlyParams, any> = {
+        roof_type: "regular",
+        gauge: 16,
+        building_type: "garage",
+        state_name: null,
+        width: null,
+        length: null,
+        height: null,
+        garage_type: null,
+        manufacturer_name: null,
+        utility_length: null,
+        is_barn: null,
+        color: undefined,
+        color_hex: undefined,
+    };
+
+    static readonly FIELD_EXTRACTION_CONFIGS: Record<
+        keyof UserFriendlyParams,
+        FieldExtractionConfig
+    > = {
+        width: {
+            instructions: "Extract WIDTH in feet as a number. Valid range: 1-100.",
+            examples:
+                'USER: "change width to 20" → OUTPUT: 20\nUSER: "make it 30 feet" → OUTPUT: 30',
+        },
+        length: {
+            instructions: "Extract LENGTH in feet as a number. Valid range: 1-200.",
+            examples:
+                'USER: "30 feet long" → OUTPUT: 30\nUSER: "length 40" → OUTPUT: 40',
+        },
+        height: {
+            instructions: "Extract HEIGHT in feet as a number. Valid range: 1-30.",
+            examples:
+                'USER: "12 feet tall" → OUTPUT: 12\nUSER: "height 10" → OUTPUT: 10',
+        },
+        gauge: {
+            instructions:
+                'Extract GAUGE as a number. VALID ONLY: 14, 16, 18, 20. If user says "any"/"idk"/etc, return 16 (default).',
+            examples:
+                'USER: "14GA" → OUTPUT: 14\nUSER: "gauge 18" → OUTPUT: 18\nUSER: "any" → OUTPUT: 16',
+        },
+        state_name: {
+            instructions:
+                "Extract STATE NAME as text. Examples: Texas, California, New York",
+            examples:
+                'USER: "I\'m in Texas" → OUTPUT: Texas\nUSER: "California" → OUTPUT: California',
+        },
+        roof_type: {
+            instructions:
+                'Extract ROOF TYPE. VALID ONLY: vertical, regular, box, a-frame. If user says "any"/"idk"/etc, return "regular" (default).',
+            examples:
+                'USER: "I want vertical" → OUTPUT: vertical\nUSER: "box roof" → OUTPUT: box\nUSER: "any" → OUTPUT: regular',
+        },
+        building_type: {
+            instructions:
+                'Extract BUILDING TYPE. Valid: garage, shed, barn. If user says "any"/"idk"/etc, return "garage" (default).',
+            examples:
+                'USER: "make it 3 car" → OUTPUT: 3-car\nUSER: "any" → OUTPUT: garage',
+        },
+        garage_type: {
+            instructions: "Extract GARAGE TYPE",
+            examples: "OUTPUT: value",
+        },
+        manufacturer_name: {
+            instructions: "Extract MANUFACTURER NAME",
+            examples: "OUTPUT: value",
+        },
+        utility_length: {
+            instructions: "Extract UTILITY LENGTH",
+            examples: "OUTPUT: value",
+        },
+        is_barn: {
+            instructions: "Extract IS BARN",
+            examples: "OUTPUT: value",
+        },
+        color: {
+            instructions: "Extract COLOR",
+            examples: "OUTPUT: value",
+        },
+        color_hex: {
+            instructions: "Extract COLOR HEX",
+            examples: "OUTPUT: value",
+        },
+    };
+
+    static readonly PRICING_CONSTANTS = {
+        DEFAULT_MAP_ID: 1,
+        DEFAULT_MANUFACTURER_ID: 1,
+        DEFAULT_ROOF_ID: 2,
+        DEFAULT_GAUGE: 14,
+        LABOR_MULTIPLIER: 0.5,
+        FOUNDATION_COST_PER_SQFT: 8.5,
+        DELIVERY_COST: 750,
+        CONTINGENCY_RATE: 0.05,
+    } as const;
+
+    static readonly ERROR_MESSAGES = {
+        CONVERSION_FAILED: "❌ Failed to convert parameters to technical format.",
+        PRICE_CALCULATION_FAILED: "❌ Failed to calculate price.",
+        UNKNOWN_ERROR: (message: string) => `❌ Failed to calculate price: ${message}`,
+    } as const;
 }

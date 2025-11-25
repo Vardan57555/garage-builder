@@ -1,22 +1,28 @@
-
-import { getAddonsWithCache, getLimitedAddonsByType } from "@agents/tools/impl/AddonDatabaseService";
+import { AddonManager } from "@agents/tools/impl/AddonDatabaseService";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { leadAgentGraph } from "@agents/LeadAgentGraph";
-import { detectParameterUpdateFromInput, detectResetIntent } from "@agents/tools/impl/DetectionHelpers";
+import {detectParameterUpdateFromInput, IntentDetector} from "@agents/tools/impl/DetectionHelpers";
 import { detectColorFromInput } from "@agents/tools/impl/ColorDetectionHelper";
-import { getColorsWithCache, getGroupedColorsByCategory } from "@agents/tools/impl/ColorDatabaseService";
+import { ColorGrouper } from "@agents/tools/impl/ColorDatabaseService";
 import { SessionManager } from "@utils/session/SessionManager";
 import { RedisCacheUtils } from "@utils/cache/RedisCacheUtils";
 import { InstantiationError } from "@errors/InstantiationError";
+import {IAddonDatabaseService} from "@agents/tools/impl/io/IAddonDatabaseService";
+import {IColorCache} from "@agents/tools/impl/io/IColorDatabaseService";
+import {ColorOption} from "@agents/tools/io/IColorChoice";
+import {ColorCache} from "@agents/tools/impl/ColorCache";
 
 const logger: pino.Logger = createLogger(module);
 
-export class LeadAgent {
+export class LeadAgent
+{
     private static instance: LeadAgent;
     private sessionManager: SessionManager;
+    private readonly addonManagerInstance: IAddonDatabaseService = AddonManager.getInstance();
+    private readonly colorCacheInstance:IColorCache = ColorCache.getInstance();
 
     private constructor(enforce: () => void, cacheUtils: RedisCacheUtils) {
         if (enforce !== Enforce) {
@@ -124,8 +130,8 @@ export class LeadAgent {
     }
 
     private async getAddonsMenuFromDatabase(): Promise<any[]> {
-        const allAddons = await getAddonsWithCache();
-        const limited = getLimitedAddonsByType(allAddons, 10);
+        const allAddons = await this.addonManagerInstance.getAddonsWithCache();
+        const limited = this.addonManagerInstance.getLimitedAddonsByType(allAddons, 10);
         return limited.map(addon => ({
             id: addon.id,
             label: addon.label,
@@ -142,7 +148,7 @@ export class LeadAgent {
             const session = this.getOrCreateSession(sessionId);
             await session.memory.chatHistory.addUserMessage(input);
 
-            if (detectResetIntent(input)) {
+            if (IntentDetector.detectReset(input)) {
                 logger.info(`[LeadAgent] Reset intent detected`);
                 const result = await leadAgentGraph.invoke({
                     sessionId,
@@ -228,20 +234,23 @@ export class LeadAgent {
 
                 try {
                     logger.info(`[LeadAgent] Fetching colors from database...`);
-                    const allColors = await getColorsWithCache();
+                    const allColors: ColorOption[] = await this.colorCacheInstance.get();
 
-                    if (!allColors || allColors.length === 0) {
+                    if (!allColors || allColors.length === 0)
+                    {
                         logger.error(`[LeadAgent] ❌ NO COLORS IN DATABASE!`);
                         return `❌ Error: No colors available in database. Skipping color selection.`;
                     }
 
                     logger.info(`[LeadAgent] ✅ Got ${allColors.length} colors from database`);
 
-                    const groupedColors = getGroupedColorsByCategory(allColors, 5);
+                    const groupedColors: Map<string, ColorOption[]> = ColorGrouper.group(allColors, 5);
                     const displayColors: any[] = [];
 
-                    for (const [category, colors] of groupedColors.entries()) {
-                        if (colors && Array.isArray(colors) && colors.length > 0) {
+                    for (const [category, colors] of groupedColors.entries())
+                    {
+                        if (colors && Array.isArray(colors) && colors.length > 0)
+                        {
                             logger.info(`[LeadAgent] Adding ${colors.length} colors from category: ${category}`);
                             displayColors.push(...colors);
                         }
@@ -249,22 +258,25 @@ export class LeadAgent {
 
                     logger.info(`[LeadAgent] Built displayColors array: ${displayColors.length} colors`);
 
-                    if (displayColors.length === 0) {
+                    if (displayColors.length === 0)
+                    {
                         logger.error(`[LeadAgent] ❌ displayColors is empty after grouping!`);
                         return `❌ Error: No colors available for selection.`;
                     }
 
                     const firstColor = displayColors[0];
-                    if (!firstColor || !firstColor.name) {
+                    if (!firstColor || !firstColor.name)
+                    {
                         logger.error(`[LeadAgent] ❌ displayColors contains invalid objects!`);
                         return `❌ Error: Color data is corrupted. Please contact support.`;
                     }
 
                     logger.info(`[LeadAgent] Attempting to match user input: "${input}"`);
 
-                    const selectedColor = detectColorFromInput(input, displayColors);
+                    const selectedColor: ColorOption = detectColorFromInput(input, displayColors);
 
-                    if (selectedColor) {
+                    if (selectedColor)
+                    {
                         logger.info(`[LeadAgent] ✅ Color matched: "${selectedColor.name}" (cost: $${selectedColor.cost})`);
 
                         session.state.color = selectedColor.name;
@@ -290,7 +302,7 @@ export class LeadAgent {
                             finalPrice: 0,
                         });
 
-                        const response = result.response;
+                        const response:string = result.response;
                         await session.memory.chatHistory.addAIChatMessage(response);
 
                         session.state.color = result.color || selectedColor.name;

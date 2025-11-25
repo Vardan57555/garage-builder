@@ -2,7 +2,7 @@ import { Annotation } from "@langchain/langgraph";
 import { BaseMessage } from "@langchain/core/messages";
 import { UserFriendlyParams, StateMapping } from "@agents/tools/io/IChat";
 
-export const LeadAgentState = Annotation.Root({
+export const    LeadAgentState = Annotation.Root({
     sessionId: Annotation<string>,
 
     messages: Annotation<BaseMessage[]>({

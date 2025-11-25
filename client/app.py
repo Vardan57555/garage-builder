@@ -12,7 +12,7 @@ import httpx
 import streamlit as st
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
-REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "300.0"))
+REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "400.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))
 
 INITIAL_GREETINGS = [

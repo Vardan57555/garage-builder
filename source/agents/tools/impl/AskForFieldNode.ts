@@ -1,117 +1,235 @@
-import {LeadAgentStateType} from "@agents/LeadAgentState";
-import {GenericChoiceManager} from "@agents/tools/impl/ChoiceHandler";
-import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
+import { LeadAgentStateType } from "@agents/LeadAgentState";
+import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
 import pino from "pino";
-import {createLogger} from "@utils/logger/Log";
-
+import { createLogger } from "@utils/logger/Log";
+import { ColorGrouper } from "@agents/tools/impl/ColorDatabaseService";
+import {FieldPromptConfig} from "@agents/tools/impl/io/IAskForField";
+import {ColorOption} from "@agents/tools/io/IColorChoice";
+import {IAskForFieldNode} from "@agents/tools/io/IAskForFieldNode";
+import { GenericChoiceManager } from "./GenericChoiceManager";
+import {ColorCache} from "@agents/tools/impl/ColorCache";
 const logger: pino.Logger = createLogger(module);
-const choiceManager = new GenericChoiceManager();
 
-export const askForFieldNode = async (state: LeadAgentStateType) => {
-    logger.info(`[AskNode] Session ${state.sessionId} - Field: ${state.currentField}`);
+/**
+ * AskForFieldNode - Responsible for managing field prompts and state transitions
+ * Handles user interactions for data collection in the lead agent workflow
+ */
+export class AskForFieldNode implements IAskForFieldNode
+{
+    private choiceManager: GenericChoiceManager;
+    private fieldPromptMap: Record<string, FieldPromptConfig>;
 
-    if (!state.currentField) {
-        logger.warn(`[AskNode] No currentField set!`);
-        const missing = LeadAgentHelpers.getMissingFields(state.userFriendlyParams);
+    constructor()
+    {
+        this.choiceManager = new GenericChoiceManager();
+        this.initializeFieldPromptMap();
+    }
 
-        if (missing.length > 0) {
-            logger.info(`[AskNode] Setting field to: ${missing[0]}`);
-            return {
-                currentField: missing[0],
-                userFriendlyParams: state.userFriendlyParams,
-                nextStep: "ask_for_field",
-            };
-        }
-
-        return {
-            response: "Error: All fields complete",
-            nextStep: "calculate_price",
+    /**
+     * Initializes the field prompt configuration map
+     */
+    private initializeFieldPromptMap(): void
+    {
+        this.fieldPromptMap = {
+            width: {
+                template: `{params}\n\n📏 What **width** (feet)?\n(e.g., 20, 24, 30)`,
+            },
+            length: {
+                template: `{params}\n\n📏 What **length** (feet)?\n(e.g., 25, 30, 40)`,
+            },
+            height: {
+                template: `{params}\n\n📏 What **height** (feet)?\n(e.g., 10, 12)`,
+            },
+            state_name: {
+                template: `{params}\n\n🗺️ Which **state**?\n(e.g., Texas, California)`,
+            },
+            roof_type: {
+                template: this.choiceManager.getPrompt("roof_type"),
+            },
+            gauge: {
+                template: `{params}\n\n📊 What **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`,
+            },
+            building_type: {
+                template: this.choiceManager.getPrompt("building_type"),
+            },
         };
     }
 
-    let promptMessage = "";
-    const currentParams = LeadAgentHelpers.formatCurrentParams(state.userFriendlyParams);
+    /**
+     * Validates and ensures the currentField is set in the state
+     */
+    private async ensureCurrentField(state: LeadAgentStateType): Promise<string>
+    {
+        if (state.currentField)
+        {
+            return state.currentField;
+        }
 
-    switch (state.currentField) {
-        case "width":
-            promptMessage = `${currentParams}\n\n📏 What **width** (feet)?\n(e.g., 20, 24, 30)`;
-            break;
-        case "length":
-            promptMessage = `${currentParams}\n\n📏 What **length** (feet)?\n(e.g., 25, 30, 40)`;
-            break;
-        case "height":
-            promptMessage = `${currentParams}\n\n📏 What **height** (feet)?\n(e.g., 10, 12)`;
-            break;
-        case "state_name":
-            promptMessage = `${currentParams}\n\n🗺️ Which **state**?\n(e.g., Texas, California)`;
-            break;
-        case "roof_type":
-            promptMessage = choiceManager.getPrompt("roof_type");
-            break;
-        case "gauge":
-            promptMessage = `${currentParams}\n\n📊 What **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`;
-            break;
-        case "building_type":
-            promptMessage = choiceManager.getPrompt("building_type");
-            break;
-        case "color":
-            try {
-                const { getColorsWithCache, getGroupedColorsByCategory } = await import("@agents/tools/impl/ColorDatabaseService");
+        logger.warn(`[FieldValidation] Session ${state.sessionId} - No currentField set`);
 
-                logger.info(`[AskNode] 🎨 Loading colors FROM DATABASE for display...`);
-                const allColors = await getColorsWithCache();
+        const missingFields: string[] = LeadAgentHelpers.getMissingFields(state.userFriendlyParams);
 
-                if (allColors.length === 0) {
-                    logger.error(`[AskNode] ❌ No colors loaded from database!`);
-                    promptMessage = `${currentParams}\n\n❌ ERROR: No colors available in database`;
-                    break;
-                }
+        if (missingFields.length === 0)
+        {
+            throw new Error("All fields complete - should transition to calculate_price");
+        }
 
-                logger.info(`[AskNode] ✅ Loaded ${allColors.length} colors from database`);
+        const nextField: string = missingFields[0];
+        logger.info(`[FieldValidation] Session ${state.sessionId} - Setting field to: ${nextField}`);
 
-                const groupedColors = getGroupedColorsByCategory(allColors, 5);
-                let colorMenu = "🎨 **CHOOSE YOUR BUILDING COLOR:**\n\n";
-                let colorIndex = 1;
-
-                for (const [category, colors] of groupedColors.entries()) {
-                    if (colors.length > 0) {
-                        colorMenu += `**${category}:**\n`;
-                        colors.forEach(color => {
-                            const colorBox = `■`;
-                            const costDisplay = color.cost > 0 ? ` +$${color.cost.toFixed(2)}` : " (included)";
-                            colorMenu += `  ${colorIndex}. ${colorBox} ${color.name} ${color.hex_value}${costDisplay}\n`;
-                            colorIndex++;
-                        });
-                        colorMenu += "\n";
-                    }
-                }
-
-                promptMessage =
-                    `${currentParams}\n\n` +
-                    colorMenu +
-                    `**Examples:**\n` +
-                    `• "1" or "2" - Select by number\n` +
-                    `• "Barn Red" or "barn red" - Select by exact name\n` +
-                    `• "red" - Search for color\n` +
-                    `• "any" or "skip" - Use default (White)\n\n` +
-                    `Which color do you prefer?`;
-
-                logger.info(`[AskNode] ✅ Color menu built with ${colorIndex - 1} options`);
-            } catch (error) {
-                logger.error(`[AskNode] Error loading colors:`, error);
-                promptMessage = `${currentParams}\n\n🎨 What color would you like?\n(e.g., "red", "white", "blue")`;
-            }
-            break;
-        default:
-            promptMessage = `${currentParams}\n\nProvide: ${LeadAgentHelpers.formatFieldName(state.currentField)}`;
+        return nextField;
     }
 
-    logger.info(`[AskNode] Prompting for: ${state.currentField}`);
+    /**
+     * Builds a formatted color menu from grouped colors
+     */
+    private buildColorMenu(colors: Awaited<ReturnType<typeof ColorCache.prototype.get>>): string
+    {
+        const groupedColors: Map<string, ColorOption[]> = ColorGrouper.group(colors, 5);
+        let colorMenu: string = "🎨 **CHOOSE YOUR BUILDING COLOR:**\n\n";
+        let colorIndex: number = 1;
 
-    return {
-        response: promptMessage,
-        userFriendlyParams: state.userFriendlyParams,
-        currentField: state.currentField,
-        nextStep: "__end__",
-    };
+        for (const [category, categoryColors] of groupedColors.entries())
+        {
+            if (categoryColors.length === 0)
+            {
+                continue;
+            }
+
+            colorMenu += `**${category}:**\n`;
+            categoryColors.forEach((color: ColorOption) => {
+                const costDisplay: string =
+                    color.cost > 0 ? ` +$${color.cost.toFixed(2)}` : " (included)";
+                colorMenu += `  ${colorIndex}. ■ ${color.name} ${color.hex_value}${costDisplay}\n`;
+                colorIndex++;
+            });
+            colorMenu += "\n";
+        }
+
+        logger.info(`[ColorMenu] Built menu with ${colorIndex - 1} options`);
+
+        return colorMenu;
+    }
+
+    /**
+     * Formats the complete color selection prompt with instructions
+     */
+    private formatColorPrompt(currentParams: string, colorMenu: string): string
+    {
+        return (
+            `${currentParams}\n\n${colorMenu}` +
+            `**Examples:**\n` +
+            `• "1" or "2" - Select by number\n` +
+            `• "Barn Red" or "barn red" - Select by exact name\n` +
+            `• "red" - Search for color\n` +
+            `• "any" or "skip" - Use default (White)\n\n` +
+            `Which color do you prefer?`
+        );
+    }
+
+    /**
+     * Generates a color selection prompt by fetching and formatting available colors
+     */
+    private async generateColorPrompt(currentParams: string): Promise<string>
+    {
+        logger.info(`[ColorPrompt] Loading colors from database...`);
+
+        try
+        {
+            const allColors: ColorOption[] = await ColorCache.getInstance().get();
+
+            if (allColors.length === 0)
+            {
+                logger.error(`[ColorPrompt] No colors available in database`);
+                return `${currentParams}\n\n❌ ERROR: No colors available in database`;
+            }
+
+            logger.info(`[ColorPrompt] Loaded ${allColors.length} colors from database`);
+
+            const colorMenu: string = this.buildColorMenu(allColors);
+            return this.formatColorPrompt(currentParams, colorMenu);
+        }
+        catch (error)
+        {
+            logger.error(`[ColorPrompt] Error loading colors`, { error });
+            return `${currentParams}\n\n🎨 What color would you like?\n(e.g., "red", "white", "blue")`;
+        }
+    }
+
+    /**
+     * Generates the prompt message for the current field
+     */
+    private async generateFieldPrompt(field: string, currentParams: string): Promise<string>
+    {
+        const config: FieldPromptConfig = this.fieldPromptMap[field];
+
+        if (config && !config.handler)
+        {
+            return config.template.replace("{params}", currentParams);
+        }
+
+        if (field === "color")
+        {
+            return this.generateColorPrompt(currentParams);
+        }
+
+        logger.warn(`[FieldPrompt] Unmapped field: ${field}`);
+        const formattedFieldName = LeadAgentHelpers.formatFieldName(field as keyof typeof LeadAgentHelpers.formatFieldName);
+        return `${currentParams}\n\nProvide: ${formattedFieldName}`;
+    }
+
+    /**
+     * Main handler for requesting the next field from user
+     * Manages state transitions and prompt generation
+     */
+    async execute(state: LeadAgentStateType): Promise<Record<string, any>>
+    {
+        const { sessionId } = state;
+        logger.info(`[AskFieldNode] Processing field request`, { sessionId });
+
+        try
+        {
+            const currentField: string = await this.ensureCurrentField(state);
+
+            if (!currentField)
+            {
+                return {
+                    response: "Error: All fields complete",
+                    nextStep: "calculate_price",
+                };
+            }
+
+            const currentParams: string = LeadAgentHelpers.formatCurrentParams(state.userFriendlyParams);
+
+            const response: string = await this.generateFieldPrompt(currentField, currentParams);
+
+            logger.info(`[AskFieldNode] Prompting for field`, {sessionId, currentField });
+
+            return {
+                response,
+                userFriendlyParams: state.userFriendlyParams,
+                currentField,
+                nextStep: "__end__",
+            };
+        }
+        catch (error)
+        {
+            logger.error(`[AskFieldNode] Error processing field request`, {sessionId: state.sessionId, error,});
+
+            return {
+                response: "An error occurred while processing your request. Please try again.",
+                userFriendlyParams: state.userFriendlyParams,
+                currentField: state.currentField,
+                nextStep: "__end__",
+            };
+        }
+    }
+}
+
+/**
+ * Factory function to maintain backward compatibility with original function-based export
+ */
+export const askForFieldNode = async (state: LeadAgentStateType) => {
+    const node = new AskForFieldNode();
+    return node.execute(state);
 };

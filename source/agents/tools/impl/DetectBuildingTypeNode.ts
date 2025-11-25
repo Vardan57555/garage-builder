@@ -1,46 +1,63 @@
-import {LeadAgentStateType} from "@agents/LeadAgentState";
+import { LeadAgentStateType } from "@agents/LeadAgentState";
 import pino from "pino";
-import {createLogger} from "@utils/logger/Log";
+import { createLogger } from "@utils/logger/Log";
+import {BuildingTypeMatch, BuildingTypeNodeResponse } from "@agents/tools/io/IDetectBuilding";
+import {BuildingTypeDetector, BuildingTypeValidator} from "@agents/tools/validators/BuildingTypeValidator";
+import {BuildingTypeNodeState} from "@agents/tools/impl/BuildingTypeNodeState";
 const logger: pino.Logger = createLogger(module);
 
-export const detectBuildingTypeNode = async (state: LeadAgentStateType) => {
-    logger.info(`[BuildingTypeNode] Detecting building type from initial input`);
+/**
+ * BuildingTypeNodeManager: Orchestrates building type detection workflow
+ */
 
-    if (state.userFriendlyParams.building_type) {
-        logger.info(`[BuildingTypeNode] Building type already set`);
-        return { nextStep: "extract_parameters" };
-    }
+class BuildingTypeNodeManager
+{
+    /**
+     * Executes building type detection node
+     */
 
-    try {
-        const userInput = state.messages[state.messages.length - 1]?.content as string;
-        if (!userInput) {
-            return { nextStep: "extract_parameters" };
-        }
+    public async execute(state: LeadAgentStateType): Promise<BuildingTypeNodeResponse>
+    {
+        logger.info("[BuildingTypeNodeManager] Starting building type detection");
 
-        const lowerInput = userInput.toLowerCase();
-
-        const buildingPatterns = [
-            { pattern: /\bgarage\b/i, type: "garage" },
-            { pattern: /\bshed\b/i, type: "shed" },
-            { pattern: /\bbarn\b/i, type: "barn" },
-            { pattern: /\bmetallic? building\b/i, type: "garage" },
-            { pattern: /\bstructure\b/i, type: "garage" },
-        ];
-
-        for (const { pattern, type } of buildingPatterns) {
-            if (pattern.test(lowerInput)) {
-                logger.info(`[BuildingTypeNode] Detected building type: ${type}`);
-                return {
-                    userFriendlyParams: { building_type: type },
-                    response: `✓ Got it - you're looking for a ${type}!`,
-                    nextStep: "extract_parameters",
-                };
+        try
+        {
+            if (BuildingTypeValidator.isAlreadySet(state))
+            {
+                return BuildingTypeNodeState.createAlreadySetResponse();
             }
-        }
 
-        return { nextStep: "extract_parameters" };
-    } catch (error) {
-        logger.error(`[BuildingTypeNode] Error:`, error);
-        return { nextStep: "extract_parameters" };
+            const userInput: string = BuildingTypeValidator.getUserInput(state);
+            if (!userInput)
+            {
+                return BuildingTypeNodeState.createNotDetectedResponse();
+            }
+
+            const match: BuildingTypeMatch = BuildingTypeDetector.detect(userInput);
+
+            if (!BuildingTypeValidator.isValidMatch(match))
+            {
+                return BuildingTypeNodeState.createNotDetectedResponse();
+            }
+
+            return BuildingTypeNodeState.createDetectedResponse(match.type, match.confidence);
+        }
+        catch (error)
+        {
+            return BuildingTypeNodeState.createErrorResponse(error);
+        }
     }
+}
+
+const buildingTypeNodeManager = new BuildingTypeNodeManager();
+
+/**
+ * NODE: Detects building type from initial user input
+ *
+ * @param state - Lead agent state containing messages and parameters
+ * @returns Node response with optional detected building type
+ */
+export const detectBuildingTypeNode = async (state: LeadAgentStateType): Promise<BuildingTypeNodeResponse> =>
+{
+    return buildingTypeNodeManager.execute(state);
 };

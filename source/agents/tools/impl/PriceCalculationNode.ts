@@ -4,176 +4,369 @@ import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
-
+import { UserFriendlyParams } from "@agents/tools/io/IChat";
+import { InstantiationError } from "@errors/InstantiationError";
+import {PriceService} from "@modules/price-service/services/PriceService";
+import {ColorOption} from "@agents/tools/io/IColorChoice";
+import {
+    ColorDetails,
+    PriceBreakdown,
+    PriceCalculationResult,
+    StateMapping
+} from "@agents/tools/impl/io/IPriceCalculator";
+import {Constants} from "@common/io/Constants";
+import {IPriceCalculatorService} from "@agents/tools/io/PriceCalculatorService";
+import {QuoteBreakdown} from "@agents/tools/impl/io/IVisualization";
+import {SelectedAddon} from "@agents/tools/io/IProcessAddon";
+import {ColorCache} from "@agents/tools/impl/ColorCache";
 const logger: pino.Logger = createLogger(module);
 
-async function convertToTechnicalParams(
-    userParams: any,
-    stateMapCache: Map<string, any>,
-    roofMapCache: Map<string, number>
-): Promise<IPricingParams | null> {
-    try {
-        let map_id = 1;
-        let manufacturer_id = 1;
+/**
+ * Service for calculating building prices with comprehensive breakdown
+ */
+export class PriceCalculatorService implements IPriceCalculatorService
+{
+    private static instance: IPriceCalculatorService;
 
-        if (userParams.state_name) {
-            const mapping = await LeadAgentHelpers.mapStateToDB(userParams.state_name, stateMapCache);
-            if (mapping) {
-                map_id = mapping.map_id;
-                manufacturer_id = mapping.manufacturer_id;
-            }
+    constructor(enforce: () => void)
+    {
+        if (enforce !== Enforce)
+        {
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use PriceCalculatorService.getInstance() instead of new.");
         }
-
-        const roof_id = userParams.roof_type
-            ? await LeadAgentHelpers.mapRoofTypeToDB(userParams.roof_type, map_id, roofMapCache)
-            : 2;
-
-        return {
-            width: userParams.width,
-            length: userParams.length,
-            height: userParams.height,
-            map_id,
-            roof_id,
-            manufacturer_id,
-            gauge: userParams.gauge ?? 14,
-            building_type: userParams.building_type,
-            utility_length: userParams.utility_length,
-            is_barn: userParams.is_barn,
-        };
-    } catch (error) {
-        logger.error("[convertToTechnicalParams] Error:", error);
-        return null;
     }
-}
 
-export const calculatePriceNode = async (state: LeadAgentStateType) => {
-    logger.info(`[PriceNode] Session ${state.sessionId} - Calculating price`);
-    logger.info(`[PriceNode] User params:`, state.userFriendlyParams);
-
-    try {
-        const technicalParams = await convertToTechnicalParams(
-            state.userFriendlyParams,
-            state.stateMapCache,
-            state.roofMapCache
-        );
-
-        if (!technicalParams) {
-            logger.error(`[PriceNode] Failed to convert parameters`);
-            return {
-                response: "❌ Failed to convert parameters to technical format.",
-                nextStep: "__end__",
-                priceCalculated: false,
-            };
+    /**
+     * Gets the singleton instance of PriceCalculatorService.
+     */
+    public static getInstance(): IPriceCalculatorService
+    {
+        if (!PriceCalculatorService.instance)
+        {
+            PriceCalculatorService.instance = new PriceCalculatorService(Enforce);
         }
+        return PriceCalculatorService.instance;
+    }
 
-        logger.info(`[PriceNode] Technical params converted successfully`);
+    /**
+     * Calculate breakdown from parameters
+     */
+    public calculateBreakdown(basePrice: number, width: number, length: number, selectedAddons: any[] = []): QuoteBreakdown
+    {
+        const sqft: number = width * length;
+        const laborCost: number = basePrice * 0.5;
+        const foundationCost: number = sqft * 8.5;
+        const deliveryCost = 750;
+        const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
+        const subtotal = basePrice + laborCost + foundationCost + deliveryCost + addonTotal;
+        const contingency: number = subtotal * 0.05;
+        const finalTotal = subtotal + contingency;
 
-        const { PriceServiceImpl } = await import("@modules/price-service/services/impl/PriceServiceImpl");
-        const priceService = PriceServiceImpl.getInstance();
+        logger.debug(`[PriceCalculator] Breakdown: Base=$${basePrice}, Addons=$${addonTotal}, Total=$${finalTotal}`);
 
-        const rawPricingData = await priceService.fetchBuildingPricingWithUtility(technicalParams);
+        return { basePrice, laborCost, foundationCost, deliveryCost, contingency, addonTotal, finalTotal };
+    }
 
-        if (!rawPricingData || rawPricingData.status === false) {
-            logger.warn(`[PriceNode] Invalid pricing data:`, rawPricingData);
-            return {
-                response: rawPricingData?.message || "❌ Failed to calculate price.",
-                nextStep: "__end__",
-                priceCalculated: false,
-            };
-        }
 
-        const extractor = PriceParamsExtractorTool.getInstance();
-        const { total: kitPrice } = extractor.calculateTotalPrice(rawPricingData, technicalParams);
+    public calculateTotalPrice(basePrice: number, addons: SelectedAddon[]): number
+    {
+        const addonTotal: number = addons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
+        const total: number = basePrice + addonTotal;
 
-        logger.info(`[PriceNode] Kit price calculated: $${kitPrice.toFixed(2)}`);
+        logger.info(`[PricingCalculator] Base: $${basePrice.toFixed(2)}, ` + `Addons: $${addonTotal.toFixed(2)}, Total: $${total.toFixed(2)}`);
 
-        let colorCost = 0;
-        if (state.color) {
-            logger.info(`[PriceNode] Calculating color cost for: ${state.color}`);
+        return total;
+    }
 
-            try {
-                const { getColorsWithCache } = await import("@agents/tools/impl/ColorDatabaseService");
-                const allColors = await getColorsWithCache();
-                const selectedColor = allColors.find(c => c.name.toLowerCase() === state.color?.toLowerCase());
+    /**
+     * Calculate complete price for a building configuration
+     */
+    public async calculatePrice(state: LeadAgentStateType): Promise<PriceCalculationResult>
+    {
+        logger.info(`[PriceCalculatorService] Session ${state.sessionId} - Calculating price`);
+        logger.info(`[PriceCalculatorService] User params:`, state.userFriendlyParams);
 
-                if (selectedColor && selectedColor.cost > 0) {
-                    colorCost = selectedColor.cost;
-                    logger.info(`[PriceNode] ✅ Color cost: $${colorCost.toFixed(2)}`);
-                } else {
-                    logger.info(`[PriceNode] Color "${state.color}" is included (no extra cost)`);
-                }
-            } catch (error) {
-                logger.error(`[PriceNode] Error calculating color cost:`, error);
+        try
+        {
+            const technicalParams: IPricingParams = await this.convertToTechnicalParams(
+                state.userFriendlyParams,
+                state.stateMapCache,
+                state.roofMapCache
+            );
+
+            if (!technicalParams)
+            {
+                return this.handleConversionError();
             }
+
+            logger.info(`[PriceCalculatorService] Technical params converted successfully`);
+
+            const rawPricingData = await this.fetchRawPricingData(technicalParams);
+
+            if (!rawPricingData || rawPricingData.status === false)
+            {
+                return this.handleInvalidPricingData(rawPricingData);
+            }
+
+            const kitPrice: number = this.extractKitPrice(rawPricingData, technicalParams);
+            logger.info(`[PriceCalculatorService] Kit price calculated: $${kitPrice.toFixed(2)}`);
+
+            const colorCost: number = await this.calculateColorCost(state.color);
+
+            const breakdown: PriceBreakdown = this.calculatePriceBreakdown(
+                kitPrice,
+                state.userFriendlyParams,
+                colorCost
+            );
+
+            return this.createSuccessResponse(
+                breakdown,
+                state.userFriendlyParams,
+                rawPricingData,
+                state.color
+            );
+        }
+        catch (error)
+        {
+            return this.handleUnexpectedError(error);
+        }
+    }
+
+    private async convertToTechnicalParams(userParams: Partial<UserFriendlyParams>, stateMapCache: Map<string, any>, roofMapCache: Map<string, number>): Promise<IPricingParams | null>
+    {
+        try
+        {
+            const { map_id, manufacturer_id } = await this.getStateMapping(userParams.state_name, stateMapCache);
+
+            const roof_id: number = await this.getRoofId(
+                userParams.roof_type,
+                map_id,
+                roofMapCache
+            );
+
+            return {
+                width: userParams.width!,
+                length: userParams.length!,
+                height: userParams.height!,
+                map_id,
+                roof_id,
+                manufacturer_id,
+                gauge: userParams.gauge ?? Constants.PRICING_CONSTANTS.DEFAULT_GAUGE,
+                building_type: userParams.building_type,
+                utility_length: userParams.utility_length,
+                is_barn: userParams.is_barn,
+            };
+        }
+        catch (error)
+        {
+            logger.error("[convertToTechnicalParams] Error:", error);
+            return null;
+        }
+    }
+
+    private async getStateMapping(stateName: string | undefined, stateMapCache: Map<string, any>): Promise<StateMapping>
+    {
+        if (!stateName)
+        {
+            return {
+                map_id: Constants.PRICING_CONSTANTS.DEFAULT_MAP_ID,
+                manufacturer_id: Constants.PRICING_CONSTANTS.DEFAULT_MANUFACTURER_ID,
+            };
         }
 
-        const formattedPrice = formatCompletePrice(
-            kitPrice,
-            state.userFriendlyParams,
-            colorCost,
-            state.color
-        );
+        const mapping: StateMapping = await LeadAgentHelpers.mapStateToDB(stateName, stateMapCache);
+
+        return mapping
+            ? { map_id: mapping.map_id, manufacturer_id: mapping.manufacturer_id }
+            : {
+                map_id: Constants.PRICING_CONSTANTS.DEFAULT_MAP_ID,
+                manufacturer_id: Constants.PRICING_CONSTANTS.DEFAULT_MANUFACTURER_ID,
+            };
+    }
+
+    private async getRoofId(roofType: string | undefined, mapId: number, roofMapCache: Map<string, number>): Promise<number>
+    {
+        if (!roofType)
+        {
+            return Constants.PRICING_CONSTANTS.DEFAULT_ROOF_ID;
+        }
+
+        return await LeadAgentHelpers.mapRoofTypeToDB(roofType, mapId, roofMapCache);
+    }
+
+    private async fetchColorDetails(colorName: string): Promise<ColorDetails | null>
+    {
+        try
+        {
+            const allColors: ColorOption[] = await ColorCache.getInstance().get();
+
+            const selectedColor: ColorOption = allColors.find((c) => c.name.toLowerCase() === colorName.toLowerCase());
+
+            return selectedColor
+                ? { name: selectedColor.name, cost: selectedColor.cost }
+                : null;
+        }
+        catch (error)
+        {
+            logger.error(`[fetchColorDetails] Error:`, error);
+            return null;
+        }
+    }
+
+    private async calculateColorCost(colorName: string | null | undefined): Promise<number>
+    {
+        if (!colorName)
+        {
+            return 0;
+        }
+
+        logger.info(`[calculateColorCost] Calculating cost for: ${colorName}`);
+
+        const colorDetails: ColorDetails = await this.fetchColorDetails(colorName);
+
+        if (!colorDetails)
+        {
+            logger.warn(`[calculateColorCost] Color "${colorName}" not found in database`);
+            return 0;
+        }
+
+        if (colorDetails.cost > 0)
+        {
+            logger.info(`[calculateColorCost] ✅ Color cost: $${colorDetails.cost.toFixed(2)}`);
+            return colorDetails.cost;
+        }
+
+        logger.info(`[calculateColorCost] Color "${colorName}" is included (no extra cost)`);
+        return 0;
+    }
+
+    private async fetchRawPricingData(technicalParams: IPricingParams): Promise<any>
+    {
+        const { PriceServiceImpl } = await import("@modules/price-service/services/impl/PriceServiceImpl");
+        const priceService: PriceService = PriceServiceImpl.getInstance();
+
+        return await priceService.fetchBuildingPricingWithUtility(technicalParams);
+    }
+
+    private extractKitPrice(rawPricingData: any, technicalParams: IPricingParams): number
+    {
+        const extractor: PriceParamsExtractorTool = PriceParamsExtractorTool.getInstance();
+        const { total: kitPrice } = extractor.calculateTotalPrice(rawPricingData, technicalParams);
+        return kitPrice;
+    }
+
+    private calculatePriceBreakdown(kitPrice: number, params: Partial<UserFriendlyParams>, colorCost: number): PriceBreakdown
+    {
+        const sqft: number = (params.width ?? 0) * (params.length ?? 0);
+        const laborCost: number = kitPrice * Constants.PRICING_CONSTANTS.LABOR_MULTIPLIER;
+        const foundationCost: number = sqft * Constants.PRICING_CONSTANTS.FOUNDATION_COST_PER_SQFT;
+        const deliveryCost: number = Constants.PRICING_CONSTANTS.DELIVERY_COST;
+
+        const subtotal: number = kitPrice + laborCost + foundationCost + deliveryCost + colorCost;
+        const contingency: number = subtotal * Constants.PRICING_CONSTANTS.CONTINGENCY_RATE;
+        const finalTotal: number = subtotal + contingency;
 
         return {
-            response: formattedPrice,
-            userFriendlyParams: state.userFriendlyParams,
-            pricingData: rawPricingData,
-            basePrice: kitPrice,
-            priceCalculated: true,
-            currentField: null,
-            nextStep: "show_addons",
-            selectedAddons: [],
-            finalPrice: kitPrice + colorCost,
-            color: state.color,
-            colorCost: colorCost,
+            kitPrice,
+            colorCost,
+            laborCost,
+            foundationCost,
+            deliveryCost,
+            contingency,
+            finalTotal,
         };
-    } catch (error) {
-        logger.error(`[PriceNode] Error:`, error);
+    }
+
+    private formatColorLine(colorName: string | null, colorCost: number): string
+    {
+        if (!colorName)
+        {
+            return "";
+        }
+
+        return colorCost > 0
+            ? `\n• Color Upgrade (${colorName}): $${colorCost.toFixed(2)}`
+            : `\n• Color (${colorName}): Included`;
+    }
+
+    private formatCompletePrice(breakdown: PriceBreakdown, params: Partial<UserFriendlyParams>, colorName: string | null = null): string
+    {
+        const sqft: number = (params.width ?? 0) * (params.length ?? 0);
+        const currentParams: string = LeadAgentHelpers.formatCurrentParams(params);
+
+        const colorLine: string = this.formatColorLine(colorName, breakdown.colorCost);
+
+        return `${currentParams}
+
+                📊 **PRICE BREAKDOWN:**
+                
+                • Base Building Kit: $${breakdown.kitPrice.toFixed(2)}${colorLine}
+                • Installation Labor (50% of kit): $${breakdown.laborCost.toFixed(2)}
+                • Concrete Foundation (${sqft} sq ft @ $${Constants.PRICING_CONSTANTS.FOUNDATION_COST_PER_SQFT.toFixed(2)}/sq ft): $${breakdown.foundationCost.toFixed(2)}
+                • Delivery & Site Preparation: $${breakdown.deliveryCost.toFixed(2)}
+                • Contingency & Misc (${(Constants.PRICING_CONSTANTS.CONTINGENCY_RATE * 100).toFixed(0)}%): $${breakdown.contingency.toFixed(2)}
+                
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                💰 **TOTAL ESTIMATED PRICE: $${breakdown.finalTotal.toFixed(2)}**
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            `;
+    }
+
+    private createErrorResponse(message: string): PriceCalculationResult
+    {
         return {
-            response: `❌ Failed to calculate price: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            response: message,
             nextStep: "__end__",
             priceCalculated: false,
         };
     }
-};
 
-function formatCompletePrice(
-    kitPrice: number,
-    params: any,
-    colorCost: number = 0,
-    colorName: string | null = null
-): string {
-    const sqft = params.width * params.length;
-    const laborCost = kitPrice * 0.5;
-    const foundationCost = sqft * 8.5;
-    const deliveryCost = 750;
-    const contingency = (kitPrice + laborCost + foundationCost + deliveryCost + colorCost) * 0.05;
-    const finalTotal = kitPrice + laborCost + foundationCost + deliveryCost + contingency + colorCost;
-
-    const currentParams = LeadAgentHelpers.formatCurrentParams(params);
-
-    let priceBreakdown = `${currentParams}
-
-📊 **PRICE BREAKDOWN:**
-
-• Base Building Kit: $${kitPrice.toFixed(2)}`;
-
-    if (colorName && colorCost > 0) {
-        priceBreakdown += `\n• Color Upgrade (${colorName}): $${colorCost.toFixed(2)}`;
-    } else if (colorName) {
-        priceBreakdown += `\n• Color (${colorName}): Included`;
+    private handleConversionError(): PriceCalculationResult
+    {
+        logger.error(`[calculatePrice] Failed to convert parameters`);
+        return this.createErrorResponse(Constants.ERROR_MESSAGES.CONVERSION_FAILED);
     }
 
-    priceBreakdown += `
-• Installation Labor (50% of kit): $${laborCost.toFixed(2)}
-• Concrete Foundation (${sqft} sq ft @ $8.50/sq ft): $${foundationCost.toFixed(2)}
-• Delivery & Site Preparation: $${deliveryCost.toFixed(2)}
-• Contingency & Misc (5%): $${contingency.toFixed(2)}
+    private handleInvalidPricingData(rawPricingData: any): PriceCalculationResult
+    {
+        logger.warn(`[calculatePrice] Invalid pricing data:`, rawPricingData);
+        const message = rawPricingData?.message || Constants.ERROR_MESSAGES.PRICE_CALCULATION_FAILED;
+        return this.createErrorResponse(message);
+    }
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 **TOTAL ESTIMATED PRICE: $${finalTotal.toFixed(2)}**
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+    private handleUnexpectedError(error: unknown): PriceCalculationResult
+    {
+        logger.error(`[calculatePrice] Error:`, error);
+        const message: string = error instanceof Error ? Constants.ERROR_MESSAGES.UNKNOWN_ERROR(error.message) : Constants.ERROR_MESSAGES.UNKNOWN_ERROR("Unknown error");
+        return this.createErrorResponse(message);
+    }
 
-    return priceBreakdown;
+    private createSuccessResponse(breakdown: PriceBreakdown, params: Partial<UserFriendlyParams>, rawPricingData: any, colorName: string | null | undefined): PriceCalculationResult
+    {
+        const formattedPrice: string = this.formatCompletePrice(breakdown, params, colorName ?? null);
+
+        return {
+            response: formattedPrice,
+            userFriendlyParams: params,
+            pricingData: rawPricingData,
+            basePrice: breakdown.kitPrice,
+            priceCalculated: true,
+            currentField: null,
+            nextStep: "show_addons",
+            selectedAddons: [],
+            finalPrice: breakdown.finalTotal,
+            color: colorName ?? null,
+            colorCost: breakdown.colorCost,
+        };
+    }
 }
 
+function Enforce(): void {}
+
+/**
+ * Legacy node handler for backward compatibility
+ */
+export const calculatePriceNode = async (state: LeadAgentStateType): Promise<PriceCalculationResult> =>
+{
+    return PriceCalculatorService.getInstance().calculatePrice(state);
+};
