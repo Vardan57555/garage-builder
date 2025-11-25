@@ -1,9 +1,12 @@
-import { IChoiceParser } from "./io/IChoiceHandler";
-import {ChoiceOption, ChoiceResult} from "@agents/tools/io/IChoiceHandler";
+import {IChoiceService} from "./io/IChoiceHandler";
+import {ChoiceOption, ChoiceResult, FieldConfig} from "@agents/tools/io/IChoiceHandler";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 import {sharedLLM} from "@llm/SharedLLM";
 import {HumanMessage} from "@langchain/core/messages";
+import {UserFriendlyParams} from "@agents/tools/io/IChat";
+import {InstantiationError} from "@errors/InstantiationError";
+import {Constants} from "@common/io/Constants";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -11,8 +14,11 @@ const logger: pino.Logger = createLogger(module);
  * ChoiceParser: Handles user input matching and validation
  * Implements fallback strategy: direct match → AI → default
  */
-export class ChoiceParser implements IChoiceParser
+export class ChoiceServiceImpl implements IChoiceService
 {
+    private configs: Map<string, FieldConfig>;
+    private static instance: IChoiceService;
+
     private static readonly INDIFFERENCE_KEYWORDS: string[] = [
         "any",
         "whatever",
@@ -21,6 +27,34 @@ export class ChoiceParser implements IChoiceParser
         "idk",
         "doesn't matter",
     ];
+
+
+    constructor(enforce: () => void, configs: FieldConfig[])
+    {
+        if(enforce !== Enforce)
+        {
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use AddonManager.getInstance() instead of new.");
+        }
+
+        this.configs = new Map(configs.map(c => [c.name, c]));
+    }
+
+
+    /**
+     * Gets the singleton instance of IChoiceService.
+     *
+     * @returns The singleton instance of IChoiceService.
+     */
+
+    public static getInstance(): IChoiceService
+    {
+        if(!ChoiceServiceImpl.instance)
+        {
+            ChoiceServiceImpl.instance = new ChoiceServiceImpl(Enforce, Constants.DEFAULT_FIELDS);
+        }
+
+        return ChoiceServiceImpl.instance;
+    }
 
     /**
      * Parses user choice with an intelligent fallback strategy
@@ -58,6 +92,100 @@ export class ChoiceParser implements IChoiceParser
             logger.error({ err: error }, "[ChoiceParser] Error parsing choice");
             return this.defaultFallback(options);
         }
+    }
+
+    /**
+     * Formats options for display with optional numbering
+     */
+    public formatOptions(options: ChoiceOption[], showNumbers = true): string
+    {
+        return options
+            .map((opt, idx) => {
+                const prefix = showNumbers ? `${idx + 1}. ` : "• ";
+                const desc = opt.description ? ` - ${opt.description}` : "";
+                return `${prefix}${opt.label}${desc}`;
+            })
+            .join("\n");
+    }
+
+    /**
+     * Creates human-readable field label from snake_case
+     */
+    public formatFieldLabel(field: string): string
+    {
+        return field
+            .replace(/_/g, " ")
+            .split(" ")
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+    }
+
+    /**
+     * Generates complete prompt for choice field
+     */
+    public generatePrompt(field: string, options: ChoiceOption[]): string
+    {
+        const label: string = this.formatFieldLabel(field);
+        const formatted: string = this.formatOptions(options);
+        return `Which ${label} would you prefer?\n${formatted}`;
+    }
+
+
+    /**
+     * Parses user input for a given field with LLM fallback
+     */
+    public async parseUserChoiceWithAI(userInput: string, options: ChoiceOption[], context: string = ""): Promise<ChoiceResult>
+    {
+        return this.parse(userInput, options, context);
+    }
+
+    /**
+     * Generates complete prompt for field
+     */
+    public getPrompt(field: string, customOptions?: ChoiceOption[]): string
+    {
+        const options: ChoiceOption[] = customOptions || this.getOptions(field);
+        return this.generatePrompt(field, options);
+    }
+
+    /**
+     * Retrieves options for field, throws if not found
+     */
+    public getOptions(field: string): ChoiceOption[]
+    {
+        const config: FieldConfig = this.configs.get(field);
+
+        if (!config)
+        {
+            throw new Error(`No options configured for field: ${field}`);
+        }
+
+        return config.options;
+    }
+
+    public async resolve(field: keyof UserFriendlyParams, value: any): Promise<any>
+    {
+        if (field !== "roof_type") return value;
+
+        const isExplicit = /^(vertical|regular|box|a-frame)$/i.test(String(value));
+        if (isExplicit)
+        {
+            return value;
+        }
+
+        const choice: ChoiceResult = await this.handleChoice("roof_type", String(value));
+        return choice.selected;
+    }
+
+
+    /**
+     * Handles user choice for a specific field
+     */
+    public async handleChoice(field: string, userInput: string, customOptions?: ChoiceOption[]): Promise<ChoiceResult>
+    {
+        logger.info(`[GenericChoiceManager] Handling choice for field: ${field}`);
+        const options: ChoiceOption[] = customOptions || this.getOptions(field);
+        return this.parseUserChoiceWithAI(userInput, options, `User is selecting a value for: ${field}`);
     }
 
     /**
@@ -119,7 +247,7 @@ export class ChoiceParser implements IChoiceParser
      */
     private isIndifferenceExpressed(userInput: string): boolean
     {
-        return ChoiceParser.INDIFFERENCE_KEYWORDS.includes(userInput.toLowerCase().trim());
+        return ChoiceServiceImpl.INDIFFERENCE_KEYWORDS.includes(userInput.toLowerCase().trim());
     }
 
     /**
@@ -237,4 +365,11 @@ export class ChoiceParser implements IChoiceParser
         logger.info(`[ChoiceParser] Valid LLM choice: ${result.selected}`);
         return result;
     }
+}
+
+/**
+ * Function to enforce the Singleton pattern.
+ */
+function Enforce(): void
+{
 }

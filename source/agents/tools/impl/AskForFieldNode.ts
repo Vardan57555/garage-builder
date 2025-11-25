@@ -6,8 +6,9 @@ import { ColorGrouper } from "@agents/tools/impl/ColorDatabaseService";
 import {FieldPromptConfig} from "@agents/tools/impl/io/IAskForField";
 import {ColorOption} from "@agents/tools/io/IColorChoice";
 import {IAskForFieldNode} from "@agents/tools/io/IAskForFieldNode";
-import { GenericChoiceManager } from "./GenericChoiceManager";
 import {ColorCache} from "@agents/tools/impl/ColorCache";
+import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
+import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -16,12 +17,12 @@ const logger: pino.Logger = createLogger(module);
  */
 export class AskForFieldNode implements IAskForFieldNode
 {
-    private choiceManager: GenericChoiceManager;
+    private choiceService: IChoiceService;
     private fieldPromptMap: Record<string, FieldPromptConfig>;
 
     constructor()
     {
-        this.choiceManager = new GenericChoiceManager();
+        this.choiceService = ChoiceServiceImpl.getInstance();
         this.initializeFieldPromptMap();
     }
 
@@ -44,13 +45,13 @@ export class AskForFieldNode implements IAskForFieldNode
                 template: `{params}\n\n🗺️ Which **state**?\n(e.g., Texas, California)`,
             },
             roof_type: {
-                template: this.choiceManager.getPrompt("roof_type"),
+                template: this.choiceService.getPrompt("roof_type"),
             },
             gauge: {
                 template: `{params}\n\n📊 What **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`,
             },
             building_type: {
-                template: this.choiceManager.getPrompt("building_type"),
+                template: this.choiceService.getPrompt("building_type"),
             },
         };
     }

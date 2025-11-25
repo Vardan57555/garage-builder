@@ -3,8 +3,9 @@ import {ParameterValidator} from "@agents/tools/validators/ParameterValidator";
 import {FieldUpdate, ProcessUpdateResult, UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {FieldValueExtractor} from "@agents/tools/FieldValueExtractor";
-import {ChoiceResolver} from "@agents/tools/impl/ChoiceResolver";
 import {ParameterUpdateApplier} from "@agents/tools/impl/ParameterUpdateApplier";
+import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
+import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 
 export class UpdateProcessor
 {
@@ -12,14 +13,14 @@ export class UpdateProcessor
     private fieldExtractor: FieldValueExtractor;
     private parameterValidator: ParameterValidator;
     private updateApplier: ParameterUpdateApplier;
-    private choiceResolver: ChoiceResolver;
+    private choiceService: IChoiceService;
 
     constructor(logger: pino.Logger) {
         this.logger = logger;
         this.fieldExtractor = new FieldValueExtractor(logger);
         this.parameterValidator = new ParameterValidator();
         this.updateApplier = new ParameterUpdateApplier();
-        this.choiceResolver = new ChoiceResolver();
+        this.choiceService = ChoiceServiceImpl.getInstance();
     }
 
     async process(update: FieldUpdate, userInput: string, currentParams: Partial<UserFriendlyParams>, stateMapCache: Map<string, any>): Promise<
@@ -61,7 +62,7 @@ export class UpdateProcessor
             };
         }
 
-        const resolvedValue = await this.choiceResolver.resolve(
+        const resolvedValue = await this.choiceService.resolve(
             update.field,
             extractedValue
         );
