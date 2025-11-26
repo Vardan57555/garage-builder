@@ -5,15 +5,13 @@ import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { leadAgentGraph } from "@agents/LeadAgentGraph";
 import {detectParameterUpdateFromInput, IntentDetector} from "@agents/tools/impl/DetectionHelpers";
-import { detectColorFromInput } from "@agents/tools/impl/ColorDetectionHelper";
-import { ColorGrouper } from "@agents/tools/impl/ColorDatabaseService";
 import { SessionManager } from "@utils/session/SessionManager";
 import { RedisCacheUtils } from "@utils/cache/RedisCacheUtils";
 import { InstantiationError } from "@errors/InstantiationError";
 import {IAddonDatabaseService} from "@agents/tools/impl/io/IAddonDatabaseService";
-import {IColorCache} from "@agents/tools/impl/io/IColorDatabaseService";
 import {ColorOption} from "@agents/tools/io/IColorChoice";
-import {ColorCache} from "@agents/tools/impl/ColorCache";
+import {ColorService} from "@agents/tools/impl/io/ColorService";
+import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -22,7 +20,7 @@ export class LeadAgent
     private static instance: LeadAgent;
     private sessionManager: SessionManager;
     private readonly addonManagerInstance: IAddonDatabaseService = AddonManager.getInstance();
-    private readonly colorCacheInstance:IColorCache = ColorCache.getInstance();
+    private readonly colorService: ColorService = ColorServiceImpl.getInstance();
 
     private constructor(enforce: () => void, cacheUtils: RedisCacheUtils) {
         if (enforce !== Enforce) {
@@ -234,7 +232,7 @@ export class LeadAgent
 
                 try {
                     logger.info(`[LeadAgent] Fetching colors from database...`);
-                    const allColors: ColorOption[] = await this.colorCacheInstance.get();
+                    const allColors: ColorOption[] = await this.colorService.get();
 
                     if (!allColors || allColors.length === 0)
                     {
@@ -244,7 +242,7 @@ export class LeadAgent
 
                     logger.info(`[LeadAgent] ✅ Got ${allColors.length} colors from database`);
 
-                    const groupedColors: Map<string, ColorOption[]> = ColorGrouper.group(allColors, 5);
+                    const groupedColors: Map<string, ColorOption[]> = this.colorService.group(allColors, 5);
                     const displayColors: any[] = [];
 
                     for (const [category, colors] of groupedColors.entries())
@@ -273,7 +271,7 @@ export class LeadAgent
 
                     logger.info(`[LeadAgent] Attempting to match user input: "${input}"`);
 
-                    const selectedColor: ColorOption = detectColorFromInput(input, displayColors);
+                    const selectedColor: ColorOption = this.colorService.detect(input, displayColors);
 
                     if (selectedColor)
                     {

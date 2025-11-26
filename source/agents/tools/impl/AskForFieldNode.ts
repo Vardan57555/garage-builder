@@ -2,13 +2,13 @@ import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
-import { ColorGrouper } from "@agents/tools/impl/ColorDatabaseService";
 import {FieldPromptConfig} from "@agents/tools/impl/io/IAskForField";
 import {ColorOption} from "@agents/tools/io/IColorChoice";
 import {IAskForFieldNode} from "@agents/tools/io/IAskForFieldNode";
-import {ColorCache} from "@agents/tools/impl/ColorCache";
 import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
+import {ColorService} from "@agents/tools/impl/io/ColorService";
+import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -19,6 +19,7 @@ export class AskForFieldNode implements IAskForFieldNode
 {
     private choiceService: IChoiceService;
     private fieldPromptMap: Record<string, FieldPromptConfig>;
+    private readonly colorService: ColorService = ColorServiceImpl.getInstance();
 
     constructor()
     {
@@ -84,9 +85,9 @@ export class AskForFieldNode implements IAskForFieldNode
     /**
      * Builds a formatted color menu from grouped colors
      */
-    private buildColorMenu(colors: Awaited<ReturnType<typeof ColorCache.prototype.get>>): string
+    private buildColorMenu(colors: Awaited<ReturnType<typeof this.colorService.get>>): string
     {
-        const groupedColors: Map<string, ColorOption[]> = ColorGrouper.group(colors, 5);
+        const groupedColors: Map<string, ColorOption[]> = this.colorService.group(colors, 5);
         let colorMenu: string = "🎨 **CHOOSE YOUR BUILDING COLOR:**\n\n";
         let colorIndex: number = 1;
 
@@ -137,7 +138,7 @@ export class AskForFieldNode implements IAskForFieldNode
 
         try
         {
-            const allColors: ColorOption[] = await ColorCache.getInstance().get();
+            const allColors: ColorOption[] = await this.colorService.get();
 
             if (allColors.length === 0)
             {

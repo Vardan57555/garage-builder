@@ -11,9 +11,9 @@ import { handleParameterUpdateNode } from "@agents/tools/impl/ParameterUpdateNod
 import { handleResetNode } from "@agents/tools/impl/ResetNode";
 import { showAddonsNode } from "@agents/tools/impl/ShowAddonsNode";
 import { processAddonsSelectionNode } from "@agents/tools/impl/ProcessAddonsNode";
-import { askForColorNode } from "@agents/tools/impl/ColorChoiceNode";
 import { generateGarageVisualizationNode } from "@agents/tools/impl/VisualizationNode";
 import { LeadAgentState } from "@agents/LeadAgentState";
+import {askForColorNode} from "@agents/tools/impl/ColorServiceImpl";
 
 const logger: pino.Logger = createLogger(module);
 

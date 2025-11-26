@@ -18,7 +18,7 @@ import {Constants} from "@common/io/Constants";
 import {IPriceCalculatorService} from "@agents/tools/io/PriceCalculatorService";
 import {QuoteBreakdown} from "@agents/tools/impl/io/IVisualization";
 import {SelectedAddon} from "@agents/tools/io/IProcessAddon";
-import {ColorCache} from "@agents/tools/impl/ColorCache";
+import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -198,7 +198,7 @@ export class PriceCalculatorService implements IPriceCalculatorService
     {
         try
         {
-            const allColors: ColorOption[] = await ColorCache.getInstance().get();
+            const allColors: ColorOption[] = await ColorServiceImpl.getInstance().get();
 
             const selectedColor: ColorOption = allColors.find((c) => c.name.toLowerCase() === colorName.toLowerCase());
 
