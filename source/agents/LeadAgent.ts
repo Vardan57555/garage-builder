@@ -1,4 +1,3 @@
-import { AddonManager } from "@agents/tools/impl/AddonDatabaseService";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
@@ -8,10 +7,11 @@ import {detectParameterUpdateFromInput, IntentDetector} from "@agents/tools/impl
 import { SessionManager } from "@utils/session/SessionManager";
 import { RedisCacheUtils } from "@utils/cache/RedisCacheUtils";
 import { InstantiationError } from "@errors/InstantiationError";
-import {IAddonDatabaseService} from "@agents/tools/impl/io/IAddonDatabaseService";
 import {ColorOption} from "@agents/tools/io/IColorChoice";
 import {ColorService} from "@agents/tools/impl/io/ColorService";
 import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
+import {AddonService} from "@agents/tools/impl/io/AddonService";
+import {AddonServiceImpl} from "@agents/tools/impl/AddonServiceImpl";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -19,7 +19,7 @@ export class LeadAgent
 {
     private static instance: LeadAgent;
     private sessionManager: SessionManager;
-    private readonly addonManagerInstance: IAddonDatabaseService = AddonManager.getInstance();
+    private readonly addonManagerInstance: AddonService = AddonServiceImpl.getInstance();
     private readonly colorService: ColorService = ColorServiceImpl.getInstance();
 
     private constructor(enforce: () => void, cacheUtils: RedisCacheUtils) {

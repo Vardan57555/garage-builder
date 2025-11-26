@@ -18,14 +18,6 @@ export interface IAddonDataProvider
     getAddonsMenu(): Promise<AddonMenuItem[]>;
 }
 
-export interface IAddonValidator
-{
-    hasItems(addons: AddonMenuItem[]): boolean;
-
-    hasValidPricingData(basePrice: number | undefined,): boolean;
-}
-
-
 export interface IShowAddonsOrchestrator
 {
     execute(state: LeadAgentStateType): Promise<ShowAddonsResponse>;

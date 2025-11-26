@@ -20,7 +20,7 @@ export class ExtractionPromptBuilder
             : "";
     }
 
-    buildExtractionPrompt(field: keyof UserFriendlyParams, userInput: string, lockedContext: string): string
+    public buildExtractionPrompt(field: keyof UserFriendlyParams, userInput: string, lockedContext: string): string
     {
         const config =
             Constants.FIELD_EXTRACTION_CONFIGS[field];

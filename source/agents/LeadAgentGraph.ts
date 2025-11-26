@@ -9,11 +9,10 @@ import { askForFieldNode } from "@agents/tools/impl/AskForFieldNode";
 import { calculatePriceNode } from "@agents/tools/impl/PriceCalculationNode";
 import { handleParameterUpdateNode } from "@agents/tools/impl/ParameterUpdateNode";
 import { handleResetNode } from "@agents/tools/impl/ResetNode";
-import { showAddonsNode } from "@agents/tools/impl/ShowAddonsNode";
-import { processAddonsSelectionNode } from "@agents/tools/impl/ProcessAddonsNode";
 import { generateGarageVisualizationNode } from "@agents/tools/impl/VisualizationNode";
 import { LeadAgentState } from "@agents/LeadAgentState";
 import {askForColorNode} from "@agents/tools/impl/ColorServiceImpl";
+import {processAddonsSelectionNode, showAddonsNode} from "@agents/tools/impl/AddonServiceImpl";
 
 const logger: pino.Logger = createLogger(module);
 

@@ -1,10 +1,10 @@
-import {AddonManager} from "@agents/tools/impl/AddonDatabaseService";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import {AddonFromDB} from "@agents/tools/io/IAddonDatabase";
 import {TestResult, ValidationContext} from "@agents/tools/io/IAddonValidation";
-import {IAddonDatabaseService} from "@agents/tools/impl/io/IAddonDatabaseService";
 import {IAddonValidationNode} from "@agents/tools/impl/io/IAddonValidationNode";
+import {AddonServiceImpl} from "@agents/tools/impl/AddonServiceImpl";
+import {AddonService} from "@agents/tools/impl/io/AddonService";
 const logger: pino.Logger = createLogger(module);
 
 
@@ -26,7 +26,7 @@ class AddonValidator implements IAddonValidationNode
 
     private static readonly LIMIT_PER_TYPE: number = 10;
     private static readonly CACHE_PERFORMANCE_THRESHOLD_MS: number  = 10;
-    private readonly addonManagerInstance: IAddonDatabaseService = AddonManager.getInstance();
+    private readonly addonManagerInstance: AddonService = AddonServiceImpl.getInstance();
 
     private results: TestResult[] = [];
 
