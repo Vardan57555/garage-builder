@@ -17,7 +17,7 @@ export class UpdateProcessor
 
     constructor(logger: pino.Logger) {
         this.logger = logger;
-        this.fieldExtractor = new FieldValueExtractor(logger);
+        this.fieldExtractor = new FieldValueExtractor();
         this.parameterValidator = new ParameterValidator();
         this.updateApplier = new ParameterUpdateApplier();
         this.choiceService = ChoiceServiceImpl.getInstance();

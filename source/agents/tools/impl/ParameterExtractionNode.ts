@@ -6,8 +6,6 @@ import { BaseMessage } from "@langchain/core/messages";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import { ParameterValidator } from "../validators/ParameterValidator";
 import {DimensionManager} from "@agents/tools/impl/DimensionManager";
-import {LLMResponseHandler} from "@agents/tools/impl/LLMResponseHandler";
-import {FallbackExtractor} from "@agents/tools/impl/FallbackExtractor";
 import {PromptBuilder} from "@agents/tools/impl/PromptBuilderNode";
 import {
     DimensionResult,
@@ -17,22 +15,22 @@ import {
 } from "@agents/tools/io/IParameterExtraction";
 import {IDimensionManager, IParameterExtractor} from "@agents/tools/impl/io/IParameterExtractionNode";
 import {IPromptBuilder} from "@agents/tools/impl/io/IVisualizationNode";
+import {IParameterExtractionStrategy} from "@agents/tools/impl/io/IParameterExtractionStrategy";
+import {ParameterExtractionStrategy} from "@agents/tools/impl/ParameterExtractionStrategy";
 const logger: pino.Logger = createLogger(module);
 
 class ParameterExtractor implements IParameterExtractor
 {
     private promptBuilder: IPromptBuilder;
-    private llmHandler: LLMResponseHandler;
+    private parameterExtractionStrategy: IParameterExtractionStrategy;
     private dimensionManager: IDimensionManager;
-    private fallbackExtractor: FallbackExtractor;
     private paramExtractor: PriceParamsExtractorTool;
 
     constructor()
     {
+        this.parameterExtractionStrategy = ParameterExtractionStrategy.getInstance();
         this.promptBuilder = PromptBuilder.getInstance();
-        this.llmHandler = new LLMResponseHandler();
         this.dimensionManager = DimensionManager.getInstance();
-        this.fallbackExtractor = new FallbackExtractor();
         this.paramExtractor = PriceParamsExtractorTool.getInstance();
     }
 
@@ -95,7 +93,7 @@ class ParameterExtractor implements IParameterExtractor
                 })
                 .join("\n");
 
-            const fallbackResult: ExtractionResult = this.fallbackExtractor.extract(
+            const fallbackResult: ExtractionResult = this.parameterExtractionStrategy.extract(
                 fullContext,
                 currentParams
             );
@@ -127,7 +125,7 @@ class ParameterExtractor implements IParameterExtractor
 
         const prompt: string = this.promptBuilder.buildUnifiedPrompt(context, calculation);
 
-        return await this.llmHandler.extractLLMResponse(
+        return await this.parameterExtractionStrategy.extractLLMResponse(
             context.userInput,
             prompt
         );

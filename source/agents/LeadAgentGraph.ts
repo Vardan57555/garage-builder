@@ -2,7 +2,6 @@ import { StateGraph } from "@langchain/langgraph";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { detectGarageIntentNode } from "@agents/IntentDetectionNode";
-import { detectBuildingTypeNode } from "@agents/tools/impl/DetectBuildingTypeNode";
 import { extractParametersNode } from "@agents/tools/impl/ParameterExtractionNode";
 import { askForFieldNode } from "@agents/tools/impl/AskForFieldNode";
 import { calculatePriceNode } from "@agents/tools/impl/PriceCalculationNode";
@@ -13,6 +12,7 @@ import { LeadAgentState } from "@agents/LeadAgentState";
 import {askForColorNode} from "@agents/tools/impl/ColorServiceImpl";
 import {processAddonsSelectionNode, showAddonsNode} from "@agents/tools/impl/AddonServiceImpl";
 import {checkMissingFieldsNode} from "@agents/tools/validators/FieldValidationOrchestrator";
+import {detectBuildingTypeNode} from "@agents/tools/impl/BuildingTypeDetectionNode";
 
 const logger: pino.Logger = createLogger(module);
 

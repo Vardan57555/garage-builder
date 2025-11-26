@@ -31,10 +31,5 @@ export interface IParameterExtractor
     extractWithUnifiedPrompt(context: ExtractionContext): Promise<string>;
 }
 
-export interface ILLMResponseHandler
-{
-    extractLLMResponse(userInput: string, prompt: string): Promise<string>;
-}
-
 
 
