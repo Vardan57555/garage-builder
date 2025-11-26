@@ -1,5 +1,5 @@
-import { ValidationResult } from "@agents/tools/impl/io/IValidation";
 import {LeadAgentStateType} from "@agents/LeadAgentState";
+import {ValidationResult} from "@agents/tools/io/IValidation";
 
 export interface IFieldValidationOrchestrator
 {

@@ -4,7 +4,7 @@ import {SessionConfig} from "@utils/session/io/ISession";
 import {ColorOption, DataSource} from "@agents/tools/io/IColorChoice";
 import {FieldConfig} from "@agents/tools/io/IChoiceHandler";
 import {DetectionPattern} from "@agents/tools/io/IDetectBuilding";
-import {FieldExtractionConfig} from "@agents/tools/impl/io/IParameterUpdate";
+import {FieldExtractionConfig} from "@agents/tools/io/IParameterUpdate";
 
 /**
  * Global constants for the application.

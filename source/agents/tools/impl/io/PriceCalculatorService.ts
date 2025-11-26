@@ -1,7 +1,7 @@
 import { LeadAgentStateType } from "@agents/LeadAgentState";
-import {PriceCalculationResult} from "@agents/tools/impl/io/IPriceCalculator";
-import {QuoteBreakdown} from "@agents/tools/impl/io/IVisualization";
 import {SelectedAddon} from "@agents/tools/io/IProcessAddon";
+import {PriceCalculationResult} from "@agents/tools/io/IPriceCalculator";
+import {QuoteBreakdown} from "@agents/tools/io/IVisualization";
 
 export interface IPriceCalculatorService
 {

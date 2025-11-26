@@ -1,11 +1,11 @@
 import pino from "pino";
 import {ParameterValidator} from "@agents/tools/validators/ParameterValidator";
-import {FieldUpdate, ProcessUpdateResult, UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {FieldValueExtractor} from "@agents/tools/FieldValueExtractor";
 import {ParameterUpdateApplier} from "@agents/tools/impl/ParameterUpdateApplier";
 import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
+import {FieldUpdate, ProcessUpdateResult, UpdateResult} from "@agents/tools/io/IParameterUpdate";
 
 export class UpdateProcessor
 {

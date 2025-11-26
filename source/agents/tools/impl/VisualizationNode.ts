@@ -1,15 +1,15 @@
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
-import { GenerationResult, HealthCheckResult, QuoteBreakdown, VisualizationResponse } from "@agents/tools/impl/io/IVisualization";
-import { IGarageImageGenerator, } from "@agents/tools/io/IVisualizationNode";
 import {WorkflowBuilder} from "@agents/tools/impl/WorkflowBuilderNode";
 import {ComfyUIClient} from "@agents/tools/impl/ComfyUIClientNode";
 import {PromptBuilder} from "@agents/tools/impl/PromptBuilderNode";
 import {GarageImageGenerator} from "@agents/tools/impl/GarageImageGeneratorNode";
 import {QuoteResponseFormatter} from "@agents/tools/impl/QuoteResponseFormatterNode";
 import {PriceCalculatorService} from "@agents/tools/impl/PriceCalculationNode";
-import {IPriceCalculatorService} from "@agents/tools/io/PriceCalculatorService";
+import {GenerationResult, HealthCheckResult, QuoteBreakdown, VisualizationResponse } from "../io/IVisualization";
+import {IGarageImageGenerator} from "@agents/tools/impl/io/IVisualizationNode";
+import {IPriceCalculatorService} from "@agents/tools/impl/io/PriceCalculatorService";
 const logger: pino.Logger = createLogger(module);
 
 /**

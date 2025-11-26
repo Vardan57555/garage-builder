@@ -1,4 +1,4 @@
-import {QuoteBreakdown} from "@agents/tools/impl/io/IVisualization";
+import {QuoteBreakdown} from "@agents/tools/io/IVisualization";
 
 export interface IPriceCalculator
 {

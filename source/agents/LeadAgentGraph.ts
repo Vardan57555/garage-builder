@@ -4,7 +4,6 @@ import { createLogger } from "@utils/logger/Log";
 import { detectGarageIntentNode } from "@agents/IntentDetectionNode";
 import { detectBuildingTypeNode } from "@agents/tools/impl/DetectBuildingTypeNode";
 import { extractParametersNode } from "@agents/tools/impl/ParameterExtractionNode";
-import { checkMissingFieldsNode } from "@agents/tools/impl/ValidationNode";
 import { askForFieldNode } from "@agents/tools/impl/AskForFieldNode";
 import { calculatePriceNode } from "@agents/tools/impl/PriceCalculationNode";
 import { handleParameterUpdateNode } from "@agents/tools/impl/ParameterUpdateNode";
@@ -13,6 +12,7 @@ import { generateGarageVisualizationNode } from "@agents/tools/impl/Visualizatio
 import { LeadAgentState } from "@agents/LeadAgentState";
 import {askForColorNode} from "@agents/tools/impl/ColorServiceImpl";
 import {processAddonsSelectionNode, showAddonsNode} from "@agents/tools/impl/AddonServiceImpl";
+import {checkMissingFieldsNode} from "@agents/tools/validators/FieldValidationOrchestrator";
 
 const logger: pino.Logger = createLogger(module);
 

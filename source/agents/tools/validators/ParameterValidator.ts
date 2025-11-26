@@ -1,9 +1,9 @@
-import {ValidationResult} from "@agents/tools/impl/io/IParameterExtraction";
 import {StateDataValidator} from "@agents/validators/StateValidator";
 import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
 import {RoofDataValidator} from "@agents/validators/RoofValidator";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {InputValidator} from "@agents/tools/validators/InputValidator";
+import {ValidationResult} from "@agents/tools/io/IParameterExtraction";
 
 export class ParameterValidator
 {

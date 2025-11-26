@@ -8,17 +8,12 @@ import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { InstantiationError } from "@errors/InstantiationError";
 import {PriceService} from "@modules/price-service/services/PriceService";
 import {ColorOption} from "@agents/tools/io/IColorChoice";
-import {
-    ColorDetails,
-    PriceBreakdown,
-    PriceCalculationResult,
-    StateMapping
-} from "@agents/tools/impl/io/IPriceCalculator";
 import {Constants} from "@common/io/Constants";
-import {IPriceCalculatorService} from "@agents/tools/io/PriceCalculatorService";
-import {QuoteBreakdown} from "@agents/tools/impl/io/IVisualization";
 import {SelectedAddon} from "@agents/tools/io/IProcessAddon";
 import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
+import {ColorDetails, PriceBreakdown, PriceCalculationResult, StateMapping} from "@agents/tools/io/IPriceCalculator";
+import {IPriceCalculatorService} from "@agents/tools/impl/io/PriceCalculatorService";
+import {QuoteBreakdown} from "@agents/tools/io/IVisualization";
 const logger: pino.Logger = createLogger(module);
 
 /**

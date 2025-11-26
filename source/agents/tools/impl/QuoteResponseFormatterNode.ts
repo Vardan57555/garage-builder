@@ -1,5 +1,5 @@
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {QuoteBreakdown} from "@agents/tools/impl/io/IVisualization";
+import {QuoteBreakdown} from "@agents/tools/io/IVisualization";
 
 /**
  * Formats quote responses

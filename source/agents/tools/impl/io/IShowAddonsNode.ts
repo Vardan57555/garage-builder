@@ -1,5 +1,5 @@
-import {AddonMenuItem, ShowAddonsResponse} from "@agents/tools/impl/io/IShowAddons";
 import {LeadAgentStateType} from "@agents/LeadAgentState";
+import {AddonMenuItem, ShowAddonsResponse} from "@agents/tools/io/IShowAddons";
 
 export interface IAddonMenuFormatter
 {

@@ -1,12 +1,12 @@
-import {IComfyUIClient, IGarageImageGenerator, IPromptBuilder, IWorkflowBuilder} from "../io/IVisualizationNode";
 import {InstantiationError} from "@errors/InstantiationError";
 import { ComfyUIClient } from "./ComfyUIClientNode";
 import { WorkflowBuilder } from "./WorkflowBuilderNode";
 import { PromptBuilder } from "./PromptBuilderNode";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {ComfyUIWorkflow, GenerationResult, HealthCheckResult} from "@agents/tools/impl/io/IVisualization";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
+import {IComfyUIClient, IGarageImageGenerator, IPromptBuilder, IWorkflowBuilder} from "./io/IVisualizationNode";
+import {ComfyUIWorkflow, GenerationResult, HealthCheckResult} from "@agents/tools/io/IVisualization";
 const logger: pino.Logger = createLogger(module);
 
 /**

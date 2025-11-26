@@ -1,9 +1,9 @@
-import {IComfyUIClient} from "@agents/tools/io/IVisualizationNode";
 import axios, { AxiosInstance } from "axios";
 import {InstantiationError} from "@errors/InstantiationError";
-import {ComfyUIResponse, ComfyUIWorkflow, HealthCheckResult} from "@agents/tools/impl/io/IVisualization";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
+import {IComfyUIClient} from "@agents/tools/impl/io/IVisualizationNode";
+import {ComfyUIResponse, ComfyUIWorkflow, HealthCheckResult} from "@agents/tools/io/IVisualization";
 const logger: pino.Logger = createLogger(module);
 
 /**

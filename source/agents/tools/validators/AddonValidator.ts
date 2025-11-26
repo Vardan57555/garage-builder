@@ -1,6 +1,6 @@
-import {AddonMenuItem} from "@agents/tools/impl/io/IShowAddons";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
+import {AddonMenuItem} from "@agents/tools/io/IShowAddons";
 const logger: pino.Logger = createLogger(module);
 
 export class AddonValidator

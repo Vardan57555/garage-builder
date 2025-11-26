@@ -1,7 +1,7 @@
-import {IPromptBuilder} from "@agents/tools/io/IVisualizationNode";
 import {InstantiationError} from "@errors/InstantiationError";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {DimensionResult, ExtractionContext} from "@agents/tools/impl/io/IParameterExtraction";
+import {IPromptBuilder} from "@agents/tools/impl/io/IVisualizationNode";
+import {DimensionResult, ExtractionContext} from "@agents/tools/io/IParameterExtraction";
 
 /**
  * Builds detailed garage prompts from parameters

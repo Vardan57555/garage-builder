@@ -1,11 +1,11 @@
-import {IDimensionManager} from "@agents/tools/io/IParameterExtractionNode";
-import {DimensionResult} from "@agents/tools/impl/io/IParameterExtraction";
 import {DynamicGarageDimensionCalculator} from "@utils/dimensionCalculator/DimensionCalculator";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 import {InstantiationError} from "@errors/InstantiationError";
+import { IDimensionManager } from "./io/IParameterExtractionNode";
+import {DimensionResult} from "@agents/tools/io/IParameterExtraction";
+import {UpdateResult} from "@agents/tools/io/IParameterUpdate";
 const logger: pino.Logger = createLogger(module);
 
 export class DimensionManager implements IDimensionManager

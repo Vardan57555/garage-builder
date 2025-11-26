@@ -1,7 +1,7 @@
 import { AddonFromDB } from "@agents/tools/io/IAddonDatabase";
 import {LeadAgentStateType} from "@agents/LeadAgentState";
 import {Addon, ProcessingResult, SelectedAddon} from "@agents/tools/io/IProcessAddon";
-import {AddonMenuItem, ShowAddonsResponse} from "@agents/tools/impl/io/IShowAddons";
+import {AddonMenuItem, ShowAddonsResponse} from "@agents/tools/io/IShowAddons";
 
 export interface AddonService
 {

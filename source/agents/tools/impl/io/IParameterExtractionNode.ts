@@ -1,7 +1,7 @@
-import {DimensionResult, ExtractionContext, ExtractionResult} from "@agents/tools/impl/io/IParameterExtraction";
 import {LeadAgentStateType} from "@agents/LeadAgentState";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
+import {UpdateResult} from "@agents/tools/io/IParameterUpdate";
+import {DimensionResult, ExtractionContext, ExtractionResult} from "@agents/tools/io/IParameterExtraction";
 
 export interface IDimensionManager
 {

@@ -1,11 +1,11 @@
 import pino from "pino";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
 import {InputValidator} from "@agents/tools/validators/InputValidator";
 import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
 import {createLogger} from "@utils/logger/Log";
 import {DimensionManager} from "@agents/tools/impl/DimensionManager";
-import {IDimensionManager} from "@agents/tools/io/IParameterExtractionNode";
+import {UpdateResult} from "@agents/tools/io/IParameterUpdate";
+import {IDimensionManager} from "@agents/tools/impl/io/IParameterExtractionNode";
 const logger: pino.Logger = createLogger(module);
 
 export class ParameterUpdateApplier

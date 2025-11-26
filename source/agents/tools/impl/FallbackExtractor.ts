@@ -1,6 +1,6 @@
-import {IFallbackExtractor} from "@agents/tools/io/IParameterExtractionNode";
-import {ExtractionResult} from "@agents/tools/impl/io/IParameterExtraction";
 import {DynamicGarageDimensionCalculator} from "@utils/dimensionCalculator/DimensionCalculator";
+import {IFallbackExtractor} from "@agents/tools/impl/io/IParameterExtractionNode";
+import {ExtractionResult} from "@agents/tools/io/IParameterExtraction";
 
 export class FallbackExtractor implements IFallbackExtractor
 {

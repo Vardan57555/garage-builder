@@ -1,6 +1,6 @@
-import {ILLMResponseHandler} from "@agents/tools/io/IParameterExtractionNode";
 import {sharedLLM} from "@llm/SharedLLM";
 import {HumanMessage} from "@langchain/core/messages";
+import {ILLMResponseHandler} from "@agents/tools/impl/io/IParameterExtractionNode";
 
 export class LLMResponseHandler implements ILLMResponseHandler
 {

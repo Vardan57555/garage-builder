@@ -1,11 +1,12 @@
+import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {
     ComfyUIWorkflow,
     GenerationResult,
     HealthCheckResult,
-    QuoteBreakdown, VisualizationResponse
-} from "@agents/tools/impl/io/IVisualization";
-import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import {DimensionResult, ExtractionContext} from "@agents/tools/impl/io/IParameterExtraction";
+    QuoteBreakdown,
+    VisualizationResponse
+} from "@agents/tools/io/IVisualization";
+import {DimensionResult, ExtractionContext} from "@agents/tools/io/IParameterExtraction";
 
 export interface IWorkflowBuilder
 {

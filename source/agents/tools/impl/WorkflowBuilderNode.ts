@@ -1,6 +1,6 @@
-import {IWorkflowBuilder} from "@agents/tools/io/IVisualizationNode";
-import {ComfyUIWorkflow, WorkflowConfig} from "@agents/tools/impl/io/IVisualization";
 import {InstantiationError} from "@errors/InstantiationError";
+import {IWorkflowBuilder} from "@agents/tools/impl/io/IVisualizationNode";
+import {ComfyUIWorkflow, WorkflowConfig} from "@agents/tools/io/IVisualization";
 
 /**
  * Builds and manages ComfyUI workflows
