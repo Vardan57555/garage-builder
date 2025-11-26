@@ -3,17 +3,14 @@ import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
 import {InputValidator} from "@agents/tools/validators/InputValidator";
 import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
-import {DimensionHandler} from "@agents/tools/impl/DimensionHandler";
 import {createLogger} from "@utils/logger/Log";
+import {DimensionManager} from "@agents/tools/impl/DimensionManager";
+import {IDimensionManager} from "@agents/tools/io/IParameterExtractionNode";
 const logger: pino.Logger = createLogger(module);
 
 export class ParameterUpdateApplier
 {
-    private dimensionHandler: DimensionHandler;
-
-    constructor() {
-        this.dimensionHandler = new DimensionHandler();
-    }
+    private dimensionManager: IDimensionManager = DimensionManager.getInstance();
 
     public apply(currentParams: Partial<UserFriendlyParams>, field: keyof UserFriendlyParams, value: any): UpdateResult
     {
@@ -21,7 +18,7 @@ export class ParameterUpdateApplier
 
         if (field === "garage_type")
         {
-            return this.dimensionHandler.handleGarageTypeUpdate(value, currentParams);
+            return this.dimensionManager.handleGarageTypeUpdate(value, currentParams);
         }
 
         if (this.isNumericField(field))

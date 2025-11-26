@@ -1,5 +1,7 @@
 import {DimensionResult, ExtractionContext, ExtractionResult} from "@agents/tools/impl/io/IParameterExtraction";
 import {LeadAgentStateType} from "@agents/LeadAgentState";
+import {UserFriendlyParams} from "@agents/tools/io/IChat";
+import {UpdateResult} from "@agents/tools/impl/io/IParameterUpdate";
 
 export interface IDimensionManager
 {
@@ -12,6 +14,8 @@ export interface IDimensionManager
     applyDimensions(params: Record<string, any>, dimensions: DimensionResult): boolean;
 
     preserveExistingDimensions(merged: Record<string, any>, current: Record<string, any>, extracted: Record<string, any>): void;
+
+    handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult
 }
 
 
@@ -30,11 +34,6 @@ export interface IParameterExtractor
 export interface ILLMResponseHandler
 {
     extractLLMResponse(userInput: string, prompt: string): Promise<string>;
-}
-
-export interface IPromptBuilder
-{
-    buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string;
 }
 
 

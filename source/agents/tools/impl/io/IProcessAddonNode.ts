@@ -9,12 +9,3 @@ export interface IAddonSelectionParser
      */
     parse(userInput: string, addonsMenu: Addon[]): SelectedAddon[];
 }
-
-
-export interface IPricingCalculator
-{
-    /**
-     * Calculates total price using base price + addon costs.
-     */
-    calculateTotalPrice(basePrice: number, addons: SelectedAddon[]): number;
-}

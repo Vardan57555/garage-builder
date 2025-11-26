@@ -10,7 +10,7 @@ import {
     ValidationResult
 } from "@agents/tools/impl/io/IParameterExtraction";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import { IParameterExtractor } from "@agents/tools/io/IParameterExtractionNode";
+import {IDimensionManager, IParameterExtractor} from "@agents/tools/io/IParameterExtractionNode";
 import { ParameterValidator } from "../validators/ParameterValidator";
 import {DimensionManager} from "@agents/tools/impl/DimensionManager";
 import {LLMResponseHandler} from "@agents/tools/impl/LLMResponseHandler";
@@ -23,7 +23,7 @@ class ParameterExtractor implements IParameterExtractor
 {
     private promptBuilder: IPromptBuilder;
     private llmHandler: LLMResponseHandler;
-    private dimensionManager: DimensionManager;
+    private dimensionManager: IDimensionManager;
     private fallbackExtractor: FallbackExtractor;
     private paramExtractor: PriceParamsExtractorTool;
 
@@ -31,7 +31,7 @@ class ParameterExtractor implements IParameterExtractor
     {
         this.promptBuilder = PromptBuilder.getInstance();
         this.llmHandler = new LLMResponseHandler();
-        this.dimensionManager = new DimensionManager();
+        this.dimensionManager = DimensionManager.getInstance();
         this.fallbackExtractor = new FallbackExtractor();
         this.paramExtractor = PriceParamsExtractorTool.getInstance();
     }
