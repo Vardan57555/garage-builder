@@ -36,7 +36,6 @@ class VisualizationOrchestrator
             const selectedAddons = state.selectedAddons || [];
             const basePrice = state.basePrice || 0;
 
-            // ✅ CRITICAL FIX: Log all parameters for debugging
             logger.info(`[VisualizationOrchestrator] Received params:`, {
                 width: params?.width,
                 length: params?.length,
@@ -50,14 +49,12 @@ class VisualizationOrchestrator
                 addonsCount: selectedAddons.length,
             });
 
-            // ✅ CRITICAL FIX: Merge state.color with params.color
             const finalColor = params?.color || state.color || "White";
             const mergedParams: UserFriendlyParams = {
                 ...params,
                 color: finalColor,
             };
 
-            // ✅ CRITICAL FIX: Validate all required dimensions exist
             if (!mergedParams.width || !mergedParams.length || !mergedParams.height) {
                 logger.error("[VisualizationOrchestrator] Missing required dimensions:", {
                     width: mergedParams.width,
@@ -78,7 +75,6 @@ class VisualizationOrchestrator
             let imageUrl: string | null = null;
             let base64Image: string | null = null;
 
-            // ✅ CRITICAL FIX: Pass complete merged params to generator
             const result: GenerationResult = await this.generator.generate(mergedParams, 3);
 
             if (result.success && result.base64)

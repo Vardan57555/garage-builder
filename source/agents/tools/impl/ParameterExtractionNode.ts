@@ -50,23 +50,17 @@ class ParameterExtractor implements IParameterExtractor
 
         try
         {
-            // ============================================================
-            // CRITICAL FIX: If in field-specific mode, validate the input first
-            // ============================================================
             if (state.currentField && typeof state.currentField === 'string') {
                 logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
 
-                // Declare fieldKey at the top of this block so it's in scope for all code below
                 const fieldKey = state.currentField as keyof UserFriendlyParams;
 
-                // CRITICAL: For choice fields, don't validate - let choice service handle it
                 const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
 
                 if (isChoiceField) {
                     logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), passing to choice service`);
 
                     try {
-                        // Let choice service handle the parsing
                         const result = await this.choiceService.handleChoice(
                             state.currentField,
                             userInput
@@ -82,12 +76,10 @@ class ParameterExtractor implements IParameterExtractor
                             };
                         }
 
-                        // Use the resolved value directly
-                        (currentParams as Record<string, any>)[fieldKey] = result.selected;
+                        // @ts-ignore
+                        currentParams[fieldKey] = result.selected;
                         logger.info(`[ParameterExtractor] Choice field resolved: ${state.currentField} = ${result.selected}`);
 
-                        // CRITICAL FIX: Clear the current field and return directly to check_missing_fields
-                        // This prevents the value from being re-processed by the update handler
                         return {
                             userFriendlyParams: currentParams,
                             currentField: null,
@@ -105,7 +97,63 @@ class ParameterExtractor implements IParameterExtractor
                     }
                 }
 
-                // For non-choice fields, validate strictly
+                if (state.currentField === 'state_name') {
+                    logger.info(`[ParameterExtractor] Validating state name against database`);
+
+                    const formatValidation = this.validateFieldInput(userInput, state.currentField);
+                    if (!formatValidation.isValid) {
+                        logger.warn(`[ParameterExtractor] Invalid format for state_name: "${userInput}"`);
+                        return {
+                            validationError: formatValidation.error,
+                            response: `❌ ${formatValidation.error}\n\nPlease provide a valid US state name.`,
+                            nextStep: "ask_for_field",
+                            currentField: state.currentField,
+                            userFriendlyParams: currentParams,
+                        };
+                    }
+
+                    try {
+                        const { ParameterValidator } = await import("@agents/tools/validators/ParameterValidator");
+
+                        const dbValidation = await ParameterValidator.validateState(
+                            userInput,
+                            state.stateMapCache
+                        );
+
+                        if (!dbValidation.isValid) {
+                            logger.warn(`[ParameterExtractor] State not found in database: "${userInput}"`);
+                            return {
+                                validationError: dbValidation.error,
+                                response: `❌ ${dbValidation.error}\n\nPlease provide a valid US state name (e.g., Texas, California, Florida).`,
+                                nextStep: "ask_for_field",
+                                currentField: state.currentField,
+                                userFriendlyParams: currentParams,
+                            };
+                        }
+
+                        // @ts-ignore
+                        currentParams[fieldKey] = dbValidation.normalizedValue;
+                        logger.info(`[ParameterExtractor] State validated: ${userInput} → ${dbValidation.normalizedValue}`);
+
+                        return {
+                            userFriendlyParams: currentParams,
+                            currentField: null,
+                            nextStep: "check_missing_fields",
+                        };
+
+                    }
+                    catch (error) {
+                        logger.error(`[ParameterExtractor] Error validating state:`, error);
+                        return {
+                            validationError: `Error validating state name`,
+                            response: `❌ Error validating state. Please try again.`,
+                            nextStep: "ask_for_field",
+                            currentField: state.currentField,
+                            userFriendlyParams: currentParams,
+                        };
+                    }
+                }
+
                 const validation = this.validateFieldInput(userInput, state.currentField);
 
                 if (!validation.isValid) {
@@ -114,14 +162,15 @@ class ParameterExtractor implements IParameterExtractor
                         validationError: validation.error,
                         response: `❌ ${validation.error}\n\nPlease provide a valid ${state.currentField}.`,
                         nextStep: "ask_for_field",
-                        currentField: state.currentField as keyof UserFriendlyParams,
+                        currentField: fieldKey,
                         userFriendlyParams: currentParams,
                     };
                 }
 
-                // Valid input - apply it directly without LLM inference
                 const parsedValue = this.parseFieldValue(userInput, state.currentField);
-                (currentParams as Record<string, any>)[fieldKey] = parsedValue;
+
+                // @ts-ignore
+                currentParams[fieldKey] = parsedValue;
 
                 logger.info(`[ParameterExtractor] Field accepted: ${state.currentField} = ${parsedValue}`);
 
@@ -131,9 +180,6 @@ class ParameterExtractor implements IParameterExtractor
                 };
             }
 
-            // ============================================================
-            // NOT in field mode - use full extraction pipeline
-            // ============================================================
             const context: ExtractionContext = {
                 userInput,
                 currentField: state.currentField,
@@ -214,15 +260,13 @@ class ParameterExtractor implements IParameterExtractor
     private validateFieldInput(input: string, field: string): { isValid: boolean; error?: string } {
         const trimmed = input.trim();
 
-        // Empty input
         if (!trimmed || trimmed.length === 0) {
             return { isValid: false, error: `Cannot be empty` };
         }
 
-        // Check for indifference keywords (any, idk, etc.) - these are valid
         const indifferenceKeywords = ["any", "whatever", "idk", "i don't know", "doesn't matter", "don't care"];
         if (indifferenceKeywords.includes(trimmed.toLowerCase())) {
-            return { isValid: true }; // Let choice service handle the default
+            return { isValid: true };
         }
 
         switch (field) {
@@ -233,7 +277,6 @@ class ParameterExtractor implements IParameterExtractor
                 return this.validateNumericInput(trimmed, field);
 
             case "gauge":
-                // For gauge, allow "any" OR valid gauge numbers
                 if (trimmed.match(/^\d+$/)) {
                     const value = parseInt(trimmed);
                     if ([14, 16, 18, 20].includes(value)) {
@@ -241,7 +284,6 @@ class ParameterExtractor implements IParameterExtractor
                     }
                     return { isValid: false, error: `Gauge must be 14, 16, 18, or 20` };
                 }
-                // If not a number, it might be "any" which is already handled above
                 return { isValid: false, error: `Gauge must be 14, 16, 18, or 20, or say "any" for default` };
 
             case "state_name":
@@ -259,7 +301,6 @@ class ParameterExtractor implements IParameterExtractor
     }
 
     private validateNumericInput(input: string, field: string): { isValid: boolean; error?: string } {
-        // Only accept numeric inputs for dimensions
         const numMatch = input.match(/^\d+(?:\.\d+)?$/);
 
         if (!numMatch) {
@@ -280,7 +321,6 @@ class ParameterExtractor implements IParameterExtractor
     }
 
     private validateStateInput(input: string): { isValid: boolean; error?: string } {
-        // State should be alphabetic (allow spaces and hyphens)
         const stateMatch = input.match(/^[a-zA-Z\s\-]{2,50}$/);
 
         if (!stateMatch) {
@@ -318,9 +358,6 @@ class ParameterExtractor implements IParameterExtractor
         return { isValid: true };
     }
 
-    // ============================================================
-    // NEW: Parse field value (convert to correct type)
-    // ============================================================
     private parseFieldValue(input: string, field: string): any {
         switch (field) {
             case "width":

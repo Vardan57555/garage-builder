@@ -41,7 +41,6 @@ export class GarageImageGenerator implements IGarageImageGenerator
         return GarageImageGenerator.instance;
     }
 
-    // ✅ CRITICAL FIX: Validate params before using them
     private validateParams(params: UserFriendlyParams): { valid: boolean; error?: string } {
         const required = ['width', 'length', 'height', 'color'];
         const missing = required.filter(field => !params[field as keyof UserFriendlyParams]);
@@ -58,7 +57,6 @@ export class GarageImageGenerator implements IGarageImageGenerator
 
     public async generate(params: UserFriendlyParams, retries: number = this.maxRetries): Promise<GenerationResult>
     {
-        // ✅ CRITICAL FIX: Validate all parameters exist
         const validation = this.validateParams(params);
         if (!validation.valid) {
             logger.error(`[GarageImageGenerator] Validation failed: ${validation.error}`);
@@ -83,7 +81,6 @@ export class GarageImageGenerator implements IGarageImageGenerator
             {
                 logger.info(`[GarageImageGenerator] Attempt ${attempt}/${retries}...`);
 
-                // ✅ CRITICAL FIX: Pass complete params to prompt builder
                 const prompt: string = this.promptBuilder.buildGaragePrompt(params);
 
                 logger.debug(`[GarageImageGenerator] Generated prompt length: ${prompt.length} chars`);

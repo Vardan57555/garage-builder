@@ -3,20 +3,19 @@ import { createLogger } from "@utils/logger/Log";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { leadAgentGraph } from "@agents/LeadAgentGraph";
-import {detectParameterUpdateFromInput, IntentDetector} from "@agents/tools/impl/DetectionHelpers";
+import { detectParameterUpdateFromInput, IntentDetector } from "@agents/tools/impl/DetectionHelpers";
 import { SessionManager } from "@utils/session/SessionManager";
 import { RedisCacheUtils } from "@utils/cache/RedisCacheUtils";
 import { InstantiationError } from "@errors/InstantiationError";
-import {ColorOption} from "@agents/tools/io/IColorChoice";
-import {ColorService} from "@agents/tools/impl/io/ColorService";
-import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
-import {AddonService} from "@agents/tools/impl/io/AddonService";
-import {AddonServiceImpl} from "@agents/tools/impl/AddonServiceImpl";
+import { ColorOption } from "@agents/tools/io/IColorChoice";
+import { ColorService } from "@agents/tools/impl/io/ColorService";
+import { ColorServiceImpl } from "@agents/tools/impl/ColorServiceImpl";
+import { AddonService } from "@agents/tools/impl/io/AddonService";
+import { AddonServiceImpl } from "@agents/tools/impl/AddonServiceImpl";
 
 const logger: pino.Logger = createLogger(module);
 
-export class LeadAgent
-{
+export class LeadAgent {
     private static instance: LeadAgent;
     private sessionManager: SessionManager;
     private readonly addonManagerInstance: AddonService = AddonServiceImpl.getInstance();
@@ -54,9 +53,12 @@ export class LeadAgent
         const foundationCost = sqft * 8.5;
         const deliveryCost = 750;
         const addonTotal = selectedAddons.reduce((sum, addon) => sum + (addon.cost || 0), 0);
-        const contingency = (basePrice + colorCost + laborCost + foundationCost + deliveryCost + addonTotal) * 0.05;
+        const contingency =
+            (basePrice + colorCost + laborCost + foundationCost + deliveryCost + addonTotal) * 0.05;
 
-        return basePrice + colorCost + laborCost + foundationCost + deliveryCost + contingency + addonTotal;
+        return (
+            basePrice + colorCost + laborCost + foundationCost + deliveryCost + contingency + addonTotal
+        );
     }
 
     private detectAddonRequest(input: string): boolean {
@@ -66,7 +68,7 @@ export class LeadAgent
             /\b(window|door|garage|walk.?in|brace|anchor|cupola|truss|sectional)/i,
         ];
 
-        const isAddon = addonPatterns.some(pattern => pattern.test(input));
+        const isAddon = addonPatterns.some((pattern) => pattern.test(input));
         const isCarRelated = /\b\d+\s*(?:car|cars)\s*(?:garage)?\b/i.test(input);
 
         return isAddon && !isCarRelated;
@@ -76,7 +78,7 @@ export class LeadAgent
         const selected: any[] = [];
 
         const normalizeForMatching = (text: string): string => {
-            return text.toLowerCase().trim().replace(/[_\s-]+/g, '').replace(/s$/, '');
+            return text.toLowerCase().trim().replace(/[_\s-]+/g, "").replace(/s$/, "");
         };
 
         const looksLikeNumberSelection = /^[\d,\s]+$/.test(userInput.trim());
@@ -85,15 +87,16 @@ export class LeadAgent
             const numberMatches = userInput.match(/\d+/g);
             if (numberMatches) {
                 const indices = numberMatches
-                    .map(n => parseInt(n) - 1)
-                    .filter(idx => idx >= 0 && idx < addonsMenu.length);
+                    .map((n) => parseInt(n) - 1)
+                    .filter((idx) => idx >= 0 && idx < addonsMenu.length);
 
-                indices.forEach(idx => selected.push(addonsMenu[idx]));
+                indices.forEach((idx) => selected.push(addonsMenu[idx]));
                 if (selected.length > 0) return selected;
             }
         }
 
-        const quantityPattern = /(?:add|also|and|get|want|need)?\s*(\d+)\s+([\w_]+(?:\s+[\w_]+)*)/gi;
+        const quantityPattern =
+            /(?:add|also|and|get|want|need)?\s*(\d+)\s+([\w_]+(?:\s+[\w_]+)*)/gi;
         const matches = [...userInput.matchAll(quantityPattern)];
 
         if (matches.length > 0) {
@@ -102,15 +105,15 @@ export class LeadAgent
                 const rawKeyword = match[2].trim();
                 const normalizedKeyword = normalizeForMatching(rawKeyword);
 
-                const matchingAddons = addonsMenu.filter(addon => {
+                const matchingAddons = addonsMenu.filter((addon) => {
                     const normalizedLabel = normalizeForMatching(addon.label || "");
                     const normalizedType = normalizeForMatching(addon.type || "");
 
                     return (
                         normalizedLabel.includes(normalizedKeyword) ||
-                        (normalizedKeyword.includes('window') && normalizedType.includes('window')) ||
-                        (normalizedKeyword.includes('door') && normalizedType.includes('door')) ||
-                        (normalizedKeyword.includes('walkin') && normalizedType.includes('walkin'))
+                        (normalizedKeyword.includes("window") && normalizedType.includes("window")) ||
+                        (normalizedKeyword.includes("door") && normalizedType.includes("door")) ||
+                        (normalizedKeyword.includes("walkin") && normalizedType.includes("walkin"))
                     );
                 });
 
@@ -130,7 +133,7 @@ export class LeadAgent
     private async getAddonsMenuFromDatabase(): Promise<any[]> {
         const allAddons = await this.addonManagerInstance.getAddonsWithCache();
         const limited = this.addonManagerInstance.getLimitedAddonsByType(allAddons, 10);
-        return limited.map(addon => ({
+        return limited.map((addon) => ({
             id: addon.id,
             label: addon.label,
             type: addon.type,
@@ -185,14 +188,23 @@ export class LeadAgent
                 return response;
             }
 
-            if (session.state.currentField === "color" && !session.state.color && !session.state.priceCalculated) {
+            if (
+                session.state.currentField === "color" &&
+                !session.state.color &&
+                !session.state.priceCalculated
+            ) {
                 logger.info(`[LeadAgent] 🎨 COLOR SELECTION PHASE - user input: "${input}"`);
 
-                const isAddonRequest = /^(add|get|want|need)\s+\d+\s+(window|door|brace|cupola|sectional)/i.test(input);
+                const isAddonRequest =
+                    /^(add|get|want|need)\s+\d+\s+(window|door|brace|cupola|sectional)/i.test(input);
 
                 if (isAddonRequest) {
-                    logger.info(`[LeadAgent] ⚠️  User in color phase but requesting addons: "${input}"`);
-                    logger.info(`[LeadAgent] Setting default color (White) and proceeding to price calculation`);
+                    logger.info(
+                        `[LeadAgent] ⚠️  User in color phase but requesting addons: "${input}"`
+                    );
+                    logger.info(
+                        `[LeadAgent] Setting default color (White) and proceeding to price calculation`
+                    );
 
                     session.state.color = "White";
                     session.state.userFriendlyParams.color = "White";
@@ -234,37 +246,39 @@ export class LeadAgent
                     logger.info(`[LeadAgent] Fetching colors from database...`);
                     const allColors: ColorOption[] = await this.colorService.get();
 
-                    if (!allColors || allColors.length === 0)
-                    {
+                    if (!allColors || allColors.length === 0) {
                         logger.error(`[LeadAgent] ❌ NO COLORS IN DATABASE!`);
                         return `❌ Error: No colors available in database. Skipping color selection.`;
                     }
 
                     logger.info(`[LeadAgent] ✅ Got ${allColors.length} colors from database`);
 
-                    const groupedColors: Map<string, ColorOption[]> = this.colorService.group(allColors, 5);
+                    const groupedColors: Map<string, ColorOption[]> = this.colorService.group(
+                        allColors,
+                        5
+                    );
                     const displayColors: any[] = [];
 
-                    for (const [category, colors] of groupedColors.entries())
-                    {
-                        if (colors && Array.isArray(colors) && colors.length > 0)
-                        {
-                            logger.info(`[LeadAgent] Adding ${colors.length} colors from category: ${category}`);
+                    for (const [category, colors] of groupedColors.entries()) {
+                        if (colors && Array.isArray(colors) && colors.length > 0) {
+                            logger.info(
+                                `[LeadAgent] Adding ${colors.length} colors from category: ${category}`
+                            );
                             displayColors.push(...colors);
                         }
                     }
 
-                    logger.info(`[LeadAgent] Built displayColors array: ${displayColors.length} colors`);
+                    logger.info(
+                        `[LeadAgent] Built displayColors array: ${displayColors.length} colors`
+                    );
 
-                    if (displayColors.length === 0)
-                    {
+                    if (displayColors.length === 0) {
                         logger.error(`[LeadAgent] ❌ displayColors is empty after grouping!`);
                         return `❌ Error: No colors available for selection.`;
                     }
 
                     const firstColor = displayColors[0];
-                    if (!firstColor || !firstColor.name)
-                    {
+                    if (!firstColor || !firstColor.name) {
                         logger.error(`[LeadAgent] ❌ displayColors contains invalid objects!`);
                         return `❌ Error: Color data is corrupted. Please contact support.`;
                     }
@@ -273,9 +287,10 @@ export class LeadAgent
 
                     const selectedColor: ColorOption = this.colorService.detect(input, displayColors);
 
-                    if (selectedColor)
-                    {
-                        logger.info(`[LeadAgent] ✅ Color matched: "${selectedColor.name}" (cost: $${selectedColor.cost})`);
+                    if (selectedColor) {
+                        logger.info(
+                            `[LeadAgent] ✅ Color matched: "${selectedColor.name}" (cost: $${selectedColor.cost})`
+                        );
 
                         session.state.color = selectedColor.name;
                         session.state.userFriendlyParams.color = selectedColor.name;
@@ -283,7 +298,8 @@ export class LeadAgent
                         const result = await leadAgentGraph.invoke({
                             sessionId,
                             messages: await session.memory.chatHistory.getMessages(),
-                            userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
+                            userFriendlyParams: session.state
+                                .userFriendlyParams as Partial<UserFriendlyParams>,
                             hasGarageIntent: session.state.hasGarageIntent,
                             color: selectedColor.name,
                             priceCalculated: false,
@@ -300,14 +316,15 @@ export class LeadAgent
                             finalPrice: 0,
                         });
 
-                        const response:string = result.response;
+                        const response: string = result.response;
                         await session.memory.chatHistory.addAIChatMessage(response);
 
                         session.state.color = result.color || selectedColor.name;
                         session.state.colorCost = result.colorCost || 0;
                         session.state.priceCalculated = result.priceCalculated || false;
                         session.state.basePrice = result.basePrice || 0;
-                        session.state.finalPrice = (result.basePrice || 0) + (result.colorCost || 0);
+                        session.state.finalPrice =
+                            (result.basePrice || 0) + (result.colorCost || 0);
                         session.state.pricingData = result.pricingData;
 
                         if (result.userFriendlyParams) {
@@ -323,7 +340,10 @@ export class LeadAgent
                     } else {
                         logger.warn(`[LeadAgent] ❌ Color not matched for input: "${input}"`);
 
-                        const suggestions = displayColors.slice(0, 3).map((c, i) => `${i + 1}. ${c.name}`).join(", ");
+                        const suggestions = displayColors
+                            .slice(0, 3)
+                            .map((c, i) => `${i + 1}. ${c.name}`)
+                            .join(", ");
 
                         return `❌ Color "${input}" not recognized.\n\nTry:\n• "1" or "2" to select by number\n• "Barn Red" or "barn red" for exact color\n• "red" to search\n• "any" for default (White)\n\n💡 Example colors: ${suggestions}...`;
                     }
@@ -338,8 +358,10 @@ export class LeadAgent
 
                 const userInput = input.toLowerCase().trim();
 
-                const isSkipping = /(^|\s)(no|skip|none|without|don't|nope|nah|nothing)($|\s)/i.test(userInput);
-                const isExplicitColorChange = /^(color|paint|make.*color|change.*color)\b/i.test(input);
+                const isSkipping =
+                    /(^|\s)(no|skip|none|without|don't|nope|nah|nothing)($|\s)/i.test(userInput);
+                const isExplicitColorChange =
+                    /^(color|paint|make.*color|change.*color)\b/i.test(input);
                 const isAddonRequest = this.detectAddonRequest(userInput);
 
                 if (isSkipping && !isExplicitColorChange && !isAddonRequest) {
@@ -352,14 +374,16 @@ export class LeadAgent
 
                     const finalTotal = this.calculateFinalPrice(basePrice, colorCost, [], sqft);
 
-                    const { generateGarageVisualizationNode } = await import("@agents/tools/impl/VisualizationNode");
+                    const { generateGarageVisualizationNode } = await import(
+                        "@agents/tools/impl/VisualizationNode"
+                        );
 
                     const visualizationState: LeadAgentStateType = {
                         sessionId,
                         messages: await session.memory.chatHistory.getMessages(),
                         userFriendlyParams: {
                             ...params,
-                            color: session.state.color
+                            color: session.state.color,
                         } as Partial<UserFriendlyParams>,
                         hasGarageIntent: true,
                         priceCalculated: true,
@@ -376,10 +400,12 @@ export class LeadAgent
                         finalPrice: finalTotal,
                         generatedImageUrl: null,
                         color: session.state.color,
-                        colorCost: colorCost
+                        colorCost: colorCost,
                     };
 
-                    logger.info(`[LeadAgent] 🎨 VISUALIZATION: Color=${session.state.color}, ColorCost=$${colorCost}, Final=$${finalTotal}`);
+                    logger.info(
+                        `[LeadAgent] 🎨 VISUALIZATION: Color=${session.state.color}, ColorCost=$${colorCost}, Final=$${finalTotal}`
+                    );
 
                     const result = await generateGarageVisualizationNode(visualizationState);
                     const response = result.response;
@@ -445,14 +471,16 @@ export class LeadAgent
 
                         const finalTotal = this.calculateFinalPrice(basePrice, colorCost, selectedAddons, sqft);
 
-                        const { generateGarageVisualizationNode } = await import("@agents/tools/impl/VisualizationNode");
+                        const { generateGarageVisualizationNode } = await import(
+                            "@agents/tools/impl/VisualizationNode"
+                            );
 
                         const visualizationState: LeadAgentStateType = {
                             sessionId,
                             messages: await session.memory.chatHistory.getMessages(),
                             userFriendlyParams: {
                                 ...params,
-                                color: session.state.color
+                                color: session.state.color,
                             } as Partial<UserFriendlyParams>,
                             hasGarageIntent: true,
                             priceCalculated: true,
@@ -469,7 +497,7 @@ export class LeadAgent
                             finalPrice: finalTotal,
                             generatedImageUrl: null,
                             color: session.state.color,
-                            colorCost: colorCost
+                            colorCost: colorCost,
                         };
 
                         const result = await generateGarageVisualizationNode(visualizationState);
@@ -486,9 +514,9 @@ export class LeadAgent
                     }
                 }
 
-                const update = await detectParameterUpdateFromInput(input);
+                const update = await detectParameterUpdateFromInput(input, session.state.currentField || undefined);
                 if (update) {
-                    logger.info(`[LeadAgent] User modified parameter: ${update.field}`);
+                    logger.info(`[LeadAgent] ✅ User modified parameter: ${update.field} = ${update.value}`);
 
                     const result = await leadAgentGraph.invoke({
                         sessionId,
@@ -516,8 +544,7 @@ export class LeadAgent
 
                     session.state.userFriendlyParams = result.userFriendlyParams;
                     session.state.priceCalculated = result.priceCalculated || false;
-
-                    session.state.currentField = null;
+                    session.state.currentField = result.currentField || null;
                     session.state.color = result.color || session.state.color;
                     session.state.colorCost = result.colorCost || session.state.colorCost;
 
@@ -527,6 +554,7 @@ export class LeadAgent
                         session.state.finalPrice = result.finalPrice || 0;
                     }
 
+                    logger.info(`[LeadAgent] ✅ Parameter update complete, returning response`);
                     return response;
                 }
 
@@ -559,7 +587,150 @@ export class LeadAgent
 
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
-            const update = await detectParameterUpdateFromInput(input);
+            const update = await detectParameterUpdateFromInput(input,session.state.currentField || undefined);
+
+            if (update && session.state.currentField) {
+                logger.info(
+                    `[LeadAgent] 🔄 Parameter update detected: ${update.field} = ${update.value} ` +
+                    `(while asking for ${session.state.currentField})`
+                );
+
+                try {
+                    const { ParameterUpdateServiceImpl } = await import(
+                        "@agents/tools/impl/ParameterUpdateServiceImpl"
+                        );
+                    const { LeadAgentHelpers } = await import("@agents/LeadAgentHelpers");
+
+                    const updateService = ParameterUpdateServiceImpl.getInstance();
+
+                    const processResult = await updateService.process(
+                        update,
+                        input,
+                        session.state.userFriendlyParams,
+                        session.stateMapCache || new Map()
+                    );
+
+                    if ("error" in processResult) {
+                        logger.error(`[LeadAgent] Update processing failed`, processResult.error);
+
+                        const errorResponse = processResult.error.response ||
+                            `❌ Could not update ${update.field}. Please try again.`;
+
+                        await session.memory.chatHistory.addAIChatMessage(errorResponse);
+                        return errorResponse;
+                    }
+
+                    const { result } = processResult;
+
+                    if (!result.success) {
+                        logger.warn(`[LeadAgent] Update validation failed: ${result.message}`);
+
+                        await session.memory.chatHistory.addAIChatMessage(result.message);
+                        return result.message;
+                    }
+
+                    if (result.updatedParams) {
+                        session.state.userFriendlyParams = {
+                            ...session.state.userFriendlyParams,
+                            ...result.updatedParams
+                        };
+
+                        logger.info(
+                            `[LeadAgent] ✅ Successfully updated ${update.field}`,
+                            session.state.userFriendlyParams
+                        );
+                    }
+
+                    const missingFields = LeadAgentHelpers.getMissingFields(
+                        session.state.userFriendlyParams
+                    );
+
+                    logger.info(
+                        `[LeadAgent] After update - Missing fields: ${missingFields.length}`,
+                        missingFields
+                    );
+
+                    let finalResponse: string;
+
+                    if (missingFields.length === 0) {
+                        logger.info(`[LeadAgent] All fields complete, calculating price`);
+
+                        session.state.currentField = null;
+
+                        const graphResult = await leadAgentGraph.invoke({
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: session.state.userFriendlyParams,
+                            hasGarageIntent: true,
+                            priceCalculated: false,
+                            currentField: null,
+                            validationError: null,
+                            response: "",
+                            nextStep: "calculate_price",
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: null,
+                            basePrice: 0,
+                            selectedAddons: [],
+                            finalPrice: 0,
+                            color: null,
+                            colorCost: 0,
+                        });
+
+                        finalResponse = graphResult.response;
+
+                        session.state.priceCalculated = graphResult.priceCalculated || false;
+                        session.state.pricingData = graphResult.pricingData;
+                        session.state.basePrice = graphResult.basePrice || 0;
+                        session.state.finalPrice = graphResult.finalPrice || 0;
+                        session.state.color = graphResult.color;
+                        session.state.colorCost = graphResult.colorCost;
+
+                    } else {
+                        const nextField = missingFields[0];
+                        session.state.currentField = nextField;
+
+                        logger.info(`[LeadAgent] Next field to collect: ${nextField}`);
+
+                        const { askForFieldNode } = await import("@agents/tools/impl/AskForFieldNode");
+
+                        const fieldResult = await askForFieldNode({
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: session.state.userFriendlyParams,
+                            hasGarageIntent: true,
+                            priceCalculated: false,
+                            currentField: nextField as keyof UserFriendlyParams,
+                            validationError: null,
+                            response: "",
+                            nextStep: null,
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: null,
+                            basePrice: 0,
+                            selectedAddons: [],
+                            finalPrice: 0,
+                            color: null,
+                            colorCost: 0,
+                            generatedImageUrl: ""
+                        });
+
+                        finalResponse = `${result.message}\n\n${fieldResult.response}`;
+                    }
+
+                    await session.memory.chatHistory.addAIChatMessage(finalResponse);
+                    return finalResponse;
+
+                } catch (error) {
+                    logger.error(`[LeadAgent] Exception handling update:`, error);
+
+                    const errorMsg = `❌ Error updating ${update.field}. Please try again.`;
+                    await session.memory.chatHistory.addAIChatMessage(errorMsg);
+                    return errorMsg;
+                }
+            }
 
             const result = await leadAgentGraph.invoke({
                 sessionId,

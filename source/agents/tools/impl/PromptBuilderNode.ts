@@ -94,7 +94,6 @@ export class PromptBuilder implements IPromptBuilder
      */
     public buildGaragePrompt(params: UserFriendlyParams): string
     {
-        // ✅ CRITICAL FIX: Use all params with proper fallbacks
         const width: number = params.width || 20;
         const length: number = params.length || 20;
         const height: number = params.height || 10;
