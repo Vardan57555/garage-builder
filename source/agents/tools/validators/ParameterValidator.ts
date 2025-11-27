@@ -18,7 +18,8 @@ export class ParameterValidator
             return this.validateStateName(value, stateMapCache);
         }
 
-        if (this.isNumericField(field)) {
+        if (this.isNumericField(field))
+        {
             return this.validateNumericField(field, value);
         }
 
@@ -33,52 +34,47 @@ export class ParameterValidator
         return null;
     }
 
-    private async validateStateName(
-        value: any,
-        stateMapCache: Map<string, any>
-    ): Promise<string | null> {
+    private async validateStateName(value: any, stateMapCache: Map<string, any>): Promise<string | null>
+    {
         const validationResult = await StateDataValidator.validateState(
             value,
             async (name: string) =>
                 await LeadAgentHelpers.mapStateToDB(name, stateMapCache)
         );
-        if (!validationResult.isValid) {
+        if (!validationResult.isValid)
+        {
             return `❌ "${value}" is not a valid state`;
         }
         return null;
     }
 
-    private validateNumericField(
-        field: keyof UserFriendlyParams,
-        value: any
-    ): string | null {
-        const numValue = InputValidator.parseNumericValue(value);
+    private validateNumericField(field: keyof UserFriendlyParams, value: any): string | null
+    {
+        const numValue: number = InputValidator.parseNumericValue(value);
 
-        if (!InputValidator.isValidNumericField(numValue)) {
+        if (!InputValidator.isValidNumericField(numValue))
+        {
             return `❌ Invalid ${field}: must be a positive number`;
         }
 
-        if (
-            field === "gauge" &&
-            !InputValidator.isValidGauge(numValue)
-        ) {
+        if (field === "gauge" && !InputValidator.isValidGauge(numValue))
+        {
             return `❌ Invalid gauge. Must be 14, 16, 18, or 20`;
         }
 
         return null;
     }
 
-    private isNumericField(field: keyof UserFriendlyParams): boolean {
-        return ["width", "length", "height", "gauge", "utility_length"].includes(
-            field
-        );
+    private isNumericField(field: keyof UserFriendlyParams): boolean
+    {
+        return ["width", "length", "height", "gauge", "utility_length"].includes(field);
     }
 
     static async validateState(stateName: string, cache: any): Promise<ValidationResult>
     {
         const result = await StateDataValidator.validateState(
             stateName,
-            async (name) => await LeadAgentHelpers.mapStateToDB(name, cache)
+            async (name: string) => await LeadAgentHelpers.mapStateToDB(name, cache)
         );
 
         return {

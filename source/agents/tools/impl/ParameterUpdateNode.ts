@@ -3,16 +3,17 @@ import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
-import {UpdateProcessor} from "@agents/tools/impl/UpdateProcessor";
+import {ParameterUpdateService} from "@agents/tools/impl/io/ParameterUpdateService";
+import {ParameterUpdateServiceImpl} from "@agents/tools/impl/ParameterUpdateServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 class ParameterUpdateHandler
 {
-    private updateProcessor: UpdateProcessor;
+    private parameterUpdateServiceImpl: ParameterUpdateService;
 
     constructor()
     {
-        this.updateProcessor = new UpdateProcessor(logger);
+        this.parameterUpdateServiceImpl =  ParameterUpdateServiceImpl.getInstance();
     }
 
     public async handle(state: LeadAgentStateType): Promise<Partial<LeadAgentStateType>>
@@ -58,7 +59,7 @@ class ParameterUpdateHandler
         {
             logger.info(`[ParameterUpdateHandler] Processing: ${update.field} = ${update.value}`);
 
-            const processResult = await this.updateProcessor.process(
+            const processResult = await this.parameterUpdateServiceImpl.process(
                 update,
                 userInput,
                 updatedParams,
