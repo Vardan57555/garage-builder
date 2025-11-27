@@ -10,9 +10,8 @@ import {Constants} from "@common/io/Constants";
 const logger: pino.Logger = createLogger(module);
 
 /**
- *
  * ChoiceParser: Handles user input matching and validation
- * Implements fallback strategy: direct match → AI → default
+ * Implements fallback strategy: number match → text match → indifference → AI → default
  */
 export class ChoiceServiceImpl implements IChoiceService
 {
@@ -26,25 +25,21 @@ export class ChoiceServiceImpl implements IChoiceService
         "dunno",
         "idk",
         "doesn't matter",
+        "don't care",
+        "idc",
+        "no preference",
+        "doesn't care",
     ];
-
 
     constructor(enforce: () => void, configs: FieldConfig[])
     {
         if(enforce !== Enforce)
         {
-            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use AddonManager.getInstance() instead of new.");
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use ChoiceServiceImpl.getInstance() instead of new.");
         }
 
         this.configs = new Map(configs.map(c => [c.name, c]));
     }
-
-
-    /**
-     * Gets the singleton instance of IChoiceService.
-     *
-     * @returns The singleton instance of IChoiceService.
-     */
 
     public static getInstance(): IChoiceService
     {
@@ -57,208 +52,144 @@ export class ChoiceServiceImpl implements IChoiceService
     }
 
     /**
-     * Parses user choice with an intelligent fallback strategy
+     * Main parsing method with strict priority order
      */
     public async parse(userInput: string, options: ChoiceOption[], context: string = ""): Promise<ChoiceResult>
     {
-        logger.info({ userInput, optionCount: options.length }, "[ChoiceParser] Parsing user choice");
+        logger.info(`[ChoiceParser] Parsing: "${userInput}" from ${options.length} options`);
 
-        try
-        {
-            let result: ChoiceResult = this.tryNumberMatch(userInput, options);
-
-            if (result)
-            {
-                return result;
-            }
-
-            result = this.tryTextMatch(userInput, options);
-
-            if (result)
-            {
-                return result;
-            }
-
-            if (this.isIndifferenceExpressed(userInput))
-            {
-                return this.selectBalancedOption(options);
-            }
-
-            logger.info("[ChoiceParser] No direct match, using AI");
-            return await this.decideWithAI(userInput, options, context);
-        }
-        catch (error)
-        {
-            logger.error({ err: error }, "[ChoiceParser] Error parsing choice");
-            return this.defaultFallback(options);
-        }
-    }
-
-    /**
-     * Formats options for display with optional numbering
-     */
-    public formatOptions(options: ChoiceOption[], showNumbers = true): string
-    {
-        return options
-            .map((opt, idx) => {
-                const prefix = showNumbers ? `${idx + 1}. ` : "• ";
-                const desc = opt.description ? ` - ${opt.description}` : "";
-                return `${prefix}${opt.label}${desc}`;
-            })
-            .join("\n");
-    }
-
-    /**
-     * Creates human-readable field label from snake_case
-     */
-    public formatFieldLabel(field: string): string
-    {
-        return field
-            .replace(/_/g, " ")
-            .split(" ")
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" ");
-    }
-
-    /**
-     * Generates complete prompt for choice field
-     */
-    public generatePrompt(field: string, options: ChoiceOption[]): string
-    {
-        const label: string = this.formatFieldLabel(field);
-        const formatted: string = this.formatOptions(options);
-        return `Which ${label} would you prefer?\n${formatted}`;
-    }
-
-
-    /**
-     * Parses user input for a given field with LLM fallback
-     */
-    public async parseUserChoiceWithAI(userInput: string, options: ChoiceOption[], context: string = ""): Promise<ChoiceResult>
-    {
-        return this.parse(userInput, options, context);
-    }
-
-    /**
-     * Generates complete prompt for field
-     */
-    public getPrompt(field: string, customOptions?: ChoiceOption[]): string
-    {
-        const options: ChoiceOption[] = customOptions || this.getOptions(field);
-        return this.generatePrompt(field, options);
-    }
-
-    /**
-     * Retrieves options for field, throws if not found
-     */
-    public getOptions(field: string): ChoiceOption[]
-    {
-        const config: FieldConfig = this.configs.get(field);
-
-        if (!config)
-        {
-            throw new Error(`No options configured for field: ${field}`);
+        const numberResult: ChoiceResult = this.tryNumberMatch(userInput, options);
+        if (numberResult) {
+            logger.info(`[ChoiceParser] ✅ Number match: ${numberResult.selected}`);
+            return numberResult;
         }
 
-        return config.options;
-    }
-
-    public async resolve(field: keyof UserFriendlyParams, value: any): Promise<any>
-    {
-        if (field !== "roof_type") return value;
-
-        const isExplicit = /^(vertical|regular|box|a-frame)$/i.test(String(value));
-        if (isExplicit)
-        {
-            return value;
+        const textResult: ChoiceResult = this.tryTextMatch(userInput, options);
+        if (textResult) {
+            logger.info(`[ChoiceParser] ✅ Text match: ${textResult.selected}`);
+            return textResult;
         }
 
-        const choice: ChoiceResult = await this.handleChoice("roof_type", String(value));
-        return choice.selected;
+        if (this.isIndifferenceExpressed(userInput))
+        {
+            logger.info(`[ChoiceParser] ✅ Indifference detected for: "${userInput}"`);
+            const balancedResult = this.selectBalancedOption(options);
+            logger.info(`[ChoiceParser] Selected balanced option: ${balancedResult.selected}`);
+            return balancedResult;
+        }
+
+        logger.info(`[ChoiceParser] No direct match, trying AI`);
+        try {
+            const aiResult: ChoiceResult = await this.decideWithAI(userInput, options, context);
+            logger.info(`[ChoiceParser] ✅ AI result: ${aiResult.selected}`);
+            return aiResult;
+        } catch (aiError) {
+            logger.error(`[ChoiceParser] AI failed:`, aiError);
+        }
+
+        logger.warn(`[ChoiceParser] All methods failed, using default`);
+        return this.defaultFallback(options);
     }
 
-
     /**
-     * Handles user choice for a specific field
-     */
-    public async handleChoice(field: string, userInput: string, customOptions?: ChoiceOption[]): Promise<ChoiceResult>
-    {
-        logger.info(`[GenericChoiceManager] Handling choice for field: ${field}`);
-        const options: ChoiceOption[] = customOptions || this.getOptions(field);
-        return this.parseUserChoiceWithAI(userInput, options, `User is selecting a value for: ${field}`);
-    }
-
-    /**
-     * Attempts direct number-based selection
+     * STRICT: Attempts direct number-based selection ONLY
      */
     private tryNumberMatch(userInput: string, options: ChoiceOption[]): ChoiceResult | null
     {
-        const numberMatch: RegExpMatchArray = userInput.match(/^\d+$/);
+        const trimmed: string = userInput.trim();
 
+        const numberMatch: RegExpMatchArray = trimmed.match(/^\d+$/);
         if (!numberMatch)
         {
             return null;
         }
 
-        const index: number = parseInt(userInput) - 1;
+        const index: number = parseInt(trimmed) - 1;
 
         if (index < 0 || index >= options.length)
         {
+            logger.warn(`[ChoiceParser] Number ${trimmed} out of range (1-${options.length})`);
             return null;
         }
 
-        logger.info(`[ChoiceParser] Number match: option ${index + 1}`);
+        const selected: ChoiceOption = options[index];
+        logger.info(`[ChoiceParser] Number match: ${trimmed} → option[${index}] = ${selected.value}`);
+
         return {
-            selected: options[index].value,
+            selected: selected.value,
             confidence: "high",
-            reasoning: `User selected option ${index + 1} by number`,
+            reasoning: `User selected option ${trimmed} (${selected.label})`,
         };
     }
 
     /**
-     * Attempts case-insensitive text matching against label/value
+     * STRICT: Attempts text match - EXACT or CONTAINS only
      */
     private tryTextMatch(userInput: string, options: ChoiceOption[]): ChoiceResult | null
     {
         const lowerInput: string = userInput.toLowerCase().trim();
 
-        const directMatch: ChoiceOption = options.find(
-            opt =>
-                opt.value.toLowerCase() === lowerInput ||
-                opt.label.toLowerCase() === lowerInput ||
-                opt.label.toLowerCase().includes(lowerInput)
-        );
-
-        if (!directMatch)
+        for (const option of options)
         {
-            return null;
+            const optionLabel: string = option.label.toLowerCase();
+            const optionValue: string = option.value.toLowerCase();
+
+            if (optionLabel === lowerInput || optionValue === lowerInput)
+            {
+                logger.info(`[ChoiceParser] Exact text match: "${option.label}" (${option.value})`);
+                return {
+                    selected: option.value,
+                    confidence: "high",
+                    reasoning: `User selected "${option.label}"`,
+                };
+            }
+
+            if (optionLabel.includes(lowerInput) || lowerInput.includes(optionLabel))
+            {
+                logger.info(`[ChoiceParser] Contains match: "${option.label}" (${option.value})`);
+                return {
+                    selected: option.value,
+                    confidence: "high",
+                    reasoning: `User indicated "${option.label}"`,
+                };
+            }
         }
 
-        logger.info(`[ChoiceParser] Text match: ${directMatch.value}`);
-        return {
-            selected: directMatch.value,
-            confidence: "high",
-            reasoning: `User explicitly selected "${directMatch.label}"`,
-        };
+        return null;
     }
 
     /**
-     * Checks if the user expressed indifference
+     * STRICT: Check if user expressed indifference
      */
     private isIndifferenceExpressed(userInput: string): boolean
     {
-        return ChoiceServiceImpl.INDIFFERENCE_KEYWORDS.includes(userInput.toLowerCase().trim());
+        const trimmed: string = userInput.trim().toLowerCase();
+        const isIndifferent: boolean = ChoiceServiceImpl.INDIFFERENCE_KEYWORDS.includes(trimmed);
+
+        if (isIndifferent)
+        {
+            logger.info(`[ChoiceParser] Indifference keyword detected: "${userInput}"`);
+        }
+
+        return isIndifferent;
     }
 
     /**
-     * Selects a middle option when user is indifferent
+     * Select balanced option (middle of list) for indifferent users
      */
     private selectBalancedOption(options: ChoiceOption[]): ChoiceResult
     {
+        if (options.length === 0)
+        {
+            logger.error(`[ChoiceParser] No options available for balanced selection!`);
+            throw new Error("No options available");
+        }
+
         const middleIndex: number = Math.floor(options.length / 2);
         const selected: ChoiceOption = options[middleIndex];
 
-        logger.info(`[ChoiceParser] Indifference detected, selecting balanced option`);
+        logger.info(`[ChoiceParser] Balanced selection: index ${middleIndex}/${options.length} = ${selected.value}`);
+
         return {
             selected: selected.value,
             confidence: "high",
@@ -267,19 +198,28 @@ export class ChoiceServiceImpl implements IChoiceService
     }
 
     /**
-     * Fallback result when all parsings fail
+     * Default fallback: Use first option
      */
     private defaultFallback(options: ChoiceOption[]): ChoiceResult
     {
+        if (options.length === 0)
+        {
+            logger.error(`[ChoiceParser] CRITICAL: No options available for default fallback!`);
+            throw new Error("No options available for default fallback");
+        }
+
+        const selected = options[0];
+        logger.warn(`[ChoiceParser] Using default fallback: ${selected.value}`);
+
         return {
-            selected: options[0].value,
+            selected: selected.value,
             confidence: "low",
-            reasoning: "Error during parsing, selected default option",
+            reasoning: "No match found, using first option as default",
         };
     }
 
     /**
-     * Uses LLM to match user input to a best option
+     * Uses LLM only as last resort
      */
     private async decideWithAI(userInput: string, options: ChoiceOption[], context: string): Promise<ChoiceResult>
     {
@@ -289,86 +229,175 @@ export class ChoiceServiceImpl implements IChoiceService
             logger.info("[ChoiceParser] Invoking LLM for decision");
 
             const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            logger.debug(`[ChoiceParser] LLM response: ${response.substring(0, 150)}`);
 
             return this.parseLLMResponse(response, options);
         }
         catch (error)
         {
-            logger.error({ err: error }, "[ChoiceParser] AI decision failed");
-            return this.defaultFallback(options);
+            logger.error("[ChoiceParser] AI decision failed:", error);
+            throw error;
         }
     }
 
-    /**
-     * Constructs LLM prompt with options and context
-     */
     private buildLLMPrompt(userInput: string, options: ChoiceOption[], context: string): string
     {
         const optionsText: string = options
-            .map(
-                (opt, idx) =>
-                    `${idx + 1}. ${opt.label} (${opt.value})${
-                        opt.description ? ` - ${opt.description}` : ""
-                    }`
+            .map((opt, idx) =>
+                `${idx + 1}. ${opt.label} (${opt.value})${opt.description ? ` - ${opt.description}` : ""}`
             )
             .join("\n");
 
-        return `You are a helpful assistant choosing from predefined options.
+        return `You are choosing from predefined options. Return ONLY valid JSON.
 
-                Context: ${context || "No specific context"}
+                Context: ${context}
                 
                 Available options:
                 ${optionsText}
                 
-                User response: "${userInput}"
+                User said: "${userInput}"
                 
-                Based on the user's response:
-                1. If they clearly indicate a preference, choose that option.
-                2. If they say "any", "whatever", "I don't care", pick the MOST BALANCED option.
-                3. If they mention characteristics, match to best option.
-                4. If unclear, pick option #1 as default.
+                RULES:
+                1. Return the value of the selected option
+                2. Confidence: high|medium|low
+                3. No explanations, ONLY JSON
                 
-                Respond ONLY with valid JSON (no markdown):
                 {
-                  "selected": "value_of_chosen_option",
-                  "confidence": "high|medium|low",
-                  "reasoning": "brief explanation"
-        }`;
+                  "selected": "option_value",
+                  "confidence": "high",
+                  "reasoning": "brief reason"
+                }`;
     }
 
-    /**
-     * Extracts and validates JSON from LLM response
-     */
     private parseLLMResponse(response: string, options: ChoiceOption[]): ChoiceResult
     {
-        const cleaned: string = response
-            .replace(/```json\s*/g, "")
-            .replace(/```\s*/g, "")
-            .trim();
+        try {
+            const cleaned: string = response
+                .replace(/```json\s*/g, "")
+                .replace(/```\s*/g, "")
+                .trim();
 
-        const jsonMatch: RegExpMatchArray = cleaned.match(/\{[\s\S]*\}/);
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch)
+            {
+                logger.warn("[ChoiceParser] No JSON in LLM response");
+                throw new Error("No JSON in response");
+            }
 
-        if (!jsonMatch)
+            const result = JSON.parse(jsonMatch[0]) as ChoiceResult;
+
+            const isValid: boolean = options.some(opt => opt.value === result.selected);
+            if (!isValid)
+            {
+                logger.warn(`[ChoiceParser] LLM selected invalid option: ${result.selected}`);
+                const validValues = options.map(o => o.value).join(", ");
+                logger.warn(`[ChoiceParser] Valid options: ${validValues}`);
+                throw new Error(`Invalid option: ${result.selected}`);
+            }
+
+            logger.info(`[ChoiceParser] ✅ LLM validated choice: ${result.selected}`);
+            return result;
+        }
+        catch (parseError)
         {
-            logger.warn("[ChoiceParser] No JSON found in LLM response");
-            throw new Error("Invalid LLM response format");
+            logger.error("[ChoiceParser] Error parsing LLM response:", parseError);
+            throw parseError;
+        }
+    }
+
+    public formatOptions(options: ChoiceOption[], showNumbers = true): string
+    {
+        return options
+            .map((opt, idx) => {
+                const prefix: string = showNumbers ? `${idx + 1}. ` : "• ";
+                const desc: string = opt.description ? ` - ${opt.description}` : "";
+                return `${prefix}${opt.label}${desc}`;
+            })
+            .join("\n");
+    }
+
+    public formatFieldLabel(field: string): string
+    {
+        return field
+            .replace(/_/g, " ")
+            .split(" ")
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" ");
+    }
+
+    public generatePrompt(field: string, options: ChoiceOption[]): string
+    {
+        const label: string = this.formatFieldLabel(field);
+        const formatted: string = this.formatOptions(options);
+        return `Which ${label} would you prefer?\n${formatted}`;
+    }
+
+    public getPrompt(field: string, customOptions?: ChoiceOption[]): string
+    {
+        const options: ChoiceOption[] = customOptions || this.getOptions(field);
+        return this.generatePrompt(field, options);
+    }
+
+    public getOptions(field: string): ChoiceOption[]
+    {
+        const config: FieldConfig = this.configs.get(field);
+        if (!config)
+        {
+            throw new Error(`No options configured for field: ${field}`);
         }
 
-        const result = JSON.parse(jsonMatch[0]) as ChoiceResult;
+        logger.error(`[DEBUG] getOptions("${field}") returning:`);
+        config.options.forEach((opt, idx) => {
+            logger.error(`  ${idx}. value="${opt.value}" label="${opt.label}"`);
+        });
 
-        if (!options.some(opt => opt.value === result.selected))
+        return config.options;
+    }
+
+    public async parseUserChoiceWithAI(userInput: string, options: ChoiceOption[], context: string = ""): Promise<ChoiceResult>
+    {
+        return this.parse(userInput, options, context);
+    }
+
+    public async handleChoice(field: string, userInput: string, customOptions?: ChoiceOption[]): Promise<ChoiceResult>
+    {
+        logger.info(`[ChoiceService] Handling choice for ${field}: "${userInput}"`);
+        const options: ChoiceOption[] = customOptions || this.getOptions(field);
+        return this.parse(userInput, options, `User is selecting a value for: ${field}`);
+    }
+
+    public async resolve(field: keyof UserFriendlyParams, value: any): Promise<any>
+    {
+        logger.info(`[ChoiceService] Resolving ${field} = ${value}`);
+
+        if (/^(vertical|regular|box|a-frame)$/i.test(String(value)))
         {
-            logger.warn(`[ChoiceParser] LLM selected invalid option: ${result.selected}`);
-            throw new Error("LLM selected invalid option");
+            logger.info(`[ChoiceService] Value is explicit, returning: ${value}`);
+            return value;
         }
 
-        logger.info(`[ChoiceParser] Valid LLM choice: ${result.selected}`);
-        return result;
+        if (field !== "roof_type")
+        {
+            return value;
+        }
+
+        logger.info(`[ChoiceService] Resolving roof_type choice`);
+
+        const options: ChoiceOption[] = this.getOptions("roof_type");
+        logger.error(`[DEBUG] resolve() - options before handleChoice:`);
+        options.forEach((opt, idx) => {
+            logger.error(`  ${idx}. ${opt.value}`);
+        });
+
+        const result: ChoiceResult = await this.handleChoice("roof_type", String(value));
+        logger.info(`[ChoiceService] Resolved to: ${result.selected}`);
+
+        return result.selected;
     }
 }
 
 /**
- * Function to enforce the Singleton pattern.
+ * Enforce singleton pattern
  */
 function Enforce(): void
 {

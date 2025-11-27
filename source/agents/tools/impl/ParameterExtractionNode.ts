@@ -17,11 +17,14 @@ import {IDimensionManager, IParameterExtractor} from "@agents/tools/impl/io/IPar
 import {IPromptBuilder} from "@agents/tools/impl/io/IVisualizationNode";
 import {IParameterExtractionStrategy} from "@agents/tools/impl/io/IParameterExtractionStrategy";
 import {ParameterExtractionStrategy} from "@agents/tools/impl/ParameterExtractionStrategy";
+import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
+import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 class ParameterExtractor implements IParameterExtractor
 {
     private promptBuilder: IPromptBuilder;
+    private choiceService: IChoiceService;
     private parameterExtractionStrategy: IParameterExtractionStrategy;
     private dimensionManager: IDimensionManager;
     private paramExtractor: PriceParamsExtractorTool;
@@ -30,10 +33,10 @@ class ParameterExtractor implements IParameterExtractor
     {
         this.parameterExtractionStrategy = ParameterExtractionStrategy.getInstance();
         this.promptBuilder = PromptBuilder.getInstance();
+        this.choiceService = ChoiceServiceImpl.getInstance();
         this.dimensionManager = DimensionManager.getInstance();
         this.paramExtractor = PriceParamsExtractorTool.getInstance();
     }
-
 
     public async extract(state: LeadAgentStateType): Promise<ExtractionResult>
     {
@@ -43,10 +46,99 @@ class ParameterExtractor implements IParameterExtractor
         const userInput = this.extractContextFromState(state);
 
         logger.info(`[ParameterExtractor] User input: "${userInput}"`);
+        logger.info(`[ParameterExtractor] Current field: ${state.currentField}`);
 
         try
         {
-            const context: ExtractionContext = {userInput, currentField: state.currentField, currentParams,};
+            // ============================================================
+            // CRITICAL FIX: If in field-specific mode, validate the input first
+            // ============================================================
+            if (state.currentField && typeof state.currentField === 'string') {
+                logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
+
+                // Declare fieldKey at the top of this block so it's in scope for all code below
+                const fieldKey = state.currentField as keyof UserFriendlyParams;
+
+                // CRITICAL: For choice fields, don't validate - let choice service handle it
+                const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
+
+                if (isChoiceField) {
+                    logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), passing to choice service`);
+
+                    try {
+                        // Let choice service handle the parsing
+                        const result = await this.choiceService.handleChoice(
+                            state.currentField,
+                            userInput
+                        );
+
+                        if (!result || result.confidence === "low") {
+                            return {
+                                validationError: `Could not understand "${userInput}" for ${state.currentField}`,
+                                response: `❌ Invalid ${state.currentField}. Please try again.`,
+                                nextStep: "ask_for_field",
+                                currentField: state.currentField,
+                                userFriendlyParams: currentParams,
+                            };
+                        }
+
+                        // Use the resolved value directly
+                        (currentParams as Record<string, any>)[fieldKey] = result.selected;
+                        logger.info(`[ParameterExtractor] Choice field resolved: ${state.currentField} = ${result.selected}`);
+
+                        // CRITICAL FIX: Clear the current field and return directly to check_missing_fields
+                        // This prevents the value from being re-processed by the update handler
+                        return {
+                            userFriendlyParams: currentParams,
+                            currentField: null,
+                            nextStep: "check_missing_fields",
+                        };
+                    } catch (error) {
+                        logger.error(`[ParameterExtractor] Error resolving choice:`, error);
+                        return {
+                            validationError: `Error processing ${state.currentField}`,
+                            response: `❌ Error processing your selection. Please try again.`,
+                            nextStep: "ask_for_field",
+                            currentField: state.currentField,
+                            userFriendlyParams: currentParams,
+                        };
+                    }
+                }
+
+                // For non-choice fields, validate strictly
+                const validation = this.validateFieldInput(userInput, state.currentField);
+
+                if (!validation.isValid) {
+                    logger.warn(`[ParameterExtractor] Invalid input for ${state.currentField}: "${userInput}"`);
+                    return {
+                        validationError: validation.error,
+                        response: `❌ ${validation.error}\n\nPlease provide a valid ${state.currentField}.`,
+                        nextStep: "ask_for_field",
+                        currentField: state.currentField as keyof UserFriendlyParams,
+                        userFriendlyParams: currentParams,
+                    };
+                }
+
+                // Valid input - apply it directly without LLM inference
+                const parsedValue = this.parseFieldValue(userInput, state.currentField);
+                (currentParams as Record<string, any>)[fieldKey] = parsedValue;
+
+                logger.info(`[ParameterExtractor] Field accepted: ${state.currentField} = ${parsedValue}`);
+
+                return {
+                    userFriendlyParams: currentParams,
+                    nextStep: "check_missing_fields",
+                };
+            }
+
+            // ============================================================
+            // NOT in field mode - use full extraction pipeline
+            // ============================================================
+            const context: ExtractionContext = {
+                userInput,
+                currentField: state.currentField,
+                currentParams,
+            };
 
             const rawParams: string = await this.extractWithUnifiedPrompt(context);
             const extractedParams: Partial<UserFriendlyParams> = this.paramExtractor.safeExtractUserFriendlyParams(rawParams);
@@ -69,7 +161,10 @@ class ParameterExtractor implements IParameterExtractor
                 };
             }
 
-            return {userFriendlyParams: mergedParams, nextStep: "check_missing_fields",};
+            return {
+                userFriendlyParams: mergedParams,
+                nextStep: "check_missing_fields",
+            };
         }
         catch (error)
         {
@@ -113,6 +208,135 @@ class ParameterExtractor implements IParameterExtractor
                 currentField: "width",
                 userFriendlyParams: currentParams,
             };
+        }
+    }
+
+    private validateFieldInput(input: string, field: string): { isValid: boolean; error?: string } {
+        const trimmed = input.trim();
+
+        // Empty input
+        if (!trimmed || trimmed.length === 0) {
+            return { isValid: false, error: `Cannot be empty` };
+        }
+
+        // Check for indifference keywords (any, idk, etc.) - these are valid
+        const indifferenceKeywords = ["any", "whatever", "idk", "i don't know", "doesn't matter", "don't care"];
+        if (indifferenceKeywords.includes(trimmed.toLowerCase())) {
+            return { isValid: true }; // Let choice service handle the default
+        }
+
+        switch (field) {
+            case "width":
+            case "length":
+            case "height":
+            case "utility_length":
+                return this.validateNumericInput(trimmed, field);
+
+            case "gauge":
+                // For gauge, allow "any" OR valid gauge numbers
+                if (trimmed.match(/^\d+$/)) {
+                    const value = parseInt(trimmed);
+                    if ([14, 16, 18, 20].includes(value)) {
+                        return { isValid: true };
+                    }
+                    return { isValid: false, error: `Gauge must be 14, 16, 18, or 20` };
+                }
+                // If not a number, it might be "any" which is already handled above
+                return { isValid: false, error: `Gauge must be 14, 16, 18, or 20, or say "any" for default` };
+
+            case "state_name":
+                return this.validateStateInput(trimmed);
+
+            case "roof_type":
+                return this.validateRoofTypeInput(trimmed);
+
+            case "building_type":
+                return this.validateBuildingTypeInput(trimmed);
+
+            default:
+                return { isValid: true };
+        }
+    }
+
+    private validateNumericInput(input: string, field: string): { isValid: boolean; error?: string } {
+        // Only accept numeric inputs for dimensions
+        const numMatch = input.match(/^\d+(?:\.\d+)?$/);
+
+        if (!numMatch) {
+            return { isValid: false, error: `${field} must be a number (e.g., 20, 30.5)` };
+        }
+
+        const value = parseFloat(input);
+
+        if (value <= 0) {
+            return { isValid: false, error: `${field} must be greater than 0` };
+        }
+
+        if (value > 500) {
+            return { isValid: false, error: `${field} seems too large (max 500 feet)` };
+        }
+
+        return { isValid: true };
+    }
+
+    private validateStateInput(input: string): { isValid: boolean; error?: string } {
+        // State should be alphabetic (allow spaces and hyphens)
+        const stateMatch = input.match(/^[a-zA-Z\s\-]{2,50}$/);
+
+        if (!stateMatch) {
+            return { isValid: false, error: `State name should only contain letters, spaces, or hyphens` };
+        }
+
+        return { isValid: true };
+    }
+
+    private validateRoofTypeInput(input: string): { isValid: boolean; error?: string } {
+        const validRoofs = ["vertical", "regular", "box", "a-frame"];
+        const normalized = input.toLowerCase().trim();
+
+        if (!validRoofs.includes(normalized)) {
+            return {
+                isValid: false,
+                error: `Roof type must be one of: ${validRoofs.join(", ")}`
+            };
+        }
+
+        return { isValid: true };
+    }
+
+    private validateBuildingTypeInput(input: string): { isValid: boolean; error?: string } {
+        const validTypes = ["garage", "shed", "barn"];
+        const normalized = input.toLowerCase().trim();
+
+        if (!validTypes.includes(normalized)) {
+            return {
+                isValid: false,
+                error: `Building type must be one of: ${validTypes.join(", ")}`
+            };
+        }
+
+        return { isValid: true };
+    }
+
+    // ============================================================
+    // NEW: Parse field value (convert to correct type)
+    // ============================================================
+    private parseFieldValue(input: string, field: string): any {
+        switch (field) {
+            case "width":
+            case "length":
+            case "height":
+            case "gauge":
+            case "utility_length":
+                return parseFloat(input);
+
+            case "state_name":
+            case "building_type":
+            case "roof_type":
+                return input.toLowerCase().trim();
+
+            default:
+                return input.trim();
         }
     }
 

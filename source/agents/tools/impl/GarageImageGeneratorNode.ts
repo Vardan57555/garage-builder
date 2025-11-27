@@ -31,12 +31,6 @@ export class GarageImageGenerator implements IGarageImageGenerator
         this.promptBuilder = PromptBuilder.getInstance();
     }
 
-    /**
-     * Gets the singleton instance of StateReset.
-     *
-     * @returns The singleton instance of StateReset.
-     */
-
     public static getInstance(comfyuiUrl: string = "http://localhost:8188"): IGarageImageGenerator
     {
         if(!GarageImageGenerator.instance)
@@ -47,20 +41,61 @@ export class GarageImageGenerator implements IGarageImageGenerator
         return GarageImageGenerator.instance;
     }
 
-    /**
-     * Generate garage image with retry logic
-     */
+    // ✅ CRITICAL FIX: Validate params before using them
+    private validateParams(params: UserFriendlyParams): { valid: boolean; error?: string } {
+        const required = ['width', 'length', 'height', 'color'];
+        const missing = required.filter(field => !params[field as keyof UserFriendlyParams]);
+
+        if (missing.length > 0) {
+            return {
+                valid: false,
+                error: `Missing parameters: ${missing.join(', ')}`
+            };
+        }
+
+        return { valid: true };
+    }
+
     public async generate(params: UserFriendlyParams, retries: number = this.maxRetries): Promise<GenerationResult>
     {
+        // ✅ CRITICAL FIX: Validate all parameters exist
+        const validation = this.validateParams(params);
+        if (!validation.valid) {
+            logger.error(`[GarageImageGenerator] Validation failed: ${validation.error}`);
+            return {
+                success: false,
+                error: validation.error
+            };
+        }
+
+        logger.info(`[GarageImageGenerator] Generating with params:`, {
+            width: params.width,
+            length: params.length,
+            height: params.height,
+            roof_type: params.roof_type,
+            color: params.color,
+            gauge: params.gauge,
+        });
+
         for (let attempt = 1; attempt <= retries; attempt++)
         {
             try
             {
                 logger.info(`[GarageImageGenerator] Attempt ${attempt}/${retries}...`);
 
+                // ✅ CRITICAL FIX: Pass complete params to prompt builder
                 const prompt: string = this.promptBuilder.buildGaragePrompt(params);
+
+                logger.debug(`[GarageImageGenerator] Generated prompt length: ${prompt.length} chars`);
+                logger.debug(`[GarageImageGenerator] Prompt preview: ${prompt.substring(0, 200)}...`);
+
                 const seed: number = Math.floor(Math.random() * (2 ** 32 - 1));
-                const workflow: ComfyUIWorkflow = this.workflowBuilder.buildGarageWorkflow(prompt, 1024, 768, seed);
+                const workflow: ComfyUIWorkflow = this.workflowBuilder.buildGarageWorkflow(
+                    prompt,
+                    1024,
+                    768,
+                    seed
+                );
 
                 const promptId: string = await this.client.queuePrompt(workflow);
                 const filename: string = await this.client.pollForCompletion(promptId);
@@ -93,9 +128,6 @@ export class GarageImageGenerator implements IGarageImageGenerator
         return { success: false, error: `Generation failed after ${retries} attempts` };
     }
 
-    /**
-     * Check ComfyUI health
-     */
     public async checkHealth(): Promise<HealthCheckResult>
     {
         return this.client.checkHealth();

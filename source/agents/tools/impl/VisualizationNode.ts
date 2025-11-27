@@ -26,9 +26,6 @@ class VisualizationOrchestrator
         this.calculator = PriceCalculatorService.getInstance();
     }
 
-    /**
-     * Orchestrate visualization and quote generation
-     */
     async generateVisualization(state): Promise<VisualizationResponse>
     {
         logger.info(`[VisualizationOrchestrator] Session ${state.sessionId} - Starting visualization`);
@@ -39,9 +36,37 @@ class VisualizationOrchestrator
             const selectedAddons = state.selectedAddons || [];
             const basePrice = state.basePrice || 0;
 
-            if (!params.width || !params.length || !params.height) {
-                logger.error("[VisualizationOrchestrator] Missing required dimensions");
-                throw new Error("Missing required dimensions");
+            // ✅ CRITICAL FIX: Log all parameters for debugging
+            logger.info(`[VisualizationOrchestrator] Received params:`, {
+                width: params?.width,
+                length: params?.length,
+                height: params?.height,
+                roof_type: params?.roof_type,
+                color: params?.color || state.color,
+                gauge: params?.gauge,
+                building_type: params?.building_type,
+                state_name: params?.state_name,
+                basePrice,
+                addonsCount: selectedAddons.length,
+            });
+
+            // ✅ CRITICAL FIX: Merge state.color with params.color
+            const finalColor = params?.color || state.color || "White";
+            const mergedParams: UserFriendlyParams = {
+                ...params,
+                color: finalColor,
+            };
+
+            // ✅ CRITICAL FIX: Validate all required dimensions exist
+            if (!mergedParams.width || !mergedParams.length || !mergedParams.height) {
+                logger.error("[VisualizationOrchestrator] Missing required dimensions:", {
+                    width: mergedParams.width,
+                    length: mergedParams.length,
+                    height: mergedParams.height,
+                });
+                throw new Error(
+                    `Missing dimensions - W: ${mergedParams.width}, L: ${mergedParams.length}, H: ${mergedParams.height}`
+                );
             }
 
             const health: HealthCheckResult = await this.generator.checkHealth();
@@ -53,7 +78,9 @@ class VisualizationOrchestrator
             let imageUrl: string | null = null;
             let base64Image: string | null = null;
 
-            const result: GenerationResult = await this.generator.generate(params, 3);
+            // ✅ CRITICAL FIX: Pass complete merged params to generator
+            const result: GenerationResult = await this.generator.generate(mergedParams, 3);
+
             if (result.success && result.base64)
             {
                 logger.info("[VisualizationOrchestrator] ✅ Image generated successfully");
@@ -67,13 +94,13 @@ class VisualizationOrchestrator
 
             const breakdown: QuoteBreakdown = this.calculator.calculateBreakdown(
                 basePrice,
-                params.width,
-                params.length,
+                mergedParams.width,
+                mergedParams.length,
                 selectedAddons
             );
 
             const response: string = QuoteResponseFormatter.formatFinalQuote(
-                params,
+                mergedParams,
                 breakdown,
                 selectedAddons,
                 base64Image
@@ -91,7 +118,7 @@ class VisualizationOrchestrator
         {
             logger.error("[VisualizationOrchestrator] Error:", error);
             return {
-                response: `FINAL QUOTE\n\nFinal Price: $${(state.finalPrice || state.basePrice || 0).toFixed(2)}`,
+                response: `FINAL QUOTE\n\nFinal Price: $${(state.finalPrice || state.basePrice || 0).toFixed(2)}\n\nError generating visualization: ${error instanceof Error ? error.message : 'Unknown error'}`,
                 finalPrice: state.finalPrice || state.basePrice || 0,
                 nextStep: "__end__",
             };

@@ -46,7 +46,13 @@ export class AskForFieldNode implements IAskForFieldNode
                 template: `{params}\n\n🗺️ Which **state**?\n(e.g., Texas, California)`,
             },
             roof_type: {
-                template: this.choiceService.getPrompt("roof_type"),
+                template: `{params}\n\n🏠 Which **Roof Type** would you prefer?
+
+1. Vertical - Best weather protection
+2. Regular - Standard horizontal panels
+3. Box - Economy option
+
+Examples: "1", "vertical", "box"`,
             },
             gauge: {
                 template: `{params}\n\n📊 What **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`,

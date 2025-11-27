@@ -485,43 +485,40 @@ export class Constants
     ];
 
     public static readonly DEFAULT_FIELDS: FieldConfig[] = [
-    {
-        name: "roof_type",
-        options: [
-            {
-                value: "vertical",
-                label: "Vertical",
-                description: "Best weather protection",
-            },
-            {
-                value: "regular",
-                label: "Regular",
-                description: "Standard horizontal panels",
-            },
-            { value: "box", label: "Box", description: "Economy option" },
-        ],
-    },
-    {
-        name: "building_type",
-        options: [
-            { value: "garage", label: "Garage", description: "Standard garage" },
-            { value: "shed", label: "Shed", description: "Storage shed" },
-            { value: "barn", label: "Barn", description: "Agricultural barn" },
-        ],
-    },
-    {
-        name: "garage_type",
-        options: [
-            {
-                value: "1-car",
-                label: "1-car",
-                description: "Single car garage",
-            },
-            { value: "2-car", label: "2-car", description: "Two car garage" },
-            { value: "3-car", label: "3-car", description: "Three car garage" },
-        ],
-    },
-];
+        {
+            name: "roof_type",
+            options: [
+                { value: "vertical", label: "Vertical", description: "Best weather protection" },
+                { value: "regular", label: "Regular", description: "Standard horizontal panels" },
+                { value: "box", label: "Box", description: "Economy option" },
+            ],
+        },
+        {
+            name: "building_type",
+            options: [
+                { value: "garage", label: "Garage", description: "Standard garage" },
+                { value: "shed", label: "Shed", description: "Storage shed" },
+                { value: "barn", label: "Barn", description: "Agricultural barn" },
+            ],
+        },
+        {
+            name: "gauge",
+            options: [
+                { value: "14", label: "14GA", description: "Premium thickness" },
+                { value: "16", label: "16GA", description: "Standard (recommended)" },
+                { value: "18", label: "18GA", description: "Light duty" },
+                { value: "20", label: "20GA", description: "Economy" },
+            ],
+        },
+        {
+            name: "garage_type",
+            options: [
+                { value: "1-car", label: "1-car", description: "Single car garage" },
+                { value: "2-car", label: "2-car", description: "Two car garage" },
+                { value: "3-car", label: "3-car", description: "Three car garage" },
+            ],
+        },
+    ];
 
     /**
      * Pattern library for building type detection

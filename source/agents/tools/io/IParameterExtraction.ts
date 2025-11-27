@@ -23,4 +23,5 @@ export interface ExtractionResult {
     validationError?: string;
     response?: string;
     currentField?: string;
+    pendingUpdates?: any;
 }

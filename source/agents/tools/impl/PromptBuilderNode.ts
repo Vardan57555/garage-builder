@@ -2,6 +2,9 @@ import {InstantiationError} from "@errors/InstantiationError";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {IPromptBuilder} from "@agents/tools/impl/io/IVisualizationNode";
 import {DimensionResult, ExtractionContext} from "@agents/tools/io/IParameterExtraction";
+import pino from "pino";
+import {createLogger} from "@utils/logger/Log";
+const logger: pino.Logger = createLogger(module);
 
 /**
  * Builds detailed garage prompts from parameters
@@ -91,38 +94,48 @@ export class PromptBuilder implements IPromptBuilder
      */
     public buildGaragePrompt(params: UserFriendlyParams): string
     {
+        // ✅ CRITICAL FIX: Use all params with proper fallbacks
         const width: number = params.width || 20;
         const length: number = params.length || 20;
         const height: number = params.height || 10;
         const roofType: string = params.roof_type || "gable";
         const color: string = params.color || "gray";
+        const gauge: string = params.gauge ? `${params.gauge}GA` : "16GA";
+
+        logger.info(`[PromptBuilder] Building garage prompt with:`, {
+            width, length, height, roofType, color, gauge
+        });
 
         const colorDesc: string = this.getColorDescription(color);
 
         return `Professional photorealistic exterior architectural visualization of a metal garage building.
 
-                Dimensions: ${width} feet wide by ${length} feet long by ${height} feet tall.
-                Roof style: ${roofType} roof with clean modern lines.
-                
-                COLOR: ${colorDesc} metal siding and roof panels - this is the PRIMARY color of the entire building.
-                
-                Features:
-                - Metal roll-up garage doors with windows and modern handles
-                - Professional ${colorDesc} corrugated metal panels covering entire building
-                - ${colorDesc} metal siding on all walls
-                - ${colorDesc} metal roof panels
-                - Concrete foundation pad
-                - Suburban residential setting with landscaping
-                - Green lawn and trees in background
-                
-                Lighting: Golden hour lighting, warm and professional, clear blue sky with subtle clouds.
-                Perspective: 3/4 front corner architectural view showing the ${colorDesc} metal exterior
-                Quality: Professional real estate photography, 8k, sharp focus, detailed textures, accurate ${colorDesc} color rendering
-                Realistic materials, accurate proportions, professional rendering.
-                
-                IMPORTANT: The building must be ${colorDesc} - make this color prominent and realistic.
-                
-                Exclude: people, text, watermarks, signs, vehicles`;
+Dimensions: ${width} feet wide by ${length} feet long by ${height} feet tall.
+Roof style: ${roofType} roof with clean modern lines.
+Metal gauge: ${gauge} - professional commercial grade materials.
+
+COLOR: ${colorDesc} metal siding and roof panels - this is the PRIMARY color of the entire building.
+
+Features:
+- Metal roll-up garage doors with windows and modern handles
+- Professional ${colorDesc} corrugated metal panels covering entire building
+- ${colorDesc} metal siding on all walls
+- ${colorDesc} metal roof panels
+- Concrete foundation pad
+- Suburban residential setting with landscaping
+- Green lawn and trees in background
+
+Lighting: Golden hour lighting, warm and professional, clear blue sky with subtle clouds.
+Perspective: 3/4 front corner architectural view showing the ${colorDesc} metal exterior
+Quality: Professional real estate photography, 8k, sharp focus, detailed textures, accurate ${colorDesc} color rendering
+Realistic materials, accurate proportions, professional rendering.
+
+IMPORTANT: The building must be ${colorDesc} - make this color prominent and realistic.
+The ${width}x${length}x${height} dimensions should be proportional and accurate.
+The ${roofType} roof style should be clearly visible and realistic.
+Use ${gauge} metal gauge appearance - professional and durable looking.
+
+Exclude: people, text, watermarks, signs, vehicles`;
     }
 
     public buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string
