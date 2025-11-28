@@ -4,6 +4,8 @@ import { LeadAgentStateType } from "@agents/LeadAgentState";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
+import {InstantiationError} from "@errors/InstantiationError";
+
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -11,6 +13,24 @@ const logger: pino.Logger = createLogger(module);
  */
 class FieldValidationOrchestrator implements IFieldValidationOrchestrator
 {
+    private static instance: FieldValidationOrchestrator;
+
+    constructor(enforce: () => void) {
+        if (enforce !== Enforce) {
+            throw new InstantiationError(
+                InstantiationError.NOT_INSTANTIABLE,
+                "Use FieldValidationOrchestrator.getInstance() instead of new."
+            );
+        }
+    }
+
+    public static getInstance(): FieldValidationOrchestrator {
+        if (!FieldValidationOrchestrator.instance) {
+            FieldValidationOrchestrator.instance = new FieldValidationOrchestrator(Enforce);
+        }
+        return FieldValidationOrchestrator.instance;
+    }
+
     /**
      * Validate state and return the appropriate response
      */
@@ -40,10 +60,12 @@ class FieldValidationOrchestrator implements IFieldValidationOrchestrator
             switch (nextStep)
             {
                 case ValidationState.ALL_COMPLETE:
+                    logger.info(`[FieldValidationOrchestrator] ✅ All fields complete`);
                     return FieldValidationOrchestrator.buildCompletionResponse(state.userFriendlyParams);
 
                 case ValidationState.MISSING_FIELDS:
                     const currentField: string = missingFields[0];
+                    logger.info(`[FieldValidationOrchestrator] Missing field: ${currentField}`);
                     return FieldValidationOrchestrator.buildMissingFieldResponse(
                         state.userFriendlyParams,
                         currentField
@@ -69,7 +91,6 @@ class FieldValidationOrchestrator implements IFieldValidationOrchestrator
     /**
      * Determine the next validation step
      */
-
     public static determineNextStep(hasPendingUpdates: boolean, missingFieldsCount: number): ValidationState
     {
         if (hasPendingUpdates)
@@ -80,7 +101,7 @@ class FieldValidationOrchestrator implements IFieldValidationOrchestrator
 
         if (missingFieldsCount === 0)
         {
-            logger.debug(`[ValidationRouter] All fields complete, routing to pricing`);
+            logger.debug(`[ValidationRouter] All fields complete, routing to color selection`);
             return ValidationState.ALL_COMPLETE;
         }
 
@@ -161,9 +182,39 @@ class FieldValidationOrchestrator implements IFieldValidationOrchestrator
 
 /**
  * NODE: Validate user parameters and determine next field to request
+ * ✅ Returns ValidationResult which graph uses to determine nextStep
  */
 export const checkMissingFieldsNode = async (state: LeadAgentStateType): Promise<ValidationResult> =>
 {
-    const orchestrator = new FieldValidationOrchestrator();
-    return orchestrator.validate(state);
+    try {
+        logger.info(`[checkMissingFieldsNode] Session ${state.sessionId} - Starting validation`);
+
+        const orchestrator = FieldValidationOrchestrator.getInstance();
+        const result = await orchestrator.validate(state);  // ✅ ADD await HERE
+
+        logger.debug(`[checkMissingFieldsNode] Result:`, {
+            nextStep: result.nextStep,
+            currentField: result.currentField,
+        });
+
+        return result;
+    } catch (error) {
+        logger.error(`[checkMissingFieldsNode] Error:`, error);
+
+        return {
+            userFriendlyParams: state.userFriendlyParams,
+            currentField: null,
+            nextStep: "__end__",
+        };
+    }
 };
+
+/**
+ * Function to enforce Singleton pattern
+ */
+function Enforce(): void {}
+
+/**
+ * Export for use in graph
+ */
+export { FieldValidationOrchestrator, ValidationResult, ValidationState };

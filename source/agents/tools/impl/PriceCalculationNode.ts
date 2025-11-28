@@ -293,18 +293,18 @@ export class PriceCalculatorService implements IPriceCalculatorService
 
         return `${currentParams}
 
-                📊 **PRICE BREAKDOWN:**
-                
-                • Base Building Kit: $${breakdown.kitPrice.toFixed(2)}${colorLine}
-                • Installation Labor (50% of kit): $${breakdown.laborCost.toFixed(2)}
-                • Concrete Foundation (${sqft} sq ft @ $${Constants.PRICING_CONSTANTS.FOUNDATION_COST_PER_SQFT.toFixed(2)}/sq ft): $${breakdown.foundationCost.toFixed(2)}
-                • Delivery & Site Preparation: $${breakdown.deliveryCost.toFixed(2)}
-                • Contingency & Misc (${(Constants.PRICING_CONSTANTS.CONTINGENCY_RATE * 100).toFixed(0)}%): $${breakdown.contingency.toFixed(2)}
-                
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                💰 **TOTAL ESTIMATED PRICE: $${breakdown.finalTotal.toFixed(2)}**
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            `;
+📊 **PRICE BREAKDOWN:**
+
+• Base Building Kit: $${breakdown.kitPrice.toFixed(2)}${colorLine}
+• Installation Labor (50% of kit): $${breakdown.laborCost.toFixed(2)}
+• Concrete Foundation (${sqft} sq ft @ $${Constants.PRICING_CONSTANTS.FOUNDATION_COST_PER_SQFT.toFixed(2)}/sq ft): $${breakdown.foundationCost.toFixed(2)}
+• Delivery & Site Preparation: $${breakdown.deliveryCost.toFixed(2)}
+• Contingency & Misc (${(Constants.PRICING_CONSTANTS.CONTINGENCY_RATE * 100).toFixed(0)}%): $${breakdown.contingency.toFixed(2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 **TOTAL ESTIMATED PRICE: $${breakdown.finalTotal.toFixed(2)}**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
     }
 
     private createErrorResponse(message: string): PriceCalculationResult
@@ -336,23 +336,45 @@ export class PriceCalculatorService implements IPriceCalculatorService
         return this.createErrorResponse(message);
     }
 
-    private createSuccessResponse(breakdown: PriceBreakdown, params: Partial<UserFriendlyParams>, rawPricingData: any, colorName: string | null | undefined): PriceCalculationResult
-    {
+    private createSuccessResponse(
+        breakdown: PriceBreakdown,
+        params: Partial<UserFriendlyParams>,
+        rawPricingData: any,
+        colorName: string | null | undefined
+    ): PriceCalculationResult {
         const formattedPrice: string = this.formatCompletePrice(breakdown, params, colorName ?? null);
 
-        return {
+        logger.info(`[createSuccessResponse] ✅ Creating success response`, {
+            priceCalculated: true,
+            basePrice: breakdown.kitPrice,
+            finalPrice: breakdown.finalTotal,
+            colorCost: breakdown.colorCost,
+        });
+
+        // ✅ CRITICAL: Return object with all required fields
+        const result: PriceCalculationResult = {
             response: formattedPrice,
             userFriendlyParams: params,
             pricingData: rawPricingData,
             basePrice: breakdown.kitPrice,
             priceCalculated: true,
             currentField: null,
-            nextStep: "show_addons",
+            nextStep: "show_addons",  // ✅ CRITICAL: Set this so graph knows to go to show_addons
             selectedAddons: [],
             finalPrice: breakdown.finalTotal,
             color: colorName ?? null,
             colorCost: breakdown.colorCost,
         };
+
+        logger.info(`[createSuccessResponse] Response structure:`, {
+            hasResponse: !!result.response,
+            priceCalculated: result.priceCalculated,
+            nextStep: result.nextStep,
+            basePrice: result.basePrice,
+            finalPrice: result.finalPrice,
+        });
+
+        return result;
     }
 }
 
@@ -361,7 +383,38 @@ function Enforce(): void {}
 /**
  * Legacy node handler for backward compatibility
  */
-export const calculatePriceNode = async (state: LeadAgentStateType): Promise<PriceCalculationResult> =>
-{
-    return PriceCalculatorService.getInstance().calculatePrice(state);
+/**
+ * Legacy node handler for backward compatibility
+ * ✅ CRITICAL: This must set nextStep to transition to show_addons
+ */
+export const calculatePriceNode = async (state: LeadAgentStateType): Promise<PriceCalculationResult> => {
+    logger.info(`[calculatePriceNode] Session ${state.sessionId} - Starting price calculation`);
+
+    try {
+        const result = await PriceCalculatorService.getInstance().calculatePrice(state);
+
+        // ✅ CRITICAL FIX: Always set nextStep to show_addons after successful price calculation
+        if (result.priceCalculated && result.response) {
+            logger.info(`[calculatePriceNode] ✅ Price calculated successfully, transitioning to show_addons`);
+
+            return {
+                ...result,
+                nextStep: "show_addons",  // ✅ THIS IS CRITICAL
+            };
+        }
+
+        // If price calculation failed, end
+        logger.warn(`[calculatePriceNode] Price calculation failed`);
+        return {
+            ...result,
+            nextStep: "__end__",
+        };
+    } catch (error) {
+        logger.error(`[calculatePriceNode] Unexpected error:`, error);
+        return {
+            response: "❌ Error calculating price. Please try again.",
+            nextStep: "__end__",
+            priceCalculated: false,
+        };
+    }
 };

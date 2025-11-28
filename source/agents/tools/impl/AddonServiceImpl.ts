@@ -187,6 +187,19 @@ export class AddonServiceImpl implements AddonService
                 return this.createResponse("Please specify which addons you'd like.", "__end__", [], state.basePrice);
             }
 
+            // ✅ NEW: Check for skip intent first
+            if (this.shouldSkipAddons(userInput!))
+            {
+                logger.info(`[AddonsProcessor] User declined addons`);
+                return this.createResponse(
+                    undefined,
+                    "generate_visualization", // ✅ Go directly to visualization
+                    [],
+                    state.basePrice,
+                    true
+                );
+            }
+
             if (AddonSelectionValidator.isUserDecline(userInput!))
             {
                 logger.info(`[AddonsProcessor] User declined addons`);
@@ -206,7 +219,7 @@ export class AddonServiceImpl implements AddonService
             {
                 logger.warn(`[AddonsProcessor] No addons matched user input`);
                 return this.createResponse(
-                    `I didn't catch that. Try:\n• "1" or "1, 2" to select by number\n• "2 windows" to specify quantity\n• "no" to skip`,
+                    `I didn't catch that. Try:\n• "1" or "1, 2" to select by number\n• "2 windows" to specify quantity\n• "no" or "skip" to skip`,
                     "__end__",
                     [],
                     state.basePrice
@@ -506,6 +519,30 @@ export class AddonServiceImpl implements AddonService
         return Object.values(this.addonTypeMatchers).some(matcher =>
             matcher(normalizedKeyword, normalizedType, normalizedLabel)
         );
+    }
+
+    private shouldSkipAddons(userInput: string): boolean
+    {
+        const skipKeywords = [
+            "any",
+            "skip",
+            "no",
+            "none",
+            "without",
+            "don't need",
+            "no addons",
+            "no add-ons",
+            "nope",
+            "nah",
+            "not needed",
+            "nothing",
+        ];
+
+        const trimmed = userInput.toLowerCase().trim();
+
+        return skipKeywords.some(keyword => {
+            return trimmed === keyword || trimmed.startsWith(keyword);
+        });
     }
 
     /**

@@ -12,13 +12,6 @@ export class DimensionManager implements IDimensionManager
 {
     private static instance: IDimensionManager;
 
-    /**
-     * Private constructor to enforce a Singleton pattern.
-     *
-     * @param enforce - Function to enforce a Singleton pattern.
-     * @throws Error if instantiation is attempted directly.
-     */
-
     constructor(enforce: () => void)
     {
         if(enforce !== Enforce)
@@ -26,12 +19,6 @@ export class DimensionManager implements IDimensionManager
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use DimensionManager.getInstance() instead of new.");
         }
     }
-
-    /**
-     * Gets the singleton instance of BuildingService.
-     *
-     * @returns The singleton instance of BuildingService.
-     */
 
     public static getInstance(): IDimensionManager
     {
@@ -43,10 +30,48 @@ export class DimensionManager implements IDimensionManager
         return DimensionManager.instance;
     }
 
-
     public calculateDimensions(input: string): DimensionResult
     {
+        // ✅ CRITICAL: Check for explicit WxLxH format FIRST
+        const explicitMatch = this.tryExplicitDimensions(input);
+        if (explicitMatch) {
+            logger.info(`[DimensionManager] ✅ Explicit WxLxH format detected:`, explicitMatch);
+            return explicitMatch;
+        }
+
+        // Then try other formats
         return DynamicGarageDimensionCalculator.calculateDimensionsFromInput(input);
+    }
+
+    /**
+     * ✅ NEW: Try to parse explicit WxLxH format
+     */
+    private tryExplicitDimensions(input: string): DimensionResult | null {
+        const match = input.match(/^(\d+)\s*x\s*(\d+)\s*x\s*(\d+)$/i);
+
+        if (!match) {
+            return null;
+        }
+
+        const width = parseInt(match[1], 10);
+        const length = parseInt(match[2], 10);
+        const height = parseInt(match[3], 10);
+
+        // Validate ranges
+        if (width <= 0 || length <= 0 || height <= 0 ||
+            width > 500 || length > 500 || height > 500) {
+            logger.warn(`[DimensionManager] Invalid dimension values: ${width}x${length}x${height}`);
+            return null;
+        }
+
+        logger.info(`[DimensionManager] Explicit WxLxH format: ${width}x${length}x${height}`);
+
+        return {
+            width,
+            length,
+            height,
+            numCars: null,
+        };
     }
 
     public isGarageTypeChanged(newGarageType?: string, oldGarageType?: string): boolean

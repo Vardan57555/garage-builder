@@ -111,7 +111,15 @@ export function buildLeadAgentGraph() {
             "ask_for_color",
             (state) => {
                 logger.debug(`[ask_for_color] nextStep=${state.nextStep}, color=${state.color}`);
-                return state.nextStep || "calculate_price";
+
+                // ✅ CRITICAL FIX: If nextStep is set, use it explicitly
+                // This prevents the graph from running other nodes that might corrupt dimensions
+                if (state.nextStep) {
+                    logger.info(`[ask_for_color] ✅ Using explicit nextStep: ${state.nextStep}`);
+                    return state.nextStep;
+                }
+
+                return "calculate_price";
             },
             {
                 "calculate_price": "calculate_price",

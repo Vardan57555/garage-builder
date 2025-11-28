@@ -3,8 +3,6 @@ import {
     ComfyUIWorkflow,
     GenerationResult,
     HealthCheckResult,
-    QuoteBreakdown,
-    VisualizationResponse
 } from "@agents/tools/io/IVisualization";
 import {DimensionResult, ExtractionContext} from "@agents/tools/io/IParameterExtraction";
 
@@ -39,15 +37,5 @@ export interface IGarageImageGenerator
     generate(params: UserFriendlyParams, retries?: number): Promise<GenerationResult>;
 
     checkHealth(): Promise<HealthCheckResult>;
-}
-
-export interface IQuoteResponseFormatter
-{
-    formatFinalQuote(params: UserFriendlyParams, breakdown: QuoteBreakdown, selectedAddons?: any[], imageBase64?: string | null): string;
-}
-
-export interface IVisualizationOrchestrator
-{
-    generateVisualization(state: any): Promise<VisualizationResponse>;
 }
 

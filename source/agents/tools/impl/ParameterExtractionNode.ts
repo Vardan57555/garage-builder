@@ -19,6 +19,7 @@ import {IParameterExtractionStrategy} from "@agents/tools/impl/io/IParameterExtr
 import {ParameterExtractionStrategy} from "@agents/tools/impl/ParameterExtractionStrategy";
 import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
+import { detectParameterUpdateFromInput } from "@agents/tools/impl/DetectionHelpers";
 const logger: pino.Logger = createLogger(module);
 
 class ParameterExtractor implements IParameterExtractor
@@ -45,8 +46,59 @@ class ParameterExtractor implements IParameterExtractor
         const currentParams = { ...state.userFriendlyParams };
         const userInput = this.extractContextFromState(state);
 
+        // ✅ PRIORITY 0: Check for explicit parameter updates FIRST (e.g., "width 10", "set length to 30")
+        const parameterUpdate = await detectParameterUpdateFromInput(userInput, state.currentField);
+        if (parameterUpdate) {
+            logger.info(`[ParameterExtractor] ✅ Explicit parameter update detected: ${parameterUpdate.field} = ${parameterUpdate.value}`);
+
+            return {
+                userFriendlyParams: {
+                    ...currentParams,
+                    [parameterUpdate.field]: parameterUpdate.value,
+                },
+                currentField: null,
+                nextStep: "check_missing_fields",
+            };
+        }
+
+        // ✅ PRIORITY 1: If in field mode with dimension field, handle simple numeric
+        if (state.currentField && this.isDimensionField(state.currentField)) {
+            const simpleNumericResult = this.trySimpleNumericParse(userInput, state.currentField);
+            if (simpleNumericResult) {
+                return {
+                    userFriendlyParams: {
+                        ...state.userFriendlyParams,
+                        [state.currentField]: simpleNumericResult,
+                    },
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                };
+            }
+        }
+
         logger.info(`[ParameterExtractor] User input: "${userInput}"`);
         logger.info(`[ParameterExtractor] Current field: ${state.currentField}`);
+
+        const hasDimensions = !!(
+            state.userFriendlyParams.width &&
+            state.userFriendlyParams.length &&
+            state.userFriendlyParams.height
+        );
+
+        if (hasDimensions && state.currentField === null) {
+            logger.info(
+                `[ParameterExtractor] ✅ Dimensions already complete, skipping extraction`,
+                {
+                    width: state.userFriendlyParams.width,
+                    length: state.userFriendlyParams.length,
+                    height: state.userFriendlyParams.height,
+                }
+            );
+            return {
+                userFriendlyParams: currentParams,
+                nextStep: "check_missing_fields",
+            };
+        }
 
         try
         {
@@ -180,6 +232,38 @@ class ParameterExtractor implements IParameterExtractor
                 };
             }
 
+            // ✅ CRITICAL: If just a simple number like "10", ask which dimension it is
+            if (this.isSimpleNumber(userInput)) {
+                logger.info(`[ParameterExtractor] Simple number detected: "${userInput}" - asking which dimension`);
+                return {
+                    userFriendlyParams: currentParams,
+                    currentField: "width",  // Start with width
+                    nextStep: "ask_for_field",
+                    response: `I see you entered "${userInput}". Is this the width, length, or height in feet?\n\nPlease enter:\n• Width (front to back)\n• Length (side to side)\n• Height (top to bottom)\n\nOr provide all three like: 20x30x10`,
+                };
+            }
+
+            // ✅ CRITICAL: Try explicit WxLxH first
+            const explicitDims = this.tryExplicitDimensions(userInput);
+            if (explicitDims) {
+                logger.info(`[ParameterExtractor] ✅ Explicit dimensions detected: ${JSON.stringify(explicitDims)}`);
+                return {
+                    userFriendlyParams: {
+                        ...currentParams,
+                        ...explicitDims,
+                    },
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                };
+            }
+
+            // ✅ PROTECTION: Store dimensions before extraction
+            const dimensionsBefore = {
+                width: currentParams.width,
+                length: currentParams.length,
+                height: currentParams.height,
+            };
+
             const context: ExtractionContext = {
                 userInput,
                 currentField: state.currentField,
@@ -192,6 +276,19 @@ class ParameterExtractor implements IParameterExtractor
             let mergedParams: Record<string, any> = this.mergeParameters(currentParams, extractedParams);
 
             await this.processDimensions(currentParams, extractedParams, mergedParams);
+
+            // ✅ PROTECTION: Validate dimensions didn't change unexpectedly
+            if (
+                extractedParams.width === undefined &&
+                extractedParams.length === undefined &&
+                extractedParams.height === undefined
+            ) {
+                // No dimensions extracted, preserve existing ones
+                logger.info(`[ParameterExtractor] ✅ No dimension extraction attempted, preserving existing dimensions`);
+                mergedParams.width = dimensionsBefore.width;
+                mergedParams.length = dimensionsBefore.length;
+                mergedParams.height = dimensionsBefore.height;
+            }
 
             const validationError: ValidationResult = await this.validateParameters(mergedParams, state.stateMapCache);
 
@@ -255,6 +352,56 @@ class ParameterExtractor implements IParameterExtractor
                 userFriendlyParams: currentParams,
             };
         }
+    }
+
+    private trySimpleNumericParse(input: string, field: string): number | null {
+        const trimmed = input.trim();
+
+        // Match just a number, optionally with "ft" or "feet"
+        const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:ft|feet)?$/i);
+
+        if (!match) return null;
+
+        const value = parseFloat(match[1]);
+
+        // Validate range
+        if (value <= 0 || value > 500) return null;
+
+        logger.info(`[ParameterExtractor] Simple numeric parse: ${field} = ${value}`);
+        return value;
+    }
+
+    private isDimensionField(field: string): boolean {
+        return ['width', 'length', 'height', 'utility_length'].includes(field);
+    }
+
+    /**
+     * ✅ NEW: Check if input is just a simple number
+     */
+    private isSimpleNumber(input: string): boolean {
+        return /^\d+(?:\.\d+)?$/.test(input.trim());
+    }
+
+    /**
+     * ✅ NEW: Try explicit WxLxH format
+     */
+    private tryExplicitDimensions(input: string): Partial<UserFriendlyParams> | null {
+        const match = input.match(/^(\d+)\s*x\s*(\d+)\s*x\s*(\d+)$/i);
+
+        if (!match) {
+            return null;
+        }
+
+        const width = parseInt(match[1], 10);
+        const length = parseInt(match[2], 10);
+        const height = parseInt(match[3], 10);
+
+        if (width > 0 && length > 0 && height > 0 &&
+            width <= 500 && length <= 500 && height <= 500) {
+            return { width, length, height };
+        }
+
+        return null;
     }
 
     private validateFieldInput(input: string, field: string): { isValid: boolean; error?: string } {
@@ -424,6 +571,31 @@ class ParameterExtractor implements IParameterExtractor
 
     private async processDimensions(current: Record<string, any>, extracted: Record<string, any>, merged: Record<string, any>): Promise<void>
     {
+        logger.info(`[ParameterExtractor] Processing dimensions...`);
+        logger.info(`[ParameterExtractor] Extracted:`, {
+            width: extracted.width,
+            length: extracted.length,
+            height: extracted.height,
+            garage_type: extracted.garage_type,
+        });
+
+        // ✅ CRITICAL: If dimensions were explicitly provided (WxLxH format), DON'T override them
+        const hasExplicitDimensions = !!(extracted.width && extracted.length && extracted.height && !extracted.garage_type);
+
+        if (hasExplicitDimensions) {
+            logger.info(`[ParameterExtractor] ✅ Explicit dimensions detected, preserving:`, {
+                width: extracted.width,
+                length: extracted.length,
+                height: extracted.height,
+            });
+
+            merged.width = extracted.width;
+            merged.length = extracted.length;
+            merged.height = extracted.height;
+            delete merged.garage_type;
+            return;
+        }
+
         const garageTypeChanged: boolean = this.dimensionManager.isGarageTypeChanged(extracted.garage_type, current.garage_type);
 
         if (garageTypeChanged)

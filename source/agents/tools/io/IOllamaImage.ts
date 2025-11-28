@@ -21,13 +21,3 @@ export interface PriceBreakdown {
     finalTotal: number;
     sqft: number;
 }
-
-/**
- * Visualization node response
- */
-export interface VisualizationNodeResponse {
-    response: string;
-    finalPrice: number;
-    generatedImageUrl?: string;
-    nextStep: string;
-}

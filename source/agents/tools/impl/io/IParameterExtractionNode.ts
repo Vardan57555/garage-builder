@@ -18,12 +18,6 @@ export interface IDimensionManager
     handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult
 }
 
-
-export interface IFallbackExtractor
-{
-    extract(context: string, baseParams: Record<string, any>): ExtractionResult | null;
-}
-
 export interface IParameterExtractor
 {
     extract(state: LeadAgentStateType): Promise<ExtractionResult>;

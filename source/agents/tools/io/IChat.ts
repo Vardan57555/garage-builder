@@ -29,8 +29,3 @@ export interface PricingBreakdown {
     total: number;
     roofPrice: number;
 }
-
-export interface ServiceCostsResult {
-    total: number;
-    breakdown: string[];
-}
