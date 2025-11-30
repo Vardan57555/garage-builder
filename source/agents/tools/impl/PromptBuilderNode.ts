@@ -107,32 +107,58 @@ export class PromptBuilder implements IPromptBuilder
 
         const colorDesc: string = this.getColorDescription(color);
 
+        // ✅ CRITICAL: VERY EXPLICIT about dimensions
         return `Professional photorealistic exterior architectural visualization of a metal garage building.
 
-Dimensions: ${width} feet wide by ${length} feet long by ${height} feet tall.
-Roof style: ${roofType} roof with clean modern lines.
-Metal gauge: ${gauge} - professional commercial grade materials.
+DIMENSIONS - MUST BE EXACT:
+⚠️ WIDTH: ${width} feet (front-to-back depth)
+⚠️ LENGTH: ${length} feet (side-to-side width)
+⚠️ HEIGHT: ${height} feet (floor to roof peak)
+⚠️ ASPECT RATIO: The building MUST appear as ${width}ft x ${length}ft x ${height}ft - NOT LARGER
 
-COLOR: ${colorDesc} metal siding and roof panels - this is the PRIMARY color of the entire building.
+This is a SMALL ${width}ft x ${length}ft garage - render it as SMALL and COMPACT, not oversized.
 
-Features:
-- Metal roll-up garage doors with windows and modern handles
+Roof style: ${roofType} roof
+Metal gauge: ${gauge}
+Color: ${colorDesc}
+
+CRITICAL ARCHITECTURAL REQUIREMENTS:
+- The building must have CORRECT proportions for ${width}ft wide x ${length}ft long x ${height}ft tall
+- The ${roofType} roof must be proportional to the ${height}ft height (NOT oversized)
+- Door and window sizes must be REALISTIC for a ${width}x${length}ft building
+- The foundation pad must match the ${width}x${length}ft footprint exactly
+- NO oversizing - this is a compact ${width}ft x ${length}ft structure
+
+VISUAL ELEMENTS:
+- Metal roll-up garage doors with windows and modern handles (2 doors for this size)
 - Professional ${colorDesc} corrugated metal panels covering entire building
 - ${colorDesc} metal siding on all walls
 - ${colorDesc} metal roof panels
-- Concrete foundation pad
+- Concrete foundation pad (${width}ft x ${length}ft)
 - Suburban residential setting with landscaping
 - Green lawn and trees in background
+- White trim around doors and windows
+- Small ventilation window(s) near roof
 
-Lighting: Golden hour lighting, warm and professional, clear blue sky with subtle clouds.
-Perspective: 3/4 front corner architectural view showing the ${colorDesc} metal exterior
-Quality: Professional real estate photography, 8k, sharp focus, detailed textures, accurate ${colorDesc} color rendering
-Realistic materials, accurate proportions, professional rendering.
+LIGHTING & PERSPECTIVE:
+- Golden hour lighting, warm and professional, clear blue sky with subtle clouds
+- 3/4 front corner architectural view showing the ${colorDesc} metal exterior
+- Camera positioned to clearly show all dimensions and proportions
+- Perspective must make the ${width}x${length}x${height} dimensions obvious
 
-IMPORTANT: The building must be ${colorDesc} - make this color prominent and realistic.
-The ${width}x${length}x${height} dimensions should be proportional and accurate.
-The ${roofType} roof style should be clearly visible and realistic.
-Use ${gauge} metal gauge appearance - professional and durable looking.
+QUALITY REQUIREMENTS:
+- Professional real estate photography style
+- 8k resolution, sharp focus, detailed textures
+- Accurate ${colorDesc} color rendering
+- Realistic materials and weathering appropriate for new metal building
+- Professional and durable appearance
+
+STRICT CONSTRAINTS - DO NOT VIOLATE:
+✓ Building is ${width}ft x ${length}ft x ${height}ft - render it at this exact scale
+✓ Roof is proportional to ${height}ft height (not a huge roof on a small building)
+✓ Doors and windows are appropriately sized for a ${width}ft wide building
+✓ No oversizing, no exaggeration, no artistic liberty with dimensions
+✓ This is a COMPACT garage, not a large structure
 
 Exclude: people, text, watermarks, signs, vehicles`;
     }

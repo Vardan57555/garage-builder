@@ -34,13 +34,13 @@ export class AskForFieldNode implements IAskForFieldNode
     {
         this.fieldPromptMap = {
             width: {
-                template: `{params}\n\n📏 What **width** (feet)?\n(e.g., 20, 24, 30)`,
+                template: `{params}\n\n📏 What **width** (feet)?\n\nExamples:\n• 20\n• 20 ft\n• width: 20`,
             },
             length: {
-                template: `{params}\n\n📏 What **length** (feet)?\n(e.g., 25, 30, 40)`,
+                template: `{params}\n\n📏 What **length** (feet)?\n\nExamples:\n• 30\n• 30 ft\n• length: 30`,
             },
             height: {
-                template: `{params}\n\n📏 What **height** (feet)?\n(e.g., 10, 12)`,
+                template: `{params}\n\n📏 What **height** (feet)?\n\nExamples:\n• 10\n• 10 ft\n• height: 10`,
             },
             state_name: {
                 template: `{params}\n\n🗺️ Which **state**?\n(e.g., Texas, California)`,

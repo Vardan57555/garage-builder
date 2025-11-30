@@ -1,6 +1,8 @@
-import { PriceParamsExtractorTool } from "@agents/tools/impl/PriceParamsExtractorTool";
+import { HumanMessage } from "@langchain/core/messages";
+import { sharedLLM } from "@llm/SharedLLM";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
+import { PriceParamsExtractorTool } from "@agents/tools/impl/PriceParamsExtractorTool";
 import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { BaseMessage } from "@langchain/core/messages";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
@@ -20,18 +22,17 @@ import {ParameterExtractionStrategy} from "@agents/tools/impl/ParameterExtractio
 import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 import { detectParameterUpdateFromInput } from "@agents/tools/impl/DetectionHelpers";
+
 const logger: pino.Logger = createLogger(module);
 
-class ParameterExtractor implements IParameterExtractor
-{
+class ParameterExtractor implements IParameterExtractor {
     private promptBuilder: IPromptBuilder;
     private choiceService: IChoiceService;
     private parameterExtractionStrategy: IParameterExtractionStrategy;
     private dimensionManager: IDimensionManager;
     private paramExtractor: PriceParamsExtractorTool;
 
-    constructor()
-    {
+    constructor() {
         this.parameterExtractionStrategy = ParameterExtractionStrategy.getInstance();
         this.promptBuilder = PromptBuilder.getInstance();
         this.choiceService = ChoiceServiceImpl.getInstance();
@@ -39,14 +40,75 @@ class ParameterExtractor implements IParameterExtractor
         this.paramExtractor = PriceParamsExtractorTool.getInstance();
     }
 
-    public async extract(state: LeadAgentStateType): Promise<ExtractionResult>
-    {
+    /**
+     * ✅ NEW: Extract single dimension using Ollama AI
+     */
+    private async extractSingleDimensionWithAI(userInput: string, field: 'width' | 'length' | 'height'): Promise<number | null> {
+        try {
+            logger.info(`[ParameterExtractor] AI extracting ${field} from: "${userInput}"`);
+
+            const prompt = `Extract a single dimension value in feet from the user's response.
+The user is being asked for: ${field}
+
+Return ONLY JSON:
+{
+  "value": <number or null>,
+  "found": <true if found, false otherwise>
+}
+
+Examples:
+- "20" → {"value": 20, "found": true}
+- "20 feet" → {"value": 20, "found": true}
+- "about 30" → {"value": 30, "found": true}
+
+User response: "${userInput}"
+
+Return ONLY JSON:`;
+
+            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+            logger.debug(`[ParameterExtractor] AI single dimension response: "${response}"`);
+
+            const parsed = this.parseAIResponse(response);
+
+            if (parsed && parsed.found && typeof parsed.value === 'number' && parsed.value > 0 && parsed.value <= 500) {
+                logger.info(`[ParameterExtractor] ✅ AI extracted ${field}: ${parsed.value}`);
+                return parsed.value;
+            }
+
+            return null;
+        } catch (error) {
+            logger.error(`[ParameterExtractor] AI extraction error:`, error);
+            return null;
+        }
+    }
+
+
+    public async extract(state: LeadAgentStateType): Promise<ExtractionResult> {
         logger.info(`[ParameterExtractor] Session ${state.sessionId} - Extracting parameters`);
 
         const currentParams = { ...state.userFriendlyParams };
         const userInput = this.extractContextFromState(state);
 
-        // ✅ PRIORITY 0: Check for explicit parameter updates FIRST (e.g., "width 10", "set length to 30")
+        // ✅ PRIORITY 0: BATCH EXTRACTION CHECK FIRST (before parameter updates)
+        // This must run BEFORE detectParameterUpdateFromInput to catch batch dimensions
+        logger.info(`[ParameterExtractor] PRIORITY 0: Checking for batch dimension extraction...`);
+        const batchResult = await this.tryBatchDimensionExtractionWithAI(userInput);
+        if (batchResult && batchResult.width && batchResult.length && batchResult.height) {
+            logger.info(`[ParameterExtractor] ✅ BATCH extraction successful: ${batchResult.width}x${batchResult.length}x${batchResult.height}`);
+            return {
+                userFriendlyParams: {
+                    ...currentParams,
+                    width: batchResult.width,
+                    length: batchResult.length,
+                    height: batchResult.height,
+                },
+                currentField: null,
+                nextStep: "check_missing_fields",
+            };
+        }
+
+        // ✅ PRIORITY 1: Check for explicit parameter updates
         const parameterUpdate = await detectParameterUpdateFromInput(userInput, state.currentField);
         if (parameterUpdate) {
             logger.info(`[ParameterExtractor] ✅ Explicit parameter update detected: ${parameterUpdate.field} = ${parameterUpdate.value}`);
@@ -61,14 +123,35 @@ class ParameterExtractor implements IParameterExtractor
             };
         }
 
-        // ✅ PRIORITY 1: If in field mode with dimension field, handle simple numeric
+        // ✅ PRIORITY 2: If in field mode with dimension field, handle with simple numeric or AI
         if (state.currentField && this.isDimensionField(state.currentField)) {
+            logger.info(`[ParameterExtractor] Field mode: ${state.currentField}`);
+
+            // Try simple numeric parse first (fast)
             const simpleNumericResult = this.trySimpleNumericParse(userInput, state.currentField);
             if (simpleNumericResult) {
+                logger.info(`[ParameterExtractor] Simple numeric matched`);
                 return {
                     userFriendlyParams: {
                         ...state.userFriendlyParams,
                         [state.currentField]: simpleNumericResult,
+                    },
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                };
+            }
+
+            // Use AI extraction for complex inputs
+            const aiExtracted = await this.extractSingleDimensionWithAI(
+                userInput,
+                state.currentField as 'width' | 'length' | 'height'
+            );
+            if (aiExtracted) {
+                logger.info(`[ParameterExtractor] AI extracted ${state.currentField}: ${aiExtracted}`);
+                return {
+                    userFriendlyParams: {
+                        ...state.userFriendlyParams,
+                        [state.currentField]: aiExtracted,
                     },
                     currentField: null,
                     nextStep: "check_missing_fields",
@@ -100,13 +183,11 @@ class ParameterExtractor implements IParameterExtractor
             };
         }
 
-        try
-        {
+        try {
             if (state.currentField && typeof state.currentField === 'string') {
                 logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
 
                 const fieldKey = state.currentField as keyof UserFriendlyParams;
-
                 const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
 
                 if (isChoiceField) {
@@ -193,8 +274,7 @@ class ParameterExtractor implements IParameterExtractor
                             nextStep: "check_missing_fields",
                         };
 
-                    }
-                    catch (error) {
+                    } catch (error) {
                         logger.error(`[ParameterExtractor] Error validating state:`, error);
                         return {
                             validationError: `Error validating state name`,
@@ -232,28 +312,14 @@ class ParameterExtractor implements IParameterExtractor
                 };
             }
 
-            // ✅ CRITICAL: If just a simple number like "10", ask which dimension it is
+            // If simple number, ask which dimension
             if (this.isSimpleNumber(userInput)) {
                 logger.info(`[ParameterExtractor] Simple number detected: "${userInput}" - asking which dimension`);
                 return {
                     userFriendlyParams: currentParams,
-                    currentField: "width",  // Start with width
+                    currentField: "width",
                     nextStep: "ask_for_field",
-                    response: `I see you entered "${userInput}". Is this the width, length, or height in feet?\n\nPlease enter:\n• Width (front to back)\n• Length (side to side)\n• Height (top to bottom)\n\nOr provide all three like: 20x30x10`,
-                };
-            }
-
-            // ✅ CRITICAL: Try explicit WxLxH first
-            const explicitDims = this.tryExplicitDimensions(userInput);
-            if (explicitDims) {
-                logger.info(`[ParameterExtractor] ✅ Explicit dimensions detected: ${JSON.stringify(explicitDims)}`);
-                return {
-                    userFriendlyParams: {
-                        ...currentParams,
-                        ...explicitDims,
-                    },
-                    currentField: null,
-                    nextStep: "check_missing_fields",
+                    response: `I see you entered "${userInput}". Is this the width, length, or height in feet?\n\nPlease enter:\n• Width (front to back)\n• Length (side to side)\n• Height (top to bottom)\n\nOr provide all three like: 20x30x10 or 20, 30, 10 or width: 20, length: 30, height: 10`,
                 };
             }
 
@@ -283,7 +349,6 @@ class ParameterExtractor implements IParameterExtractor
                 extractedParams.length === undefined &&
                 extractedParams.height === undefined
             ) {
-                // No dimensions extracted, preserve existing ones
                 logger.info(`[ParameterExtractor] ✅ No dimension extraction attempted, preserving existing dimensions`);
                 mergedParams.width = dimensionsBefore.width;
                 mergedParams.length = dimensionsBefore.length;
@@ -292,8 +357,7 @@ class ParameterExtractor implements IParameterExtractor
 
             const validationError: ValidationResult = await this.validateParameters(mergedParams, state.stateMapCache);
 
-            if (validationError)
-            {
+            if (validationError) {
                 const fieldName = mergedParams.state_name ? "state_name" : "roof_type";
                 return {
                     validationError: validationError.error,
@@ -308,9 +372,7 @@ class ParameterExtractor implements IParameterExtractor
                 userFriendlyParams: mergedParams,
                 nextStep: "check_missing_fields",
             };
-        }
-        catch (error)
-        {
+        } catch (error) {
             logger.error(`[ParameterExtractor] LLM extraction failed, attempting fallback`, error);
 
             const fullContext: string = state.messages
@@ -336,8 +398,7 @@ class ParameterExtractor implements IParameterExtractor
                 currentParams
             );
 
-            if (fallbackResult)
-            {
+            if (fallbackResult) {
                 logger.info(`[ParameterExtractor] Fallback extraction succeeded`);
                 return fallbackResult;
             }
@@ -346,7 +407,7 @@ class ParameterExtractor implements IParameterExtractor
 
             return {
                 response:
-                    "I couldn't understand your request. Could you please provide your building dimensions? (e.g., '20x20x10' for width x length x height in feet)",
+                    "I couldn't understand your request. Could you please provide your building dimensions? (e.g., '20x30x10' or '20, 30, 10' for width x length x height in feet)",
                 nextStep: "ask_for_field",
                 currentField: "width",
                 userFriendlyParams: currentParams,
@@ -356,15 +417,12 @@ class ParameterExtractor implements IParameterExtractor
 
     private trySimpleNumericParse(input: string, field: string): number | null {
         const trimmed = input.trim();
-
-        // Match just a number, optionally with "ft" or "feet"
         const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:ft|feet)?$/i);
 
         if (!match) return null;
 
         const value = parseFloat(match[1]);
 
-        // Validate range
         if (value <= 0 || value > 500) return null;
 
         logger.info(`[ParameterExtractor] Simple numeric parse: ${field} = ${value}`);
@@ -375,33 +433,148 @@ class ParameterExtractor implements IParameterExtractor
         return ['width', 'length', 'height', 'utility_length'].includes(field);
     }
 
-    /**
-     * ✅ NEW: Check if input is just a simple number
-     */
     private isSimpleNumber(input: string): boolean {
         return /^\d+(?:\.\d+)?$/.test(input.trim());
     }
 
-    /**
-     * ✅ NEW: Try explicit WxLxH format
-     */
-    private tryExplicitDimensions(input: string): Partial<UserFriendlyParams> | null {
-        const match = input.match(/^(\d+)\s*x\s*(\d+)\s*x\s*(\d+)$/i);
-
-        if (!match) {
+    private async tryBatchDimensionExtractionWithAI(userInput: string): Promise<Partial<UserFriendlyParams> | null> {
+        if (!userInput) {
+            logger.debug(`[tryBatchDimensionExtractionWithAI] Empty input`);
             return null;
         }
 
-        const width = parseInt(match[1], 10);
-        const length = parseInt(match[2], 10);
-        const height = parseInt(match[3], 10);
+        try {
+            logger.info(`[tryBatchDimensionExtractionWithAI] Starting batch extraction for: "${userInput}"`);
 
-        if (width > 0 && length > 0 && height > 0 &&
-            width <= 500 && length <= 500 && height <= 500) {
-            return { width, length, height };
+            // ✅ STEP 1: Try DimensionManager patterns first (fast path)
+            logger.info(`[tryBatchDimensionExtractionWithAI] Attempting pattern matching...`);
+            const calculation = this.dimensionManager.calculateDimensions(userInput);
+
+            logger.debug(`[tryBatchDimensionExtractionWithAI] Pattern result:`, {
+                width: calculation?.width,
+                length: calculation?.length,
+                height: calculation?.height,
+            });
+
+            if (calculation && calculation.width && calculation.length && calculation.height) {
+                logger.info(`[tryBatchDimensionExtractionWithAI] ✅ PATTERN MATCH SUCCESS: ${calculation.width}x${calculation.length}x${calculation.height}`);
+                return {
+                    width: calculation.width,
+                    length: calculation.length,
+                    height: calculation.height,
+                };
+            }
+
+            // ✅ STEP 2: If patterns fail, use AI to detect batch dimensions
+            logger.info(`[tryBatchDimensionExtractionWithAI] Pattern match failed, attempting AI detection...`);
+            const aiResult = await this.detectBatchDimensionsWithAI(userInput);
+
+            logger.debug(`[tryBatchDimensionExtractionWithAI] AI result:`, {
+                width: aiResult?.width,
+                length: aiResult?.length,
+                height: aiResult?.height,
+            });
+
+            if (aiResult && aiResult.width && aiResult.length && aiResult.height) {
+                logger.info(`[tryBatchDimensionExtractionWithAI] ✅ AI DETECTION SUCCESS: ${aiResult.width}x${aiResult.length}x${aiResult.height}`);
+                return aiResult;
+            }
+
+            logger.debug(`[tryBatchDimensionExtractionWithAI] ❌ No batch dimensions found`);
+            return null;
+
+        } catch (error) {
+            logger.error(`[tryBatchDimensionExtractionWithAI] Exception:`, error);
+            return null;
         }
+    }
 
-        return null;
+    private async detectBatchDimensionsWithAI(userInput: string): Promise<Partial<UserFriendlyParams> | null> {
+        try {
+            logger.info(`[detectBatchDimensionsWithAI] AI analyzing: "${userInput}"`);
+
+            const prompt = `Analyze the user input and extract ALL THREE building dimensions if provided.
+
+CRITICAL RULES:
+1. User must provide ALL THREE dimensions (width, length, height) in feet
+2. Dimensions can appear in any format or language pattern
+3. If ANY dimension is missing → return found: false
+4. Extract numbers ONLY - ignore "feet", "ft", "garage", etc.
+
+Return ONLY JSON (no markdown, no explanation):
+{
+  "found": <true ONLY if all 3 present, false otherwise>,
+  "width": <number or null>,
+  "length": <number or null>,
+  "height": <number or null>
+}
+
+Examples:
+- "width 10 length 10 height 10" → {"found": true, "width": 10, "length": 10, "height": 10}
+- "10x10x10" → {"found": true, "width": 10, "length": 10, "height": 10}
+- "i want a garage width 10 length 10 height 10" → {"found": true, "width": 10, "length": 10, "height": 10}
+- "width 10" → {"found": false, "width": null, "length": null, "height": null}
+
+User input: "${userInput}"
+
+ONLY valid JSON:`;
+
+            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+            logger.debug(`[detectBatchDimensionsWithAI] AI response: "${response}"`);
+
+            const parsed = this.parseAIResponse(response);
+
+            logger.debug(`[detectBatchDimensionsWithAI] Parsed response:`, parsed);
+
+            if (!parsed) {
+                logger.warn(`[detectBatchDimensionsWithAI] Failed to parse response`);
+                return null;
+            }
+
+            // ✅ STRICT: Only return if ALL three found
+            if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
+                logger.info(`[detectBatchDimensionsWithAI] ✅ AI SUCCESS: ${parsed.width}x${parsed.length}x${parsed.height}`);
+                return {
+                    width: parsed.width,
+                    length: parsed.length,
+                    height: parsed.height,
+                };
+            }
+
+            logger.debug(`[detectBatchDimensionsWithAI] AI: Not all dimensions found or found=false`, {
+                found: parsed.found,
+                width: parsed.width,
+                length: parsed.length,
+                height: parsed.height,
+            });
+
+            return null;
+
+        } catch (error) {
+            logger.error(`[detectBatchDimensionsWithAI] Exception:`, error);
+            return null;
+        }
+    }
+
+    private parseAIResponse(response: string): any {
+        try {
+            let cleaned = response
+                .replace(/```json\s*/g, '')
+                .replace(/```\s*/g, '')
+                .trim();
+
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                logger.warn(`[parseAIResponse] No JSON in response: "${response}"`);
+                return null;
+            }
+
+            return JSON.parse(jsonMatch[0]);
+        } catch (error) {
+            logger.error(`[parseAIResponse] Failed to parse response:`, error);
+            return null;
+        }
     }
 
     private validateFieldInput(input: string, field: string): { isValid: boolean; error?: string } {
@@ -524,8 +697,7 @@ class ParameterExtractor implements IParameterExtractor
         }
     }
 
-    public async extractWithUnifiedPrompt(context: ExtractionContext): Promise<string>
-    {
+    public async extractWithUnifiedPrompt(context: ExtractionContext): Promise<string> {
         logger.info(`[extractWithUnifiedPrompt] Processing context (${context.userInput.length} chars)`);
         logger.info(`[extractWithUnifiedPrompt] Current field: ${context.currentField}`);
 
@@ -539,12 +711,10 @@ class ParameterExtractor implements IParameterExtractor
         );
     }
 
-    private extractContextFromState(state: LeadAgentStateType): string
-    {
+    private extractContextFromState(state: LeadAgentStateType): string {
         const lastMessage: BaseMessage = state.messages[state.messages.length - 1];
 
-        if (!lastMessage)
-        {
+        if (!lastMessage) {
             return "";
         }
 
@@ -552,8 +722,7 @@ class ParameterExtractor implements IParameterExtractor
             return lastMessage.content;
         }
 
-        if (Array.isArray(lastMessage.content))
-        {
+        if (Array.isArray(lastMessage.content)) {
             return lastMessage.content
                 .map((c) =>
                     typeof c === "string" ? c : "text" in c ? c.text : JSON.stringify(c)
@@ -564,13 +733,11 @@ class ParameterExtractor implements IParameterExtractor
         return "";
     }
 
-    private mergeParameters(current: Record<string, any>, extracted: Record<string, any>): Record<string, any>
-    {
+    private mergeParameters(current: Record<string, any>, extracted: Record<string, any>): Record<string, any> {
         return { ...current, ...extracted };
     }
 
-    private async processDimensions(current: Record<string, any>, extracted: Record<string, any>, merged: Record<string, any>): Promise<void>
-    {
+    private async processDimensions(current: Record<string, any>, extracted: Record<string, any>, merged: Record<string, any>): Promise<void> {
         logger.info(`[ParameterExtractor] Processing dimensions...`);
         logger.info(`[ParameterExtractor] Extracted:`, {
             width: extracted.width,
@@ -579,7 +746,6 @@ class ParameterExtractor implements IParameterExtractor
             garage_type: extracted.garage_type,
         });
 
-        // ✅ CRITICAL: If dimensions were explicitly provided (WxLxH format), DON'T override them
         const hasExplicitDimensions = !!(extracted.width && extracted.length && extracted.height && !extracted.garage_type);
 
         if (hasExplicitDimensions) {
@@ -598,58 +764,47 @@ class ParameterExtractor implements IParameterExtractor
 
         const garageTypeChanged: boolean = this.dimensionManager.isGarageTypeChanged(extracted.garage_type, current.garage_type);
 
-        if (garageTypeChanged)
-        {
+        if (garageTypeChanged) {
             logger.info(`[ParameterExtractor] Garage type changed from "${current.garage_type}" to "${extracted.garage_type}"`);
 
             this.dimensionManager.clearDimensions(merged);
 
             const calc: DimensionResult = this.dimensionManager.calculateDimensions(extracted.garage_type!);
 
-            if (!this.dimensionManager.applyDimensions(merged, calc))
-            {
+            if (!this.dimensionManager.applyDimensions(merged, calc)) {
                 logger.warn(`[ParameterExtractor] Failed to calculate dimensions`);
             }
-        }
-        else
-        {
+        } else {
             this.dimensionManager.preserveExistingDimensions(merged, current, extracted);
         }
 
-        if (merged.garage_type && !merged.width)
-        {
+        if (merged.garage_type && !merged.width) {
             const calc: DimensionResult = this.dimensionManager.calculateDimensions(merged.garage_type);
 
-            if (!this.dimensionManager.applyDimensions(merged, calc))
-            {
+            if (!this.dimensionManager.applyDimensions(merged, calc)) {
                 logger.warn(`[ParameterExtractor] Failed to calculate dimensions`);
             }
         }
     }
 
-    private async validateParameters(params: Record<string, any>, stateMapCache: any): Promise<ValidationResult | null>
-    {
-        if (params.state_name)
-        {
+    private async validateParameters(params: Record<string, any>, stateMapCache: any): Promise<ValidationResult | null> {
+        if (params.state_name) {
             const result: ValidationResult = await ParameterValidator.validateState(
                 params.state_name,
                 stateMapCache
             );
 
-            if (!result.isValid)
-            {
+            if (!result.isValid) {
                 return result;
             }
 
             params.state_name = result.normalizedValue;
         }
 
-        if (params.roof_type)
-        {
+        if (params.roof_type) {
             const result: ValidationResult = await ParameterValidator.validateRoofType(params.roof_type);
 
-            if (!result.isValid)
-            {
+            if (!result.isValid) {
                 return result;
             }
 
@@ -662,7 +817,6 @@ class ParameterExtractor implements IParameterExtractor
 
 const extractor = new ParameterExtractor();
 
-export const extractParametersNode = async (state: LeadAgentStateType): Promise<ExtractionResult> =>
-{
+export const extractParametersNode = async (state: LeadAgentStateType): Promise<ExtractionResult> => {
     return extractor.extract(state);
 };

@@ -30,24 +30,46 @@ export class DimensionManager implements IDimensionManager
         return DimensionManager.instance;
     }
 
-    public calculateDimensions(input: string): DimensionResult
-    {
-        // ✅ CRITICAL: Check for explicit WxLxH format FIRST
-        const explicitMatch = this.tryExplicitDimensions(input);
-        if (explicitMatch) {
-            logger.info(`[DimensionManager] ✅ Explicit WxLxH format detected:`, explicitMatch);
-            return explicitMatch;
+    public calculateDimensions(input: string): DimensionResult {
+        logger.info(`[DimensionManager] Input: "${input}"`);
+
+        // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10"
+        const labeledResult = this.tryLabeledDimensions(input);
+        if (labeledResult) {
+            logger.info(`[DimensionManager] ✅ Labeled format: ${JSON.stringify(labeledResult)}`);
+            return labeledResult;
         }
 
-        // Then try other formats
+        // Priority 2: X format "10x10x10"
+        const xFormatResult = this.tryExplicitDimensions(input);
+        if (xFormatResult) {
+            logger.info(`[DimensionManager] ✅ X format: ${JSON.stringify(xFormatResult)}`);
+            return xFormatResult;
+        }
+
+        // Priority 3: Comma-separated "10, 10, 10"
+        const commaResult = this.tryCommaSeparatedDimensions(input);
+        if (commaResult) {
+            logger.info(`[DimensionManager] ✅ Comma format: ${JSON.stringify(commaResult)}`);
+            return commaResult;
+        }
+
+        // Priority 4: Space-separated "10 10 10"
+        const spaceResult = this.trySpaceSeparatedDimensions(input);
+        if (spaceResult) {
+            logger.info(`[DimensionManager] ✅ Space format: ${JSON.stringify(spaceResult)}`);
+            return spaceResult;
+        }
+
+        // Fallback: Use existing calculator
+        logger.info(`[DimensionManager] No explicit format matched, using calculator`);
         return DynamicGarageDimensionCalculator.calculateDimensionsFromInput(input);
     }
 
-    /**
-     * ✅ NEW: Try to parse explicit WxLxH format
-     */
-    private tryExplicitDimensions(input: string): DimensionResult | null {
-        const match = input.match(/^(\d+)\s*x\s*(\d+)\s*x\s*(\d+)$/i);
+
+    private tryCommaSeparatedDimensions(input: string): DimensionResult | null {
+        // Match 3 numbers separated by commas
+        const match = input.match(/(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/);
 
         if (!match) {
             return null;
@@ -57,21 +79,90 @@ export class DimensionManager implements IDimensionManager
         const length = parseInt(match[2], 10);
         const height = parseInt(match[3], 10);
 
-        // Validate ranges
-        if (width <= 0 || length <= 0 || height <= 0 ||
-            width > 500 || length > 500 || height > 500) {
-            logger.warn(`[DimensionManager] Invalid dimension values: ${width}x${length}x${height}`);
+        if (!this.validateDimensions(width, length, height)) {
+            logger.warn(`[DimensionManager] Invalid comma-separated values: ${width}x${length}x${height}`);
             return null;
         }
 
-        logger.info(`[DimensionManager] Explicit WxLxH format: ${width}x${length}x${height}`);
+        logger.info(`[DimensionManager] Comma-separated match: ${width}x${length}x${height}`);
+        return { width, length, height, numCars: null };
+    }
 
-        return {
-            width,
-            length,
-            height,
-            numCars: null,
-        };
+    private trySpaceSeparatedDimensions(input: string): DimensionResult | null {
+        // Match only if it's 3 bare numbers with spaces (not mixed with other text)
+        const trimmed = input.trim();
+
+        // Must start with optional context then have 3 numbers
+        const match = trimmed.match(/(?:^|\D)(\d+)\s+(\d+)\s+(\d+)(?:\s|$|[^\d])/);
+
+        if (!match) {
+            return null;
+        }
+
+        const width = parseInt(match[1], 10);
+        const length = parseInt(match[2], 10);
+        const height = parseInt(match[3], 10);
+
+        if (!this.validateDimensions(width, length, height)) {
+            return null;
+        }
+
+        logger.info(`[DimensionManager] Space-separated match: ${width}x${length}x${height}`);
+        return { width, length, height, numCars: null };
+    }
+
+    private tryLabeledDimensions(input: string): DimensionResult | null {
+        const lowerInput = input.toLowerCase();
+
+        // ✅ FIX: Use word boundaries to avoid partial matches
+        const widthMatch = lowerInput.match(/\bwidth\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        const lengthMatch = lowerInput.match(/\blength\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        const heightMatch = lowerInput.match(/\bheight\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+
+        const width = widthMatch ? parseInt(widthMatch[1], 10) : null;
+        const length = lengthMatch ? parseInt(lengthMatch[1], 10) : null;
+        const height = heightMatch ? parseInt(heightMatch[1], 10) : null;
+
+        // ✅ CRITICAL: All three MUST be present
+        if (width && length && height && this.validateDimensions(width, length, height)) {
+            logger.info(`[DimensionManager] Labeled match: ${width}x${length}x${height}`);
+            return { width, length, height, numCars: null };
+        }
+
+        logger.debug(`[DimensionManager] Labeled format incomplete - W:${width}, L:${length}, H:${height}`);
+        return null;
+    }
+
+    private validateDimensions(w: number, l: number, h: number): boolean {
+        const valid = w > 0 && l > 0 && h > 0 && w <= 500 && l <= 500 && h <= 500;
+        if (!valid) {
+            logger.warn(`[DimensionManager] Dimension validation failed: ${w}x${l}x${h}`);
+        }
+        return valid;
+    }
+
+    /**
+     * Original X format parser (keep existing)
+     */
+    private tryExplicitDimensions(input: string): DimensionResult | null {
+        // ✅ FIXED: Allow spaces around 'x' and handle both cases
+        const match = input.match(/(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i);
+
+        if (!match) {
+            return null;
+        }
+
+        const width = parseInt(match[1], 10);
+        const length = parseInt(match[2], 10);
+        const height = parseInt(match[3], 10);
+
+        if (width <= 0 || length <= 0 || height <= 0 ||
+            width > 500 || length > 500 || height > 500) {
+            logger.warn(`[DimensionManager] Invalid X-format values: ${width}x${length}x${height}`);
+            return null;
+        }
+
+        return { width, length, height, numCars: null };
     }
 
     public isGarageTypeChanged(newGarageType?: string, oldGarageType?: string): boolean

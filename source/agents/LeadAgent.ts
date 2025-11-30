@@ -18,6 +18,9 @@ import { generateGarageVisualizationNode } from "@agents/tools/impl/Visualizatio
 import { ParameterUpdateServiceImpl } from "@agents/tools/impl/ParameterUpdateServiceImpl";
 import  { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
 import { askForFieldNode } from "@agents/tools/impl/AskForFieldNode";
+import {sharedLLM} from "@llm/SharedLLM";
+import {HumanMessage} from "@langchain/core/messages";
+import {DimensionManager} from "@agents/tools/impl/DimensionManager";
 const logger: pino.Logger = createLogger(module);
 
 export class LeadAgent {
@@ -114,6 +117,59 @@ export class LeadAgent {
                     colorCost: 0,
                 };
                 return response;
+            }
+
+            logger.info(`[LeadAgent] Checking for batch dimensions...`);
+            const batchDimensions = await this.detectBatchDimensions(input);
+            if (batchDimensions && batchDimensions.width && batchDimensions.length && batchDimensions.height) {
+                logger.info(`[LeadAgent] ✅ BATCH DIMENSIONS DETECTED: ${batchDimensions.width}x${batchDimensions.length}x${batchDimensions.height}`);
+
+                // Update session state with batch dimensions
+                session.state.userFriendlyParams.width = batchDimensions.width;
+                session.state.userFriendlyParams.length = batchDimensions.length;
+                session.state.userFriendlyParams.height = batchDimensions.height;
+                session.state.hasGarageIntent = true;
+
+                const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
+                await session.memory.chatHistory.addAIChatMessage(response);
+
+                // Now check for other missing fields
+                const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                if (missingFields.length === 0) {
+                    // All fields complete, go to price calculation
+                    session.state.currentField = null;
+                    return response + "\n\nMoving to price calculation...";
+                } else {
+                    // Ask for next missing field
+                    const nextField = missingFields[0];
+                    session.state.currentField = nextField as keyof UserFriendlyParams;
+
+                    const fieldResult = await askForFieldNode({
+                        sessionId,
+                        messages: await session.memory.chatHistory.getMessages(),
+                        userFriendlyParams: session.state.userFriendlyParams,
+                        hasGarageIntent: true,
+                        priceCalculated: false,
+                        currentField: nextField as keyof UserFriendlyParams,
+                        validationError: null,
+                        response: "",
+                        nextStep: null,
+                        stateMapCache: session.stateMapCache || new Map(),
+                        roofMapCache: session.roofMapCache || new Map(),
+                        pendingUpdates: [],
+                        pricingData: null,
+                        basePrice: 0,
+                        selectedAddons: [],
+                        finalPrice: 0,
+                        color: null,
+                        colorCost: 0,
+                        generatedImageUrl: ""
+                    });
+
+                    const fullResponse = `${response}\n\n${fieldResult.response}`;
+                    await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                    return fullResponse;
+                }
             }
 
             if (session.state.currentField === "color" && !session.state.color && !session.state.priceCalculated)
@@ -704,6 +760,87 @@ export class LeadAgent {
         });
 
         return `${previousMessage}\n\n${fieldResult.response}`;
+    }
+
+    private async detectBatchDimensions(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
+        if (!userInput) return null;
+
+        try {
+            logger.info(`[LeadAgent] detectBatchDimensions: "${userInput}"`);
+
+            // Try DimensionManager patterns first
+            const dimensionManager = DimensionManager.getInstance();
+            const calculation = dimensionManager.calculateDimensions(userInput);
+
+            if (calculation && calculation.width && calculation.length && calculation.height) {
+                logger.info(`[LeadAgent] ✅ Pattern match: ${calculation.width}x${calculation.length}x${calculation.height}`);
+                return {
+                    width: calculation.width,
+                    length: calculation.length,
+                    height: calculation.height,
+                };
+            }
+
+            // If patterns fail, try AI
+            logger.info(`[LeadAgent] Pattern failed, trying AI detection...`);
+            const aiResult = await this.detectBatchDimensionsWithAI(userInput);
+
+            if (aiResult) {
+                logger.info(`[LeadAgent] ✅ AI detected: ${aiResult.width}x${aiResult.length}x${aiResult.height}`);
+                return aiResult;
+            }
+
+            return null;
+        } catch (error) {
+            logger.error(`[LeadAgent] detectBatchDimensions error:`, error);
+            return null;
+        }
+    }
+
+    private async detectBatchDimensionsWithAI(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
+        try {
+            const prompt = `Extract building dimensions from user input. Return ONLY JSON:
+{
+  "found": <true if all 3 dimensions present, false otherwise>,
+  "width": <number or null>,
+  "length": <number or null>,
+  "height": <number or null>
+}
+
+User input: "${userInput}"
+
+ONLY JSON:`;
+
+            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+            logger.debug(`[LeadAgent] AI response: "${response}"`);
+
+            let cleaned = response
+                .replace(/```json\s*/g, '')
+                .replace(/```\s*/g, '')
+                .trim();
+
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                return null;
+            }
+
+            const parsed = JSON.parse(jsonMatch[0]);
+
+            if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
+                logger.info(`[LeadAgent] ✅ AI batch detected: ${parsed.width}x${parsed.length}x${parsed.height}`);
+                return {
+                    width: parsed.width,
+                    length: parsed.length,
+                    height: parsed.height,
+                };
+            }
+
+            return null;
+        } catch (error) {
+            logger.error(`[LeadAgent] AI batch detection error:`, error);
+            return null;
+        }
     }
 
     private async handleParameterUpdate(
