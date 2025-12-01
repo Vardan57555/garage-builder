@@ -34,6 +34,27 @@ export class DimensionManager implements IDimensionManager
         const lowerInput = input.toLowerCase();
         logger.info(`[DimensionManager] Input: "${input}"`);
 
+        // ✅ CRITICAL FIX: Corrected regex pattern
+        // This pattern matches: "w 20 l 20 h 10", "w20l20h10", "w:20 l:20 h:10", etc.
+        // The key is \s* (zero or more spaces) instead of \s+ (one or more spaces)
+        const abbreviatedPattern = /w\s*:?\s*(\d+)\s*l\s*:?\s*(\d+)\s*h\s*:?\s*(\d+)/i;
+        const abbreviatedMatch = input.match(abbreviatedPattern);
+
+        if (abbreviatedMatch) {
+            const width = parseInt(abbreviatedMatch[1], 10);
+            const length = parseInt(abbreviatedMatch[2], 10);
+            const height = parseInt(abbreviatedMatch[3], 10);
+
+            logger.info(`[DimensionManager] Regex captured: w=${width}, l=${length}, h=${height}`);
+
+            if (this.validateDimensions(width, length, height)) {
+                logger.info(`[DimensionManager] ✅ Abbreviated format: ${width}x${length}x${height}`);
+                return { width, length, height, numCars: null };
+            } else {
+                logger.warn(`[DimensionManager] Validation failed for abbreviated format: ${width}x${length}x${height}`);
+            }
+        }
+
         // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10"
         const labeledResult = this.tryLabeledDimensions(input);
         if (labeledResult) {
@@ -107,6 +128,7 @@ export class DimensionManager implements IDimensionManager
             /width.*?\d+.*?length.*?\d+/i,
             /\d+\s*ft.*?\d+\s*ft/i,
             /\d+\s*,\s*\d+\s*,\s*\d+/,
+            /w\s*:?\s*\d+\s*l\s*:?\s*\d+\s*h\s*:?\s*\d+/i, // ✅ ADD abbreviated format check
         ];
 
         return explicitPatterns.some(pattern => pattern.test(input));
@@ -223,7 +245,6 @@ export class DimensionManager implements IDimensionManager
         }
     }
 
-    // ✅ FIXED: Now calculates dimensions when garage_type changes
     public handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult {
         const carCountMatch: RegExpMatchArray = String(value).match(/(\d+)/);
         const numCars: number = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
@@ -234,10 +255,9 @@ export class DimensionManager implements IDimensionManager
 
         logger.info(`[DimensionManager] Garage type changing to "${value}" (${numCars} cars)`);
 
-        // ✅ Calculate dimensions based on car count
-        const width = (numCars * 6) + 8;  // Formula: (cars × 6) + 8 clearance
-        const length = 20;                 // Standard: 15ft car + 5ft clearance
-        const height = 10;                 // Standard height
+        const width = (numCars * 6) + 8;
+        const length = 20;
+        const height = 10;
 
         const updatedParams = {
             ...currentParams,

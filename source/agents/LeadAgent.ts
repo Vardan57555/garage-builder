@@ -85,6 +85,65 @@ export class LeadAgent {
 
             const isInFieldMode = !!session.state.currentField;
 
+            if (isInFieldMode && this.isDimensionField(session.state.currentField)) {
+                logger.info(`[LeadAgent] In dimension field mode (${session.state.currentField}), checking for batch dimensions...`);
+
+                const batchDimensions = await this.detectBatchDimensions(input);
+
+                if (batchDimensions && batchDimensions.width && batchDimensions.length && batchDimensions.height) {
+                    logger.info(`[LeadAgent] ✅ BATCH dimensions detected in field mode: ${batchDimensions.width}x${batchDimensions.length}x${batchDimensions.height}`);
+
+                    // Apply all three dimensions
+                    session.state.userFriendlyParams.width = batchDimensions.width;
+                    session.state.userFriendlyParams.length = batchDimensions.length;
+                    session.state.userFriendlyParams.height = batchDimensions.height;
+                    session.state.hasGarageIntent = true;
+                    session.state.currentField = null; // Clear field mode
+
+                    const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
+                    await session.memory.chatHistory.addAIChatMessage(response);
+
+                    // Check for other missing fields
+                    const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                    if (missingFields.length === 0) {
+                        // All fields complete
+                        return response + "\n\nMoving to price calculation...";
+                    } else {
+                        // Ask for next missing field
+                        const nextField = missingFields[0];
+                        session.state.currentField = nextField as keyof UserFriendlyParams;
+
+                        const fieldResult = await askForFieldNode({
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: session.state.userFriendlyParams,
+                            hasGarageIntent: true,
+                            priceCalculated: false,
+                            currentField: nextField as keyof UserFriendlyParams,
+                            validationError: null,
+                            response: "",
+                            nextStep: null,
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: null,
+                            basePrice: 0,
+                            selectedAddons: [],
+                            finalPrice: 0,
+                            color: null,
+                            colorCost: 0,
+                            generatedImageUrl: ""
+                        });
+
+                        const fullResponse = `${response}\n\n${fieldResult.response}`;
+                        await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                        return fullResponse;
+                    }
+                }
+
+                logger.info(`[LeadAgent] No batch dimensions detected, continuing with single field extraction`);
+            }
+
             if (!hasDimensions && !isInFieldMode) {
                 logger.info(`[LeadAgent] Checking for explicit batch dimensions...`);
                 const batchDimensions = await this.detectBatchDimensions(input);
@@ -100,7 +159,6 @@ export class LeadAgent {
                     const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
                     await session.memory.chatHistory.addAIChatMessage(response);
 
-                    // Continue to next field
                     const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
                     if (missingFields.length > 0) {
                         const nextField = missingFields[0];
@@ -137,8 +195,6 @@ export class LeadAgent {
                 }
             } else if (hasDimensions) {
                 logger.info(`[LeadAgent] ✅ Dimensions already complete, SKIPPING batch detection`);
-            } else if (isInFieldMode) {
-                logger.info(`[LeadAgent] ✅ In field mode (${session.state.currentField}), SKIPPING batch detection`);
             }
 
             if (IntentDetector.detectReset(input))
@@ -408,6 +464,11 @@ export class LeadAgent {
             logger.error(`[LeadAgent] Error:`, error);
             return "❌ An error occurred. Please try again.";
         }
+    }
+
+    private isDimensionField(field: string | null): boolean {
+        if (!field) return false;
+        return ['width', 'length', 'height', 'utility_length'].includes(field);
     }
 
     private calculateFinalPrice(basePrice: number, colorCost: number, selectedAddons: any[], sqft: number): number
@@ -759,34 +820,100 @@ export class LeadAgent {
         return `${previousMessage}\n\n${fieldResult.response}`;
     }
 
+    // ============================================================================
+// COPY THIS EXACT METHOD INTO YOUR LeadAgent.ts
+// Replace your entire detectBatchDimensions method with this
+// ============================================================================
+
     private async detectBatchDimensions(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
-        if (!userInput) return null;
+        if (!userInput) {
+            logger.info(`[LeadAgent] detectBatchDimensions: empty input`);
+            return null;
+        }
 
         try {
             logger.info(`[LeadAgent] detectBatchDimensions: "${userInput}"`);
 
-            // ✅ STRICT: Only allow EXPLICIT dimension patterns
-            const explicitPatterns = [
-                /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i,           // "20x30x10"
-                /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/,             // "20, 30, 10"
-                /width.*?(\d+).*?length.*?(\d+).*?height.*?(\d+)/i,  // "width 20 length 30 height 10"
-            ];
+            // ✅ STEP 1: Try abbreviated format FIRST (highest priority)
+            const abbreviatedPattern = /w\s*:?\s*(\d+)\s*l\s*:?\s*(\d+)\s*h\s*:?\s*(\d+)/i;
+            logger.info(`[LeadAgent] Testing abbreviated pattern: ${abbreviatedPattern}`);
 
-            const hasExplicitPattern = explicitPatterns.some(pattern => pattern.test(userInput));
+            const abbreviatedMatch = userInput.match(abbreviatedPattern);
 
-            if (!hasExplicitPattern) {
-                logger.info(`[LeadAgent] ❌ No explicit dimension pattern in: "${userInput}"`);
-                return null;
+            if (abbreviatedMatch) {
+                logger.info(`[LeadAgent] ✅ Abbreviated pattern MATCHED!`);
+                logger.info(`[LeadAgent] Raw match: ${JSON.stringify(abbreviatedMatch)}`);
+
+                const width = parseInt(abbreviatedMatch[1], 10);
+                const length = parseInt(abbreviatedMatch[2], 10);
+                const height = parseInt(abbreviatedMatch[3], 10);
+
+                logger.info(`[LeadAgent] Parsed values: w=${width}, l=${length}, h=${height}`);
+
+                // Validate dimensions
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ Validation passed: ${width}x${length}x${height}`);
+                    return { width, length, height };
+                } else {
+                    logger.warn(`[LeadAgent] ❌ Validation failed: values out of range (1-500)`);
+                    logger.warn(`[LeadAgent] Values: width=${width}, length=${length}, height=${height}`);
+                }
+            } else {
+                logger.info(`[LeadAgent] ❌ Abbreviated pattern did NOT match`);
             }
 
-            logger.info(`[LeadAgent] ✅ Explicit dimension pattern detected`);
+            // ✅ STEP 2: Try other patterns
+            logger.info(`[LeadAgent] Trying standard patterns...`);
 
-            // Try DimensionManager patterns first
+            // X format
+            const xPattern = /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i;
+            const xMatch = userInput.match(xPattern);
+            if (xMatch) {
+                const width = parseInt(xMatch[1], 10);
+                const length = parseInt(xMatch[2], 10);
+                const height = parseInt(xMatch[3], 10);
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ X format match: ${width}x${length}x${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // Comma format
+            const commaPattern = /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/;
+            const commaMatch = userInput.match(commaPattern);
+            if (commaMatch) {
+                const width = parseInt(commaMatch[1], 10);
+                const length = parseInt(commaMatch[2], 10);
+                const height = parseInt(commaMatch[3], 10);
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ Comma format match: ${width}x${length}x${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // Labeled format
+            const labeledPattern = /width.*?(\d+).*?length.*?(\d+).*?height.*?(\d+)/i;
+            const labeledMatch = userInput.match(labeledPattern);
+            if (labeledMatch) {
+                const width = parseInt(labeledMatch[1], 10);
+                const length = parseInt(labeledMatch[2], 10);
+                const height = parseInt(labeledMatch[3], 10);
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ Labeled format match: ${width}x${length}x${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // Try DimensionManager as fallback
+            logger.info(`[LeadAgent] Trying DimensionManager...`);
             const dimensionManager = DimensionManager.getInstance();
             const calculation = dimensionManager.calculateDimensions(userInput);
 
             if (calculation && calculation.width && calculation.length && calculation.height) {
-                logger.info(`[LeadAgent] ✅ Pattern match: ${calculation.width}x${calculation.length}x${calculation.height}`);
+                logger.info(`[LeadAgent] ✅ DimensionManager match: ${calculation.width}x${calculation.length}x${calculation.height}`);
                 return {
                     width: calculation.width,
                     length: calculation.length,
@@ -794,7 +921,9 @@ export class LeadAgent {
                 };
             }
 
+            logger.info(`[LeadAgent] ❌ No pattern matched`);
             return null;
+
         } catch (error) {
             logger.error(`[LeadAgent] detectBatchDimensions error:`, error);
             return null;
