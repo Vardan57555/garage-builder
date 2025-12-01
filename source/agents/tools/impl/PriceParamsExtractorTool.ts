@@ -7,6 +7,7 @@ import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import {Dimensions, PricingBreakdown, UserFriendlyParams} from "@agents/tools/io/IChat";
 import { Constants } from "@common/io/Constants";
+import {DynamicGarageDimensionCalculator} from "@utils/dimensionCalculator/DimensionCalculator";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -428,95 +429,111 @@ export class PriceParamsExtractorTool extends BaseTool
      * Builds the LLM prompt for parameter extraction.
      */
     private buildInferencePrompt(userInput: string): string {
+        const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(userInput);
+        const dimensionExplanation: string = this.buildDimensionExplanation(calculation);
+
         return `You are a garage/building specification extraction system.
 
-⚠️  CRITICAL RULES FOR DIMENSIONS:
-1. ONLY extract dimensions if user EXPLICITLY provides them
-2. DO NOT infer, guess, or calculate default dimensions
-3. DO NOT use standard garage sizes unless explicitly stated
-4. If user says "garage" or "2 car garage" WITHOUT dimensions → return null for width/length/height
-5. ONLY return dimensions if user provides actual numbers
+⚠️ CRITICAL DIMENSION RULES:
+1. ONLY extract dimensions if the user EXPLICITLY provides them.
+2. DO NOT infer, guess, estimate, or calculate default dimensions.
+3. DO NOT use standard garage sizes unless explicitly stated by the user.
+4. If user says generic phrases like "garage", "2 car garage", "build me a garage" WITHOUT numbers → width/length/height MUST be null.
+5. ONLY return dimensions if user provides actual numeric values.
 
 EXPLICIT DIMENSION FORMATS (extract these):
-✅ "20x30x10" → Extract all three
-✅ "width 20 length 30 height 10" → Extract all three
-✅ "20 feet by 30 feet by 10 feet" → Extract all three
-✅ "20, 30, 10" → Extract all three
+- "20x30x10"
+- "20 x 30 x 10"
+- "width 20 length 30 height 10"
+- "20 feet by 30 feet by 10 feet"
+- "20, 30, 10"
 
 IMPLICIT REQUESTS (DO NOT extract dimensions):
-❌ "i want garage" → {"width": null, "length": null, "height": null}
-❌ "2 car garage" → {"garage_type": "2-car", "width": null, "length": null, "height": null}
-❌ "build me a garage" → {"width": null, "length": null, "height": null}
-❌ "need storage" → {"width": null, "length": null, "height": null}
+- "i want garage"
+- "build me a garage"
+- "need storage"
 
-GARAGE TYPE DETECTION (without dimensions):
-- "2 cars", "three car garage" → Extract garage_type ONLY, dimensions stay null
-- "truck garage", "RV garage" → Extract building_type ONLY, dimensions stay null
+GARAGE TYPE DETECTION (no dimensions unless provided):
+- "2 cars", "three car garage" → extract garage_type ONLY (dimensions remain null)
+- "truck garage", "RV garage" → extract building_type ONLY (dimensions remain null)
 
-OTHER PARAMETERS (always extract if mentioned):
-- state_name: Extract if mentioned ("in Texas", "California")
-- roof_type: Extract ONLY if explicitly mentioned ("vertical roof", "box roof")
-- gauge: Extract if mentioned ("14ga", "16 gauge")
-- color: Extract if mentioned ("red", "barn red")
+OTHER PARAMETERS:
+- state_name → extract only if explicitly stated ("in Texas", "Georgia")
+- roof_type → extract ONLY if explicitly stated ("vertical roof", "box roof", "a-frame roof")
+- gauge → extract if mentioned ("14ga", "16 gauge")
+- color → extract if mentioned ("red", "blue", "barn red")
 
-OUTPUT FORMAT - Return ONLY valid JSON (no markdown):
+❗ ROOF TYPE RULES:
+- ONLY extract roof_type if user explicitly says it
+- NEVER infer or default roof_type
+- If not mentioned → roof_type = null
+- Valid values: "regular", "a-frame", "vertical", "box"
+
+📌 DIMENSION CALCULATION LOGIC (ONLY used for interpreting explicit numeric inputs):
+${dimensionExplanation}
+
+OUTPUT FORMAT — return ONLY valid JSON (no markdown, no commentary):
+
 {
-  "garage_type": "detected type or null",
-  "width": null unless explicitly provided,
-  "length": null unless explicitly provided,
-  "height": null unless explicitly provided,
-  "state_name": "state name or null",
-  "roof_type": "roof type or null",
+  "garage_type": "string or null",
+  "width": number or null,
+  "length": number or null,
+  "height": number or null,
+  "state_name": "string or null",
+  "roof_type": "string or null",
   "gauge": number or null,
-  "color": "color or null",
-  "building_type": "type or null"
+  "color": "string or null",
+  "building_type": "string or null"
 }
 
 EXAMPLES:
 Input: "i want garage"
-Output: {"garage_type": "garage", "width": null, "length": null, "height": null}
+→ {"garage_type": "garage", "width": null, "length": null, "height": null}
 
 Input: "2 car garage"
-Output: {"garage_type": "2-car", "width": null, "length": null, "height": null}
+→ {"garage_type": "2-car", "width": null, "length": null, "height": null}
 
 Input: "20x30x10 garage"
-Output: {"width": 20, "length": 30, "height": 10}
+→ {"width": 20, "length": 30, "height": 10}
 
 Input: "width 20 length 30 height 10"
-Output: {"width": 20, "length": 30, "height": 10}
+→ {"width": 20, "length": 30, "height": 10}
 
 Input: "i want a building in Texas"
-Output: {"state_name": "Texas", "width": null, "length": null, "height": null}
+→ {"state_name": "Texas", "width": null, "length": null, "height": null}
 
-⚠️  REMEMBER: If dimensions are NOT explicitly stated, return null for them!
+⚠️ FINAL RULE:
+If dimensions are NOT explicitly stated → width/length/height MUST be null.
 
 User input: "${userInput}"
 
 Return ONLY valid JSON:`;
     }
 
+
     /**
      * Builds dimension calculation explanation for the prompt.
      */
-    // private buildDimensionExplanation(calculation: any): string
-    // {
-    //     let explanation: string = `
-    //             DIMENSION CALCULATION (Dynamic Formula):
-    //             - Width formula: (number_of_cars × 6) + 8 feet clearance
-    //             - Length formula: 15 (car length) + 5 feet clearance = 20 feet
-    //             - Height: 10 feet (standard) or 12 feet (truck/RV)`;
-    //
-    //                     if (calculation.numCars) {
-    //                         explanation += `
-    //
-    //             Example for ${calculation.numCars} car(s):
-    //             - Width: (${calculation.numCars} × 6) + 8 = ${calculation.width} ft
-    //             - Length: 15 + 5 = ${calculation.length} ft
-    //             - Height: ${calculation.height} ft`;
-    //     }
-    //
-    //     return explanation;
-    // }
+
+    private buildDimensionExplanation(calculation: any): string
+    {
+        let explanation: string = `
+                DIMENSION CALCULATION (Dynamic Formula):
+                - Width formula: (number_of_cars × 6) + 8 feet clearance
+                - Length formula: 15 (car length) + 5 feet clearance = 20 feet
+                - Height: 10 feet (standard) or 12 feet (truck/RV)`;
+
+                        if (calculation.numCars) {
+                            explanation += `
+
+                Example for ${calculation.numCars} car(s):
+                - Width: (${calculation.numCars} × 6) + 8 = ${calculation.width} ft
+                - Length: 15 + 5 = ${calculation.length} ft
+                - Height: ${calculation.height} ft`;
+        }
+
+        return explanation;
+    }
 }
 
 /**

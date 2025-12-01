@@ -103,15 +103,40 @@ Return ONLY JSON:`;
         logger.info(`[ParameterExtractor] Has explicit car count: ${hasExplicitCarCount}`);
         logger.info(`[ParameterExtractor] Has explicit dimensions: ${hasExplicitDimensions}`);
 
+        // ✅ FIX: If user provides car count, calculate dimensions automatically
+        if (hasExplicitCarCount && !hasExplicitDimensions) {
+            logger.info(`[ParameterExtractor] ✅ Car count provided, calculating dimensions...`);
+
+            const dimensionCalc = this.dimensionManager.calculateDimensions(userInput);
+
+            if (dimensionCalc && dimensionCalc.width && dimensionCalc.length && dimensionCalc.height) {
+                logger.info(`[ParameterExtractor] ✅ Dimensions calculated: ${dimensionCalc.width}×${dimensionCalc.length}×${dimensionCalc.height}`);
+
+                currentParams.width = dimensionCalc.width;
+                currentParams.length = dimensionCalc.length;
+                currentParams.height = dimensionCalc.height;
+
+                // Extract garage_type
+                const carMatch = userInput.match(/(\d+)\s*(?:car|cars?)/i);
+                if (carMatch) {
+                    currentParams.garage_type = `${carMatch[1]}-car`;
+                }
+
+                return {
+                    userFriendlyParams: currentParams,
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                };
+            }
+        }
+
         if (!hasExplicitCarCount && !hasExplicitDimensions) {
-            logger.info(`[ParameterExtractor] ⚠️ User wants building but NO car count or dimensions provided`);
+            logger.info(`[ParameterExtractor] ⚠️ No car count or dimensions provided`);
             logger.info(`[ParameterExtractor] Will ask for parameters individually`);
 
             return {
                 userFriendlyParams: {
                     ...currentParams,
-                    // ✅ DON'T set garage_type
-                    // ✅ DON'T auto-calculate dimensions
                     building_type: buildingType || undefined,
                 },
                 currentField: null,

@@ -31,6 +31,7 @@ export class DimensionManager implements IDimensionManager
     }
 
     public calculateDimensions(input: string): DimensionResult {
+        const lowerInput = input.toLowerCase();
         logger.info(`[DimensionManager] Input: "${input}"`);
 
         // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10"
@@ -40,35 +41,47 @@ export class DimensionManager implements IDimensionManager
             return labeledResult;
         }
 
-        // Priority 2: X format "10x10x10"
+        // ✅ PRIORITY 2: X format "20x30x10"
         const xFormatResult = this.tryExplicitDimensions(input);
         if (xFormatResult) {
             logger.info(`[DimensionManager] ✅ X format: ${JSON.stringify(xFormatResult)}`);
             return xFormatResult;
         }
 
-        // Priority 3: Comma-separated "10, 10, 10"
+        // ✅ PRIORITY 3: Comma-separated "10, 10, 10"
         const commaResult = this.tryCommaSeparatedDimensions(input);
         if (commaResult) {
             logger.info(`[DimensionManager] ✅ Comma format: ${JSON.stringify(commaResult)}`);
             return commaResult;
         }
 
-        // Priority 4: Space-separated "10 10 10"
+        // ✅ PRIORITY 4: Space-separated "10 10 10"
         const spaceResult = this.trySpaceSeparatedDimensions(input);
         if (spaceResult) {
             logger.info(`[DimensionManager] ✅ Space format: ${JSON.stringify(spaceResult)}`);
             return spaceResult;
         }
 
+        // ✅ PRIORITY 5: Car count pattern - CALCULATE dimensions
+        const carCountPattern = /\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(car|cars?)\b/i;
+        const carMatch = lowerInput.match(carCountPattern);
+
+        if (carMatch && !this.hasExplicitDimensions(input)) {
+            logger.info(`[DimensionManager] Car count detected, CALCULATING dimensions`);
+            const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(input);
+
+            if (calculation && calculation.width && calculation.length && calculation.height) {
+                logger.info(`[DimensionManager] ✅ Calculated from car count: ${calculation.width}x${calculation.length}x${calculation.height}`);
+                return calculation;
+            }
+        }
+
         // Fallback: Use existing calculator
-        logger.info(`[DimensionManager] No explicit format matched, using calculator`);
+        logger.info(`[DimensionManager] Using fallback calculator`);
         return DynamicGarageDimensionCalculator.calculateDimensionsFromInput(input);
     }
 
-
     private tryCommaSeparatedDimensions(input: string): DimensionResult | null {
-        // Match 3 numbers separated by commas
         const match = input.match(/(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/);
 
         if (!match) {
@@ -88,11 +101,19 @@ export class DimensionManager implements IDimensionManager
         return { width, length, height, numCars: null };
     }
 
-    private trySpaceSeparatedDimensions(input: string): DimensionResult | null {
-        // Match only if it's 3 bare numbers with spaces (not mixed with other text)
-        const trimmed = input.trim();
+    private hasExplicitDimensions(input: string): boolean {
+        const explicitPatterns = [
+            /\d+\s*x\s*\d+\s*x\s*\d+/i,
+            /width.*?\d+.*?length.*?\d+/i,
+            /\d+\s*ft.*?\d+\s*ft/i,
+            /\d+\s*,\s*\d+\s*,\s*\d+/,
+        ];
 
-        // Must start with optional context then have 3 numbers
+        return explicitPatterns.some(pattern => pattern.test(input));
+    }
+
+    private trySpaceSeparatedDimensions(input: string): DimensionResult | null {
+        const trimmed = input.trim();
         const match = trimmed.match(/(?:^|\D)(\d+)\s+(\d+)\s+(\d+)(?:\s|$|[^\d])/);
 
         if (!match) {
@@ -114,7 +135,6 @@ export class DimensionManager implements IDimensionManager
     private tryLabeledDimensions(input: string): DimensionResult | null {
         const lowerInput = input.toLowerCase();
 
-        // ✅ FIX: Use word boundaries to avoid partial matches
         const widthMatch = lowerInput.match(/\bwidth\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         const lengthMatch = lowerInput.match(/\blength\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         const heightMatch = lowerInput.match(/\bheight\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
@@ -123,7 +143,6 @@ export class DimensionManager implements IDimensionManager
         const length = lengthMatch ? parseInt(lengthMatch[1], 10) : null;
         const height = heightMatch ? parseInt(heightMatch[1], 10) : null;
 
-        // ✅ CRITICAL: All three MUST be present
         if (width && length && height && this.validateDimensions(width, length, height)) {
             logger.info(`[DimensionManager] Labeled match: ${width}x${length}x${height}`);
             return { width, length, height, numCars: null };
@@ -141,11 +160,7 @@ export class DimensionManager implements IDimensionManager
         return valid;
     }
 
-    /**
-     * Original X format parser (keep existing)
-     */
     private tryExplicitDimensions(input: string): DimensionResult | null {
-        // ✅ FIXED: Allow spaces around 'x' and handle both cases
         const match = input.match(/(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i);
 
         if (!match) {
@@ -208,6 +223,7 @@ export class DimensionManager implements IDimensionManager
         }
     }
 
+    // ✅ FIXED: Now calculates dimensions when garage_type changes
     public handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult {
         const carCountMatch: RegExpMatchArray = String(value).match(/(\d+)/);
         const numCars: number = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
@@ -216,27 +232,29 @@ export class DimensionManager implements IDimensionManager
             return {success: false, message: `❌ Could not process ${value}`};
         }
 
-        logger.info(`[DimensionHandler] Garage type changing from "${currentParams.garage_type}" to "${value}"`);
-        logger.info(`[DimensionHandler] Current dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
+        logger.info(`[DimensionManager] Garage type changing to "${value}" (${numCars} cars)`);
 
-        // ✅ ONLY update garage_type, DON'T auto-calculate dimensions
-        const updatedParams = { ...currentParams };
-        updatedParams.garage_type = value;
+        // ✅ Calculate dimensions based on car count
+        const width = (numCars * 6) + 8;  // Formula: (cars × 6) + 8 clearance
+        const length = 20;                 // Standard: 15ft car + 5ft clearance
+        const height = 10;                 // Standard height
 
-        logger.info(`[DimensionHandler] Updated garage_type to: ${value}`);
-        logger.info(`[DimensionHandler] Dimensions remain: ${updatedParams.width}×${updatedParams.length}×${updatedParams.height}`);
+        const updatedParams = {
+            ...currentParams,
+            garage_type: value,
+            width,
+            length,
+            height
+        };
+
+        logger.info(`[DimensionManager] ✅ Calculated dimensions: ${width}×${length}×${height}`);
 
         return {
             success: true,
-            message: `✓ Updated to ${numCars}-car garage`,
+            message: `✓ Updated to ${numCars}-car garage (${width}ft × ${length}ft × ${height}ft)`,
             updatedParams,
         };
     }
 }
 
-/**
- * Function to enforce the Singleton pattern.
- */
-function Enforce(): void
-{
-}
+function Enforce(): void {}
