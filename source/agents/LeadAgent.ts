@@ -801,63 +801,6 @@ export class LeadAgent {
         }
     }
 
-//     private async detectBatchDimensionsWithAI(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
-//         try {
-//             const prompt = `STRICT RULES: Only extract if ALL THREE dimensions are EXPLICITLY mentioned.
-//
-// "i want garage" → NO, not explicit dimensions
-// "20x30x10" → YES, explicit
-// "width 20 length 30 height 10" → YES, explicit
-// "two car garage" → NO, car count not actual dimensions
-//
-// Extract ONLY if user explicitly stated width/length/height numbers.
-//
-// Return ONLY JSON:
-// {
-//   "found": <true ONLY if all 3 dimensions explicitly present>,
-//   "width": <number or null>,
-//   "length": <number or null>,
-//   "height": <number or null>
-// }
-//
-// User input: "${userInput}"
-//
-// ONLY JSON:`;
-//
-//             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
-//
-//             logger.debug(`[LeadAgent] AI response: "${response}"`);
-//
-//             let cleaned = response
-//                 .replace(/```json\s*/g, '')
-//                 .replace(/```\s*/g, '')
-//                 .trim();
-//
-//             const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-//             if (!jsonMatch) {
-//                 return null;
-//             }
-//
-//             const parsed = JSON.parse(jsonMatch[0]);
-//
-//             // ✅ STRICT: Only return if found=true AND all three present
-//             if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
-//                 logger.info(`[LeadAgent] ✅ AI batch detected: ${parsed.width}x${parsed.length}x${parsed.height}`);
-//                 return {
-//                     width: parsed.width,
-//                     length: parsed.length,
-//                     height: parsed.height,
-//                 };
-//             }
-//
-//             logger.debug(`[LeadAgent] AI: Not explicit dimensions`);
-//             return null;
-//         } catch (error) {
-//             logger.error(`[LeadAgent] AI batch detection error:`, error);
-//             return null;
-//         }
-//     }
-
     private async handleParameterUpdate(
         session: any,
         sessionId: string,
