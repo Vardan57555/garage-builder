@@ -178,10 +178,11 @@ export class AddonServiceImpl implements AddonService
         try {
             logger.info(`[AddonParser] Trying quantity selection with AI for: "${input}"`);
 
-            // ✅ Pattern: (optional action words) + (number/word) + (addon keyword)
-            const quantityPattern = /(?:add|also|and|get|want|need)?\s*([a-z\s]+?)\s+(window|garage\s+door|door|walk.?in|brace|anchor|cupola|truss|sectional)s?/gi;
+            // ✅ NEW: More flexible pattern that captures ANY quantity expression
+            // Pattern: (optional action) + (any text that could be a number) + (addon keyword)
+            const flexiblePattern = /(?:add|also|and|get|want|need|i\s+want|i'd\s+like)?\s*([a-z0-9\s]+?)\s+(window|garage\s*door|door|walk\s*in|brace|anchor|cupola|truss|sectional|overhead)s?(?:\s|$|,)/gi;
 
-            const matches: RegExpExecArray[] = [...input.matchAll(quantityPattern)];
+            const matches: RegExpExecArray[] = [...input.matchAll(flexiblePattern)];
 
             if (matches.length === 0) {
                 logger.debug(`[AddonParser] No quantity pattern matches`);
@@ -192,12 +193,12 @@ export class AddonServiceImpl implements AddonService
             const numberExtractor = AINumberExtractor.getInstance();
 
             for (const match of matches) {
-                const quantityText = match[1].trim(); // "two", "a couple", "2", etc.
+                const quantityText = match[1].trim(); // "two", "a couple", "2", "three", etc.
                 const keyword = match[2].trim(); // "window", "door", etc.
 
                 logger.info(`[AddonParser] Extracting quantity from: "${quantityText}" for keyword: "${keyword}"`);
 
-                // ✅ Extract quantity using AI
+                // ✅ Use AINumberExtractor to handle word numbers
                 const quantity = await numberExtractor.extractNumber(
                     quantityText,
                     `addon quantity for ${keyword}`
@@ -212,7 +213,6 @@ export class AddonServiceImpl implements AddonService
 
                 // Find matching addons
                 const matchingAddons: Addon[] = this.findMatchingAddons(keyword, addonsMenu);
-
                 if (matchingAddons.length === 0) {
                     logger.warn(`[AddonParser] No addons match keyword: "${keyword}"`);
                     continue;
@@ -220,7 +220,7 @@ export class AddonServiceImpl implements AddonService
 
                 logger.info(`[AddonParser] Found ${matchingAddons.length} matching addons for "${keyword}"`);
 
-                // Add the requested quantity
+                // ✅ Add the requested quantity
                 for (let i = 0; i < quantity; i++) {
                     const addon: Addon = matchingAddons[i % matchingAddons.length];
                     selected.push({
@@ -229,7 +229,7 @@ export class AddonServiceImpl implements AddonService
                     });
                 }
 
-                logger.info(`[AddonParser] Added ${quantity} x ${keyword}`);
+                logger.info(`[AddonParser] ✅ Added ${quantity} × ${keyword}`);
             }
 
             if (selected.length > 0) {
@@ -240,7 +240,6 @@ export class AddonServiceImpl implements AddonService
 
         } catch (error) {
             logger.error(`[AddonParser] Error in AI quantity selection:`, error);
-
             // ✅ FALLBACK: Try original digit-only parsing
             logger.info(`[AddonParser] Falling back to digit-only parsing`);
             return this.parseQuantitySelections(input, addonsMenu);
@@ -638,34 +637,57 @@ export class AddonServiceImpl implements AddonService
     /**
      * Parse quantity + keyword patterns (e.g., "2 windows", "add 3 doors")
      */
-    private parseQuantitySelections(input: string, addonsMenu: Addon[]): SelectedAddon[]
-    {
-        const quantityPattern = /(?:add|also|and|get|want|need)?\s*(\d+)\s+([\w_]+(?:\s+[\w_]+)*)/gi;
+    private async parseQuantitySelections(input: string, addonsMenu: Addon[]): Promise<SelectedAddon[]> {
+        const quantityPattern = /(?:add|also|and|get|want|need)?\s*(\d+|[a-z]+)\s+([\w_]+(?:\s+[\w_]+)*)/gi;
         const matches: RegExpExecArray[] = [...input.matchAll(quantityPattern)];
 
-        if (matches.length === 0)
-        {
+        if (matches.length === 0) {
             return [];
         }
 
         const selected: SelectedAddon[] = [];
+        const numberExtractor = AINumberExtractor.getInstance();
 
-        matches.forEach((match, idx) => {
-            const quantity: number = parseInt(match[1], 10);
-            const keyword: string = match[2].trim();
+        for (const match of matches) {
+            let quantity: number | null = null;
+            const quantityRaw = match[1];
+            const keyword = match[2].trim();
+
+            // ✅ Try to parse as digit first
+            if (/^\d+$/.test(quantityRaw)) {
+                quantity = parseInt(quantityRaw, 10);
+            } else {
+                // ✅ Use AINumberExtractor for word numbers
+                try {
+                    quantity = await numberExtractor.extractNumber(
+                        quantityRaw,
+                        `addon quantity for ${keyword}`
+                    );
+                } catch (error) {
+                    logger.warn(`[AddonParser] Failed to extract number from: "${quantityRaw}"`, error);
+                    continue;
+                }
+            }
+
+            if (!quantity || quantity <= 0) {
+                logger.warn(`[AddonParser] Invalid quantity: ${quantity}`);
+                continue;
+            }
+
+            logger.info(`[AddonParser] Quantity match: quantity=${quantity}, keyword="${keyword}"`);
+
             const matchingAddons: Addon[] = this.findMatchingAddons(keyword, addonsMenu);
 
-            logger.debug(`[AddonParser] Quantity match ${idx}: quantity=${quantity}, keyword="${keyword}", matches=${matchingAddons.length}`);
-
-            for (let i = 0; i < quantity; i++)
-            {
+            for (let i = 0; i < quantity; i++) {
                 const addon: Addon = matchingAddons[i % matchingAddons.length];
                 selected.push({
                     ...addon,
                     id: `${addon.id}_${Date.now()}_${i}`,
                 });
             }
-        });
+
+            logger.info(`[AddonParser] ✅ Added ${quantity} × ${keyword}`);
+        }
 
         return selected;
     }

@@ -437,71 +437,6 @@ export class LeadAgent {
         return isAddon && !isCarRelated;
     }
 
-    private parseAddonSelections(userInput: string, addonsMenu: any[]): any[]
-    {
-        const selected: any[] = [];
-
-        const normalizeForMatching = (text: string): string => {
-            return text.toLowerCase().trim().replace(/[_\s-]+/g, "").replace(/s$/, "");
-        };
-
-        const looksLikeNumberSelection = /^[\d,\s]+$/.test(userInput.trim());
-
-        if (looksLikeNumberSelection)
-        {
-            const numberMatches: RegExpMatchArray = userInput.match(/\d+/g);
-            if (numberMatches)
-            {
-                const indices: number[] = numberMatches
-                    .map((n) => parseInt(n) - 1)
-                    .filter((idx) => idx >= 0 && idx < addonsMenu.length);
-
-                indices.forEach((idx) => selected.push(addonsMenu[idx]));
-                if (selected.length > 0) return selected;
-            }
-        }
-
-        const quantityPattern = /(?:add|also|and|get|want|need)?\s*(\d+)\s+([\w_]+(?:\s+[\w_]+)*)/gi;
-        const matches: RegExpExecArray[] = [...userInput.matchAll(quantityPattern)];
-
-        if (matches.length > 0)
-        {
-            for (const match of matches)
-            {
-                const quantity: number = parseInt(match[1], 10);
-                const rawKeyword: string = match[2].trim();
-                const normalizedKeyword: string = normalizeForMatching(rawKeyword);
-
-                const matchingAddons = addonsMenu.filter((addon) =>
-                {
-                    const normalizedLabel: string = normalizeForMatching(addon.label || "");
-                    const normalizedType: string = normalizeForMatching(addon.type || "");
-
-                    return (
-                        normalizedLabel.includes(normalizedKeyword) ||
-                        (normalizedKeyword.includes("window") && normalizedType.includes("window")) ||
-                        (normalizedKeyword.includes("door") && normalizedType.includes("door")) ||
-                        (normalizedKeyword.includes("walkin") && normalizedType.includes("walkin"))
-                    );
-                });
-
-                if (matchingAddons.length > 0)
-                {
-                    for (let i = 0; i < quantity; i++) {
-                        const addon = matchingAddons[i % matchingAddons.length];
-                        selected.push({ ...addon, id: `${addon.id}_${Date.now()}_${i}` });
-                    }
-                }
-            }
-            if (selected.length > 0)
-            {
-                return selected;
-            }
-        }
-
-        return selected;
-    }
-
     private async getAddonsMenuFromDatabase(): Promise<any[]>
     {
         const allAddons: AddonFromDB[] = await this.addonManagerInstance.getAddonsWithCache();
@@ -1059,7 +994,10 @@ export class LeadAgent {
                 return `❌ Error: Addon options not available`;
             }
 
-            const selectedAddons = this.parseAddonSelections(userInput, addonsMenu);
+            // ✅ CRITICAL FIX: Use AddonServiceImpl.parse() instead of parseAddonSelections()
+            // This will use AI number extraction for "two", "three", "a couple", etc.
+            const addonService = AddonServiceImpl.getInstance();
+            const selectedAddons = await addonService.parse(userInput, addonsMenu);
 
             if (selectedAddons.length === 0) {
                 return `I couldn't find any addons matching "${userInput}".\n\nPlease try:\n• "1" to select by number\n• "2 windows" for 2 windows\n• "add 3 doors" for 3 garage doors\n• "no" or "skip" to proceed without addons`;
