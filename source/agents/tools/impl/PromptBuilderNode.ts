@@ -167,6 +167,11 @@ Exclude: people, text, watermarks, signs, vehicles`;
     {
         const sections: string[] = [
             this.buildSystemPrompt(),
+            `BUILDING TYPE RULES:
+        - "garage" or "2 car garage" → {"building_type": "garage"}
+        - "shed" or "storage shed" → {"building_type": "shed"}
+        - "barn" or "metal barn" → {"building_type": "barn"}
+        - If unclear → use default "garage"`,
             this.buildDimensionSection(calculation),
             this.buildFieldContextSection(context.currentField),
             this.buildLockedFieldsSection(context.currentParams),

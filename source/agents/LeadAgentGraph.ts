@@ -72,7 +72,13 @@ export function buildLeadAgentGraph() {
         .addConditionalEdges(
             "extract_parameters",
             (state) => {
-                logger.debug(`[extract_parameters] nextStep=${state.nextStep}`);
+                logger.debug(`[extract_parameters] nextStep=${state.nextStep}, building_type=${state.userFriendlyParams.building_type}`);
+
+                // ✅ Ensure building_type is always set
+                if (!state.userFriendlyParams.building_type) {
+                    logger.warn(`[extract_parameters] ⚠️ Building type not set after extraction!`);
+                }
+
                 return state.nextStep || "check_missing_fields";
             },
             {

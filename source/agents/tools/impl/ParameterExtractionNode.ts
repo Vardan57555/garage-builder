@@ -90,8 +90,66 @@ Return ONLY JSON:`;
         const currentParams = { ...state.userFriendlyParams };
         const userInput = this.extractContextFromState(state);
 
-        // ✅ PRIORITY 0: BATCH EXTRACTION CHECK FIRST (before parameter updates)
-        // This must run BEFORE detectParameterUpdateFromInput to catch batch dimensions
+
+        const buildingType = await this.extractBuildingTypeIfMissing(userInput, currentParams);
+        if (buildingType) {
+            currentParams.building_type = buildingType;
+            logger.info(`[ParameterExtractor] ✅ Building type set to: ${buildingType}`);
+        }
+
+        const hasExplicitCarCount = /(\d+)\s*(?:car|cars?)\s*(?:garage)?/i.test(userInput);
+        const hasExplicitDimensions = this.detectExplicitDimensions(userInput);
+
+        logger.info(`[ParameterExtractor] Has explicit car count: ${hasExplicitCarCount}`);
+        logger.info(`[ParameterExtractor] Has explicit dimensions: ${hasExplicitDimensions}`);
+
+        if (!hasExplicitCarCount && !hasExplicitDimensions) {
+            logger.info(`[ParameterExtractor] ⚠️ User wants building but NO car count or dimensions provided`);
+            logger.info(`[ParameterExtractor] Will ask for parameters individually`);
+
+            return {
+                userFriendlyParams: {
+                    ...currentParams,
+                    // ✅ DON'T set garage_type
+                    // ✅ DON'T auto-calculate dimensions
+                    building_type: buildingType || undefined,
+                },
+                currentField: null,
+                nextStep: "check_missing_fields",
+            };
+        }
+
+        const hasDimensions = !!(
+            currentParams.width &&
+            currentParams.length &&
+            currentParams.height
+        );
+
+        if (hasDimensions) {
+            logger.info(
+                `[ParameterExtractor] ✅ Dimensions already complete, PROTECTING from overwrite`,
+                {
+                    width: currentParams.width,
+                    length: currentParams.length,
+                    height: currentParams.height,
+                }
+            );
+
+            // Don't run extraction if dimensions are complete unless explicitly requested
+            if (!this.isExplicitDimensionChange(userInput)) {
+                return {
+                    userFriendlyParams: currentParams,
+                    nextStep: "check_missing_fields",
+                };
+            }
+        }
+
+
+        if (!hasExplicitDimensions && !hasDimensions) {
+            logger.info(`[ParameterExtractor] No explicit dimensions in: "${userInput}"`);
+            logger.info(`[ParameterExtractor] Will proceed to ask for dimensions individually`);
+        }
+
         logger.info(`[ParameterExtractor] PRIORITY 0: Checking for batch dimension extraction...`);
         const batchResult = await this.tryBatchDimensionExtractionWithAI(userInput);
         if (batchResult && batchResult.width && batchResult.length && batchResult.height) {
@@ -161,27 +219,6 @@ Return ONLY JSON:`;
 
         logger.info(`[ParameterExtractor] User input: "${userInput}"`);
         logger.info(`[ParameterExtractor] Current field: ${state.currentField}`);
-
-        const hasDimensions = !!(
-            state.userFriendlyParams.width &&
-            state.userFriendlyParams.length &&
-            state.userFriendlyParams.height
-        );
-
-        if (hasDimensions && state.currentField === null) {
-            logger.info(
-                `[ParameterExtractor] ✅ Dimensions already complete, skipping extraction`,
-                {
-                    width: state.userFriendlyParams.width,
-                    length: state.userFriendlyParams.length,
-                    height: state.userFriendlyParams.height,
-                }
-            );
-            return {
-                userFriendlyParams: currentParams,
-                nextStep: "check_missing_fields",
-            };
-        }
 
         try {
             if (state.currentField && typeof state.currentField === 'string') {
@@ -437,6 +474,68 @@ Return ONLY JSON:`;
         return /^\d+(?:\.\d+)?$/.test(input.trim());
     }
 
+    private isExplicitDimensionChange(input: string): boolean {
+        const changeKeywords = [
+            /change.*?(width|length|height|dimension)/i,
+            /update.*?(width|length|height|dimension)/i,
+            /make.*?(width|length|height|dimension)/i,
+            /set.*?(width|length|height|dimension)/i,
+        ];
+
+        return changeKeywords.some(pattern => pattern.test(input));
+    }
+
+    private async extractBuildingTypeIfMissing(
+        userInput: string,
+        currentParams: Partial<UserFriendlyParams>
+    ): Promise<string | null> {
+        if (currentParams.building_type) {
+            logger.info(`[ParameterExtractor] Building type already set: ${currentParams.building_type}`);
+            return currentParams.building_type;
+        }
+
+        logger.info(`[ParameterExtractor] Attempting to extract building_type from: "${userInput}"`);
+
+        try {
+            const prompt = `Extract the building type from user input. ONLY return one of: garage, shed, barn
+
+CRITICAL RULES:
+- Only extract if user EXPLICITLY mentions the type
+- "i want garage" → garage (user is asking about garage)
+- "i want a garage" → garage
+- "need shed" → shed
+- "looking for barn" → barn
+- "just tell me" or "hello" or no building mention → return: null (do NOT guess)
+
+Return ONLY: garage, shed, barn, or null (lowercase)
+NO OTHER TEXT. Just the type or null:`;
+
+            const response = await sharedLLM.invoke([
+                new HumanMessage(`${prompt}\n\nUser input: "${userInput}"`)
+            ]);
+
+            const extracted = response.trim().toLowerCase();
+
+            if (extracted === 'null' || extracted === '') {
+                logger.info(`[ParameterExtractor] No explicit building_type detected`);
+                return null;
+            }
+
+            const validTypes = ['garage', 'shed', 'barn'];
+            if (validTypes.includes(extracted)) {
+                logger.info(`[ParameterExtractor] ✅ Extracted building_type: ${extracted}`);
+                return extracted;
+            }
+
+            logger.warn(`[ParameterExtractor] Invalid building_type: ${extracted}`);
+            return null;
+
+        } catch (error) {
+            logger.error(`[ParameterExtractor] Error extracting building_type:`, error);
+            return null;
+        }
+    }
+
     private async tryBatchDimensionExtractionWithAI(userInput: string): Promise<Partial<UserFriendlyParams> | null> {
         if (!userInput) {
             logger.debug(`[tryBatchDimensionExtractionWithAI] Empty input`);
@@ -487,6 +586,17 @@ Return ONLY JSON:`;
             logger.error(`[tryBatchDimensionExtractionWithAI] Exception:`, error);
             return null;
         }
+    }
+
+    private detectExplicitDimensions(input: string): boolean {
+        const patterns = [
+            /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i,
+            /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/,
+            /width.*?(\d+).*?length.*?(\d+).*?height.*?(\d+)/i,
+            /(\d+)\s*ft.*?(\d+)\s*ft.*?(\d+)\s*ft/i,
+        ];
+
+        return patterns.some(pattern => pattern.test(input));
     }
 
     private async detectBatchDimensionsWithAI(userInput: string): Promise<Partial<UserFriendlyParams> | null> {
@@ -737,24 +847,22 @@ ONLY valid JSON:`;
         return { ...current, ...extracted };
     }
 
-    private async processDimensions(current: Record<string, any>, extracted: Record<string, any>, merged: Record<string, any>): Promise<void> {
+    private async processDimensions(
+        current: Record<string, any>,
+        extracted: Record<string, any>,
+        merged: Record<string, any>
+    ): Promise<void> {
         logger.info(`[ParameterExtractor] Processing dimensions...`);
-        logger.info(`[ParameterExtractor] Extracted:`, {
-            width: extracted.width,
-            length: extracted.length,
-            height: extracted.height,
-            garage_type: extracted.garage_type,
-        });
 
-        const hasExplicitDimensions = !!(extracted.width && extracted.length && extracted.height && !extracted.garage_type);
+        const hasExplicitDimensions = !!(
+            extracted.width &&
+            extracted.length &&
+            extracted.height &&
+            !extracted.garage_type
+        );
 
         if (hasExplicitDimensions) {
-            logger.info(`[ParameterExtractor] ✅ Explicit dimensions detected, preserving:`, {
-                width: extracted.width,
-                length: extracted.length,
-                height: extracted.height,
-            });
-
+            logger.info(`[ParameterExtractor] ✅ Explicit dimensions detected`);
             merged.width = extracted.width;
             merged.length = extracted.length;
             merged.height = extracted.height;
@@ -762,29 +870,11 @@ ONLY valid JSON:`;
             return;
         }
 
-        const garageTypeChanged: boolean = this.dimensionManager.isGarageTypeChanged(extracted.garage_type, current.garage_type);
+        // ✅ CRITICAL: DON'T auto-calculate dimensions based on garage_type
+        // Just preserve existing dimensions and let user provide them
+        this.dimensionManager.preserveExistingDimensions(merged, current, extracted);
 
-        if (garageTypeChanged) {
-            logger.info(`[ParameterExtractor] Garage type changed from "${current.garage_type}" to "${extracted.garage_type}"`);
-
-            this.dimensionManager.clearDimensions(merged);
-
-            const calc: DimensionResult = this.dimensionManager.calculateDimensions(extracted.garage_type!);
-
-            if (!this.dimensionManager.applyDimensions(merged, calc)) {
-                logger.warn(`[ParameterExtractor] Failed to calculate dimensions`);
-            }
-        } else {
-            this.dimensionManager.preserveExistingDimensions(merged, current, extracted);
-        }
-
-        if (merged.garage_type && !merged.width) {
-            const calc: DimensionResult = this.dimensionManager.calculateDimensions(merged.garage_type);
-
-            if (!this.dimensionManager.applyDimensions(merged, calc)) {
-                logger.warn(`[ParameterExtractor] Failed to calculate dimensions`);
-            }
-        }
+        logger.info(`[ParameterExtractor] Preserved dimensions: ${merged.width}×${merged.length}×${merged.height}`);
     }
 
     private async validateParameters(params: Record<string, any>, stateMapCache: any): Promise<ValidationResult | null> {

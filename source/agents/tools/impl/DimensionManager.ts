@@ -208,44 +208,27 @@ export class DimensionManager implements IDimensionManager
         }
     }
 
-    public handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult
-    {
+    public handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult {
         const carCountMatch: RegExpMatchArray = String(value).match(/(\d+)/);
         const numCars: number = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
 
-        if (!numCars || numCars <= 0)
-        {
+        if (!numCars || numCars <= 0) {
             return {success: false, message: `❌ Could not process ${value}`};
         }
 
-        const calculation =
-            DynamicGarageDimensionCalculator.calculateDimensionsFromInput(`${numCars} cars`);
-
-        if (!calculation.width || !calculation.length)
-        {
-            return {success: false, message: `❌ Could not process ${value}`,};
-        }
-
         logger.info(`[DimensionHandler] Garage type changing from "${currentParams.garage_type}" to "${value}"`);
-        logger.info(`[DimensionHandler] OLD dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
+        logger.info(`[DimensionHandler] Current dimensions: ${currentParams.width}×${currentParams.length}×${currentParams.height}`);
 
+        // ✅ ONLY update garage_type, DON'T auto-calculate dimensions
         const updatedParams = { ...currentParams };
-        delete updatedParams.width;
-        delete updatedParams.length;
-        delete updatedParams.height;
+        updatedParams.garage_type = value;
 
-        logger.info(`[DimensionHandler] Deleted old dimensions`);
-
-        updatedParams.width = calculation.width;
-        updatedParams.length = calculation.length;
-        updatedParams.height = calculation.height;
-        updatedParams.garage_type = calculation.garageType;
-
-        logger.info(`[DimensionHandler] NEW dimensions: ${calculation.width}×${calculation.length}×${calculation.height}`);
+        logger.info(`[DimensionHandler] Updated garage_type to: ${value}`);
+        logger.info(`[DimensionHandler] Dimensions remain: ${updatedParams.width}×${updatedParams.length}×${updatedParams.height}`);
 
         return {
             success: true,
-            message: `✓ Updated to ${calculation.numCars}-car garage (${calculation.width}×${calculation.length}×${calculation.height}ft)`,
+            message: `✓ Updated to ${numCars}-car garage`,
             updatedParams,
         };
     }

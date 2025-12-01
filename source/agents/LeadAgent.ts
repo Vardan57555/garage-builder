@@ -18,8 +18,6 @@ import { generateGarageVisualizationNode } from "@agents/tools/impl/Visualizatio
 import { ParameterUpdateServiceImpl } from "@agents/tools/impl/ParameterUpdateServiceImpl";
 import  { LeadAgentHelpers } from "@agents/LeadAgentHelpers";
 import { askForFieldNode } from "@agents/tools/impl/AskForFieldNode";
-import {sharedLLM} from "@llm/SharedLLM";
-import {HumanMessage} from "@langchain/core/messages";
 import {DimensionManager} from "@agents/tools/impl/DimensionManager";
 const logger: pino.Logger = createLogger(module);
 
@@ -78,6 +76,70 @@ export class LeadAgent {
                 height: session.state.userFriendlyParams.height,
             };
             logger.info(`[LeadAgent] Original dimensions stored:`, originalDimensions);
+
+            const hasDimensions = !!(
+                originalDimensions.width &&
+                originalDimensions.length &&
+                originalDimensions.height
+            );
+
+            const isInFieldMode = !!session.state.currentField;
+
+            if (!hasDimensions && !isInFieldMode) {
+                logger.info(`[LeadAgent] Checking for explicit batch dimensions...`);
+                const batchDimensions = await this.detectBatchDimensions(input);
+
+                if (batchDimensions && batchDimensions.width && batchDimensions.length && batchDimensions.height) {
+                    logger.info(`[LeadAgent] ✅ EXPLICIT batch dimensions: ${batchDimensions.width}x${batchDimensions.length}x${batchDimensions.height}`);
+
+                    session.state.userFriendlyParams.width = batchDimensions.width;
+                    session.state.userFriendlyParams.length = batchDimensions.length;
+                    session.state.userFriendlyParams.height = batchDimensions.height;
+                    session.state.hasGarageIntent = true;
+
+                    const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
+                    await session.memory.chatHistory.addAIChatMessage(response);
+
+                    // Continue to next field
+                    const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                    if (missingFields.length > 0) {
+                        const nextField = missingFields[0];
+                        session.state.currentField = nextField as keyof UserFriendlyParams;
+
+                        const fieldResult = await askForFieldNode({
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: session.state.userFriendlyParams,
+                            hasGarageIntent: true,
+                            priceCalculated: false,
+                            currentField: nextField as keyof UserFriendlyParams,
+                            validationError: null,
+                            response: "",
+                            nextStep: null,
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: null,
+                            basePrice: 0,
+                            selectedAddons: [],
+                            finalPrice: 0,
+                            color: null,
+                            colorCost: 0,
+                            generatedImageUrl: ""
+                        });
+
+                        const fullResponse = `${response}\n\n${fieldResult.response}`;
+                        await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                        return fullResponse;
+                    }
+
+                    return response;
+                }
+            } else if (hasDimensions) {
+                logger.info(`[LeadAgent] ✅ Dimensions already complete, SKIPPING batch detection`);
+            } else if (isInFieldMode) {
+                logger.info(`[LeadAgent] ✅ In field mode (${session.state.currentField}), SKIPPING batch detection`);
+            }
 
             if (IntentDetector.detectReset(input))
             {
@@ -768,13 +830,18 @@ export class LeadAgent {
         try {
             logger.info(`[LeadAgent] detectBatchDimensions: "${userInput}"`);
 
-            // ✅ NEW: STRICT check - ONLY allow explicit dimension patterns
-            // Do NOT allow generic "garage" or "i want garage" to trigger batch extraction
-            const hasExplicitDimensions = /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)|(\d+)\s*,\s*(\d+)\s*,\s*(\d+)|width.*?(\d+)|length.*?(\d+)|height.*?(\d+)/i.test(userInput);
+            // ✅ STRICT: Only allow EXPLICIT dimension patterns
+            const explicitPatterns = [
+                /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i,           // "20x30x10"
+                /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/,             // "20, 30, 10"
+                /width.*?(\d+).*?length.*?(\d+).*?height.*?(\d+)/i,  // "width 20 length 30 height 10"
+            ];
 
-            if (!hasExplicitDimensions) {
-                logger.info(`[LeadAgent] ❌ No explicit dimensions detected in: "${userInput}"`);
-                return null;  // ✅ Return null for generic input like "i want garage"
+            const hasExplicitPattern = explicitPatterns.some(pattern => pattern.test(userInput));
+
+            if (!hasExplicitPattern) {
+                logger.info(`[LeadAgent] ❌ No explicit dimension pattern in: "${userInput}"`);
+                return null;
             }
 
             logger.info(`[LeadAgent] ✅ Explicit dimension pattern detected`);
@@ -792,15 +859,6 @@ export class LeadAgent {
                 };
             }
 
-            // If patterns fail, try AI ONLY if we have explicit dimension keywords
-            logger.info(`[LeadAgent] Pattern failed, trying AI detection...`);
-            const aiResult = await this.detectBatchDimensionsWithAI(userInput);
-
-            if (aiResult) {
-                logger.info(`[LeadAgent] ✅ AI detected: ${aiResult.width}x${aiResult.length}x${aiResult.height}`);
-                return aiResult;
-            }
-
             return null;
         } catch (error) {
             logger.error(`[LeadAgent] detectBatchDimensions error:`, error);
@@ -808,62 +866,62 @@ export class LeadAgent {
         }
     }
 
-    private async detectBatchDimensionsWithAI(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
-        try {
-            const prompt = `STRICT RULES: Only extract if ALL THREE dimensions are EXPLICITLY mentioned.
-        
-"i want garage" → NO, not explicit dimensions
-"20x30x10" → YES, explicit
-"width 20 length 30 height 10" → YES, explicit
-"two car garage" → NO, car count not actual dimensions
-
-Extract ONLY if user explicitly stated width/length/height numbers.
-
-Return ONLY JSON:
-{
-  "found": <true ONLY if all 3 dimensions explicitly present>,
-  "width": <number or null>,
-  "length": <number or null>,
-  "height": <number or null>
-}
-
-User input: "${userInput}"
-
-ONLY JSON:`;
-
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
-
-            logger.debug(`[LeadAgent] AI response: "${response}"`);
-
-            let cleaned = response
-                .replace(/```json\s*/g, '')
-                .replace(/```\s*/g, '')
-                .trim();
-
-            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
-                return null;
-            }
-
-            const parsed = JSON.parse(jsonMatch[0]);
-
-            // ✅ STRICT: Only return if found=true AND all three present
-            if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
-                logger.info(`[LeadAgent] ✅ AI batch detected: ${parsed.width}x${parsed.length}x${parsed.height}`);
-                return {
-                    width: parsed.width,
-                    length: parsed.length,
-                    height: parsed.height,
-                };
-            }
-
-            logger.debug(`[LeadAgent] AI: Not explicit dimensions`);
-            return null;
-        } catch (error) {
-            logger.error(`[LeadAgent] AI batch detection error:`, error);
-            return null;
-        }
-    }
+//     private async detectBatchDimensionsWithAI(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
+//         try {
+//             const prompt = `STRICT RULES: Only extract if ALL THREE dimensions are EXPLICITLY mentioned.
+//
+// "i want garage" → NO, not explicit dimensions
+// "20x30x10" → YES, explicit
+// "width 20 length 30 height 10" → YES, explicit
+// "two car garage" → NO, car count not actual dimensions
+//
+// Extract ONLY if user explicitly stated width/length/height numbers.
+//
+// Return ONLY JSON:
+// {
+//   "found": <true ONLY if all 3 dimensions explicitly present>,
+//   "width": <number or null>,
+//   "length": <number or null>,
+//   "height": <number or null>
+// }
+//
+// User input: "${userInput}"
+//
+// ONLY JSON:`;
+//
+//             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+//
+//             logger.debug(`[LeadAgent] AI response: "${response}"`);
+//
+//             let cleaned = response
+//                 .replace(/```json\s*/g, '')
+//                 .replace(/```\s*/g, '')
+//                 .trim();
+//
+//             const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+//             if (!jsonMatch) {
+//                 return null;
+//             }
+//
+//             const parsed = JSON.parse(jsonMatch[0]);
+//
+//             // ✅ STRICT: Only return if found=true AND all three present
+//             if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
+//                 logger.info(`[LeadAgent] ✅ AI batch detected: ${parsed.width}x${parsed.length}x${parsed.height}`);
+//                 return {
+//                     width: parsed.width,
+//                     length: parsed.length,
+//                     height: parsed.height,
+//                 };
+//             }
+//
+//             logger.debug(`[LeadAgent] AI: Not explicit dimensions`);
+//             return null;
+//         } catch (error) {
+//             logger.error(`[LeadAgent] AI batch detection error:`, error);
+//             return null;
+//         }
+//     }
 
     private async handleParameterUpdate(
         session: any,
