@@ -1,6 +1,8 @@
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
+import {sharedLLM} from "@llm/SharedLLM";
+import {HumanMessage} from "@langchain/core/messages";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -20,92 +22,11 @@ const RESET_PATTERNS = [
     /\b(quit|exit|done with this)\b/i,
 ];
 
-/**
- * ADDON_PATTERNS: Identifies addon requests (windows, doors, braces, etc.)
- * Prevents misinterpretation of "2 windows" as "2 car garage"
- */
-const ADDON_PATTERNS = [
-    /\b(?:add|also|get|want|need)?\s*(\d+)\s+(window|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
-    /\b(window|garage\s+door|walk.?in|brace|anchor|cupola|truss)s?\b/i,
-];
-
-/**
- * VALID_GAUGES: Allowed gauge values
- */
-const VALID_GAUGES = [14, 16, 18, 20];
-
-/**
- * COLOR_KEYWORDS: Searchable color options
- */
-const COLOR_KEYWORDS = [
-    "red",
-    "barn red",
-    "burgundy",
-    "crimson",
-    "blue",
-    "royal blue",
-    "navy",
-    "green",
-    "evergreen",
-    "gray",
-    "grey",
-    "pewter",
-    "white",
-    "black",
-    "beige",
-    "brown",
-];
-
-/**
- * ✅ NEW: PARAMETER UPDATE PATTERNS
- * Direct pattern matching for parameter modifications
- */
-const PARAMETER_UPDATE_PATTERNS = [
-    {
-        regex: /(?:make|set|change|update)\s+width\s+(?:to)?\s+(\d+(?:\.\d+)?)/i,
-        field: "width" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /(?:make|set|change|update)\s+length\s+(?:to)?\s+(\d+(?:\.\d+)?)/i,
-        field: "length" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /(?:make|set|change|update)\s+height\s+(?:to)?\s+(\d+(?:\.\d+)?)/i,
-        field: "height" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /width\s+(?:to|=|is|:)?\s*(\d+(?:\.\d+)?)/i,
-        field: "width" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /length\s+(?:to|=|is|:)?\s*(\d+(?:\.\d+)?)/i,
-        field: "length" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /height\s+(?:to|=|is|:)?\s*(\d+(?:\.\d+)?)/i,
-        field: "height" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /gauge\s+(?:to|=|is|:)?\s*(\d+)/i,
-        field: "gauge" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /state\s+(?:to|=|is|:)?\s+([A-Za-z\s]{2,20})/i,
-        field: "state_name" as keyof UserFriendlyParams,
-    },
-    {
-        regex: /roof\s+(?:type|style)?\s+(?:to|=|is|:)?\s+(vertical|regular|box|a-frame)/i,
-        field: "roof_type" as keyof UserFriendlyParams,
-    },
-];
 
 /**
  * IntentDetector: Identifies high-level user intentions
  */
 export class IntentDetector {
-    /**
-     * Detects if user wants to reset/restart conversation
-     */
     static detectReset(input: string): boolean {
         const isReset: boolean = RESET_PATTERNS.some((p) => p.test(input));
         if (isReset) {
@@ -113,482 +34,276 @@ export class IntentDetector {
         }
         return isReset;
     }
-
-    /**
-     * Detects if user is requesting addons (windows, doors, etc.)
-     * Must check BEFORE dimension patterns to prevent misinterpretation
-     */
-    static detectAddon(input: string): boolean {
-        const hasAddonKeyword: boolean = ADDON_PATTERNS.some((p) => p.test(input));
-        const hasCarKeyword: boolean = /\b(\d+)\s*(?:car|cars)\s*(?:garage)?\b/i.test(input);
-
-        if (hasCarKeyword && !input.match(/\b(?:add|also)\s+\d+\s+(?:window|door|brace)/i)) {
-            return false;
-        }
-
-        return hasAddonKeyword;
-    }
 }
 
-/**
- * ParameterExtractor: Extracts typed values from user input using regex patterns
- */
-class ParameterExtractor {
-    /**
-     * Extracts numeric value from match groups
-     */
-    private static extractNumeric(match: RegExpMatchArray, groups: number[]): number | null {
-        for (const group of groups) {
-            const value: string = match[group];
-            if (value) {
-                return parseFloat(value);
-            }
-        }
-        return null;
-    }
+export class FullyAIDrivenExtractor {
 
     /**
-     * Extracts dimension (width, length, height)
+     * Main AI-powered extraction - handles EVERYTHING
      */
-    static extractDimension(input: string, dimensionName: string): DetectionResult | null {
-        const pattern = new RegExp(
-            `${dimensionName}\\s*[:=]?\\s*(\\d+(?:\\.\\d+)?)`+
-            `|(\\d+)\\s*(?:ft|feet)?(?:\\s+${dimensionName === "width" ? "wide|w" : dimensionName === "length" ? "long|l" : "tall|h"}\\b)`,
-            "i"
-        );
+    static async extractWithAI(
+        userInput: string,
+        currentField?: string,
+        currentParams?: Partial<UserFriendlyParams>
+    ): Promise<DetectionResult | null> {
 
-        const match: RegExpMatchArray = input.match(pattern);
-
-        if (!match) {
+        if (!userInput?.trim()) {
+            logger.warn("[AIExtractor] Empty input");
             return null;
         }
 
-        const value: number = this.extractNumeric(match, [1, 2]);
+        logger.info(`[AIExtractor] Analyzing: "${userInput}" (context: ${currentField || 'none'})`);
 
-        if (value === null) {
-            return null;
-        }
+        try {
+            const prompt = this.buildSmartExtractionPrompt(userInput, currentField, currentParams);
+            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
-        logger.info(`[ParameterExtractor] ${dimensionName}: ${value}`);
+            logger.debug(`[AIExtractor] AI response: "${response}"`);
 
-        return { field: dimensionName as keyof UserFriendlyParams, value };
-    }
+            const result = this.parseAIResponse(response);
 
-    /**
-     * Extracts single-word enum value (building type, gauge, roof)
-     */
-    static extractEnum(
-        input: string,
-        pattern: RegExp,
-        validValues: string[],
-        fieldName: keyof UserFriendlyParams
-    ): DetectionResult | null {
-        const match: RegExpMatchArray = input.match(pattern);
-
-        if (!match) {
-            return null;
-        }
-
-        const value: string = match[1]?.toLowerCase() || match[0]?.toLowerCase();
-
-        if (!validValues.includes(value)) {
-            return null;
-        }
-
-        logger.info(`[ParameterExtractor] ${fieldName}: ${value}`);
-        return { field: fieldName, value };
-    }
-
-    /**
-     * Extracts numeric enum (gauge: 14, 16, 18, 20)
-     */
-    static extractNumericEnum(
-        input: string,
-        pattern: RegExp,
-        validValues: number[],
-        fieldName: keyof UserFriendlyParams
-    ): DetectionResult | null {
-        const match: RegExpMatchArray = input.match(pattern);
-
-        if (!match) {
-            return null;
-        }
-
-        const value: number = parseInt(match[1], 10);
-
-        if (!validValues.includes(value)) {
-            return null;
-        }
-
-        logger.info(`[ParameterExtractor] ${fieldName}: ${value}`);
-        return { field: fieldName, value };
-    }
-
-    /**
-     * Extracts state name with validation
-     */
-    static extractState(input: string): DetectionResult | null {
-        const match = input.match(/(?:in|from|state)\s*[:=]?\s*([A-Za-z\s]+?)(?:\s|$|\.)/i);
-
-        if (!match) {
-            return null;
-        }
-
-        const state: string = match[1].trim();
-
-        if (state.length === 0 || state.length > 20 || /^\d+$/.test(state)) {
-            return null;
-        }
-
-        logger.info(`[ParameterExtractor] state_name: ${state}`);
-        return { field: "state_name", value: state };
-    }
-
-    /**
-     * Extracts color with keyword matching
-     */
-    static extractColor(input: string): DetectionResult | null {
-        const hasColorIntent = /(?:color|paint|change\s+color|make.*(?:color|red|blue|green|white|black))/i.test(input);
-
-        if (!hasColorIntent) {
-            return null;
-        }
-
-        const lowerInput: string = input.toLowerCase();
-
-        for (const keyword of COLOR_KEYWORDS) {
-            if (lowerInput.includes(keyword)) {
-                logger.info(`[ParameterExtractor] color: ${keyword}`);
-                return { field: "color", value: keyword };
-            }
-        }
-
-        logger.info("[ParameterExtractor] color: pending (generic request)");
-        return { field: "color", value: "pending" };
-    }
-
-    /**
-     * Extracts garage car count with addon context awareness
-     */
-    static extractGarageType(input: string, isAddon: boolean): DetectionResult | null {
-        const match: RegExpMatchArray = input.match(/(?<!window\s)(?<!door\s)(?<!brace\s)(\d+)\s*-?cars?(?!\s+window|\s+door|\s+brace)/i);
-
-        if (!match) {
-            return null;
-        }
-
-        if (isAddon) {
-            logger.info("[ParameterExtractor] Car count in addon context, skipping");
-            return null;
-        }
-
-        const carCount: string = match[1];
-        logger.info(`[ParameterExtractor] garage_type: ${carCount}-car`);
-        return { field: "garage_type", value: `${carCount}-car` };
-    }
-
-    /**
-     * Extracts truck/rv garage designation
-     */
-    static extractGarageDesignation(input: string): DetectionResult | null {
-        const match: RegExpMatchArray = input.match(/\b(truck|rv)\s*(?:garage|building)?\b/i);
-
-        if (!match) {
-            return null;
-        }
-
-        const designation: string = match[1].toLowerCase();
-        logger.info(`[ParameterExtractor] garage_type: ${designation}`);
-        return { field: "garage_type", value: designation };
-    }
-
-    /**
-     * Extracts utility length parameter
-     */
-    static extractUtilityLength(input: string): DetectionResult | null {
-        const match: RegExpMatchArray = input.match(/utility\s*(?:length|section)?\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-        if (!match) {
-            return null;
-        }
-
-        const value: number = parseFloat(match[1]);
-        logger.info(`[ParameterExtractor] utility_length: ${value}`);
-        return { field: "utility_length", value };
-    }
-
-    /**
-     * Extracts gauge with both contextual and standalone patterns
-     */
-    static extractGauge(input: string): DetectionResult | null {
-        let result: DetectionResult = this.extractNumericEnum(
-            input,
-            /(?:gauge\s*)?(\d+)\s*ga?(?:uge)?/i,
-            VALID_GAUGES,
-            "gauge"
-        );
-        if (result) {
-            return result;
-        }
-
-        if (/^\d+$/.test(input.trim())) {
-            const value = parseInt(input.trim(), 10);
-            if (VALID_GAUGES.includes(value)) {
-                logger.info(`[ParameterExtractor] gauge (standalone): ${value}`);
-                return { field: "gauge", value };
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Extracts roof type
-     */
-    static extractRoof(input: string): DetectionResult | null {
-        const directMatch: RegExpMatchArray = input.toLowerCase().match(/^(vertical|regular|box|a-frame)$/);
-
-        if (directMatch) {
-            logger.info(`[ParameterExtractor] roof_type: ${directMatch[0]}`);
-            return { field: "roof_type", value: directMatch[0] };
-        }
-
-        const contextMatch = input.match(
-            /(?:roof|style)\s*[:=]?\s*(vertical|regular|box|a-frame)|(?:vertical|regular|box|a-frame)\s+roof/i
-        );
-
-        if (!contextMatch) {
-            return null;
-        }
-
-        const roofType = (contextMatch[1] || contextMatch[0])
-            .toLowerCase()
-            .match(/(vertical|regular|box|a-frame)/);
-
-        if (!roofType) {
-            return null;
-        }
-
-        logger.info(`[ParameterExtractor] roof_type: ${roofType}`);
-        return { field: "roof_type", value: roofType };
-    }
-}
-
-/**
- * ParameterDetector: Main API for parameter extraction from user input
- * Implements priority-based detection strategy
- */
-class ParameterDetector {
-    /**
-     * Detects parameters from user input with intelligent priority
-     *
-     * Priority order:
-     * 1. ✅ NEW: Parameter updates (make width 25, set length to 30)
-     * 2. Addon requests (prevent misinterpretation)
-     * 3. Dimensions (width, length, height)
-     * 4. Building type (garage, shed, barn)
-     * 5. Garage type (car count, truck, rv)
-     * 6. State, gauge, color, utility length, roof
-     */
-    static detect(input: string, currentField?: string): DetectionResult | null {
-        if (!input?.trim()) {
-            logger.warn("[ParameterDetector] Empty input");
-            return null;
-        }
-
-        logger.info(
-            `[ParameterDetector] Analyzing: "${input}"` +
-            (currentField ? ` (context: asking for ${currentField})` : '')
-        );
-
-        const paramUpdateResult = this.detectParameterUpdate(input);
-        if (paramUpdateResult) {
-            logger.info(
-                `[ParameterDetector] ✅ Explicit update detected: ` +
-                `${paramUpdateResult.field} = ${paramUpdateResult.value}`
-            );
-            return paramUpdateResult;
-        }
-
-        if (currentField && this.isSimpleNumericInput(input)) {
-            logger.info(
-                `[ParameterDetector] Simple numeric input in context of ${currentField}`
-            );
-
-            if (this.isDimensionField(currentField)) {
-                const value = parseFloat(input.trim());
-                if (!isNaN(value) && value > 0 && value <= 500) {
-                    logger.info(
-                        `[ParameterDetector] ✅ Interpreting "${input}" as ${currentField} = ${value}`
-                    );
-                    return { field: currentField as keyof UserFriendlyParams, value };
-                }
-            }
-
-            if (currentField === 'gauge') {
-                const value = parseInt(input.trim(), 10);
-                if (VALID_GAUGES.includes(value)) {
-                    logger.info(
-                        `[ParameterDetector] ✅ Interpreting "${input}" as gauge = ${value}`
-                    );
-                    return { field: 'gauge', value };
-                }
-            }
-        }
-
-        const isAddon: boolean = IntentDetector.detectAddon(input);
-        if (isAddon) {
-            logger.info("[ParameterDetector] Addon request, skipping parameter detection");
-            return null;
-        }
-
-        for (const dimension of ["width", "length", "height"]) {
-            const result: DetectionResult = ParameterExtractor.extractDimension(input, dimension);
             if (result) {
+                logger.info(`[AIExtractor] ✅ Extracted: ${result.field} = ${result.value}`);
                 return result;
             }
+
+            logger.warn(`[AIExtractor] ❌ No parameter detected`);
+            return null;
+
+        } catch (error) {
+            logger.error(`[AIExtractor] AI extraction failed:`, error);
+            return null;
         }
+    }
 
-        const buildingMatch: RegExpMatchArray = input.match(/\b(garage|shed|barn)\b/i);
-        if (buildingMatch) {
-            return { field: "building_type", value: buildingMatch[1].toLowerCase() };
-        }
+    /**
+     * ✅ SMART PROMPT: Context-aware extraction with garage dimension knowledge
+     */
+    private static buildSmartExtractionPrompt(
+        userInput: string,
+        currentField?: string,
+        currentParams?: Partial<UserFriendlyParams>
+    ): string {
+        const contextInfo = currentField
+            ? `\n⚠️ CRITICAL CONTEXT: User is being asked for: "${currentField}"\n- Extract ONLY this field unless user explicitly mentions something else`
+            : '';
 
-        let result: DetectionResult = ParameterExtractor.extractGarageType(input, isAddon);
-        if (result) return result;
+        const existingParams = currentParams && Object.keys(currentParams).length > 0
+            ? `\n📊 Already collected:\n${JSON.stringify(currentParams, null, 2)}`
+            : '';
 
-        result = ParameterExtractor.extractGarageDesignation(input);
-        if (result) return result;
+        return `You are a garage construction parameter extraction AI. Extract building specifications from user input.
 
-        result = ParameterExtractor.extractState(input);
-        if (result) return result;
+${contextInfo}${existingParams}
 
-        if (!currentField || !this.isDimensionField(currentField)) {
-            result = ParameterExtractor.extractGauge(input);
-            if (result) {
-                logger.info(
-                    `[ParameterDetector] ✅ Standalone gauge detected: ${result.value}`
-                );
-                return result;
+🎯 YOUR TASK: Analyze the user input and extract the MOST RELEVANT parameter.
+
+CRITICAL RULES:
+1. **GARAGE TYPE vs DIMENSIONS**:
+   - "two cars", "2 car garage", "three cars" → garage_type: "2-car", "3-car" (NOT width/length!)
+   - "width 20", "20 feet wide", "20ft" → width: 20 (ONLY if clearly about width)
+   - "20x30x10" → Extract all three dimensions
+
+2. **CONTEXT AWARENESS**:
+   - If currentField is "width" and user says "20" → width: 20
+   - If currentField is "length" and user says "30" → length: 30
+   - If NO currentField and user says "two cars" → garage_type: "2-car"
+
+3. **NUMBER CONVERSION**:
+   - Convert ALL word numbers: "two" → 2, "twenty" → 20, "a couple" → 2
+   - Handle slang: "a few" → 3, "several" → 5, "dozen" → 12
+
+4. **FIELD DETECTION**:
+   - garage_type: "2 cars", "three car garage", "truck garage", "RV"
+   - width: "width 20", "20 feet wide", "20ft width"
+   - length: "length 30", "30 feet long"
+   - height: "height 10", "10 feet tall"
+   - roof_type: "vertical", "regular", "box", "a-frame"
+   - gauge: "14ga", "16 gauge", "20GA"
+   - state_name: "Texas", "California", "in Florida"
+   - color: "red", "barn red", "white"
+
+5. **PRIORITY**:
+   - If currentField is set, try to extract that field FIRST
+   - If user mentions a different field explicitly, extract that instead
+   - For ambiguous input, use context to decide
+
+6. **GARAGE DIMENSIONS KNOWLEDGE**:
+   - 1-car garage: typically 12ft × 20ft × 10ft
+   - 2-car garage: typically 20ft × 20ft × 10ft
+   - 3-car garage: typically 30ft × 20ft × 10ft
+   - DO NOT auto-fill dimensions - only extract what user explicitly provides
+
+RETURN ONLY JSON (NO MARKDOWN, NO EXPLANATION):
+{
+  "field": "<parameter_name>",
+  "value": <extracted_value>,
+  "confidence": "high" | "medium" | "low",
+  "reasoning": "brief explanation of what was detected"
+}
+
+EXAMPLES:
+
+Input: "i want a garage for two cars" (no currentField)
+Output: {"field": "garage_type", "value": "2-car", "confidence": "high", "reasoning": "User wants a 2-car garage"}
+
+Input: "20" (currentField: "width")
+Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "User provided width value"}
+
+Input: "two" (currentField: "width")
+Output: {"field": "width", "value": 2, "confidence": "medium", "reasoning": "User said 'two' in context of width field"}
+
+Input: "width twenty length thirty height ten" (no currentField)
+Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "Extracted first dimension from batch input"}
+
+Input: "vertical roof" (no currentField)
+Output: {"field": "roof_type", "value": "vertical", "confidence": "high", "reasoning": "User specified vertical roof type"}
+
+Input: "Texas" (currentField: "state_name")
+Output: {"field": "state_name", "value": "Texas", "confidence": "high", "reasoning": "User provided state name"}
+
+Input: "three" (currentField: "garage_type")
+Output: {"field": "garage_type", "value": "3-car", "confidence": "high", "reasoning": "User wants 3-car garage"}
+
+⚠️ CRITICAL: Distinguish between:
+- "two CARS" → garage_type: "2-car" (asking for a 2-car garage)
+- "width TWO" → width: 2 (setting width to 2 feet, which is unusual)
+
+User input: "${userInput}"
+
+ONLY JSON:`;
+    }
+
+    /**
+     * Parse AI response and validate
+     */
+    private static parseAIResponse(response: string): DetectionResult | null {
+        try {
+            // Clean response
+            let cleaned = response
+                .replace(/```json\s*/g, '')
+                .replace(/```\s*/g, '')
+                .trim();
+
+            // Extract JSON
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                logger.warn(`[AIExtractor] No JSON in response`);
+                return null;
             }
-        } else {
-            logger.debug(
-                `[ParameterDetector] Skipping gauge detection (in context of ${currentField})`
-            );
-        }
 
-        result = ParameterExtractor.extractColor(input);
-        if (result) return result;
+            const parsed = JSON.parse(jsonMatch[0]);
 
-        result = ParameterExtractor.extractUtilityLength(input);
-        if (result) return result;
-
-        result = ParameterExtractor.extractRoof(input);
-        if (result) return result;
-
-        logger.info("[ParameterDetector] No parameters detected");
-        return null;
-    }
-
-    /**
-     * ✅ NEW: Check if input is a simple number
-     */
-    private static isSimpleNumericInput(input: string): boolean {
-        return /^\d+(\.\d+)?$/.test(input.trim());
-    }
-
-    /**
-     * ✅ NEW: Check if field is a dimension field
-     */
-    private static isDimensionField(field: string): boolean {
-        return ['width', 'length', 'height', 'utility_length'].includes(field);
-    }
-
-    /**
-     * ✅ NEW: Detect parameter update patterns
-     * Examples: "make width 25", "set length to 30", "height 12"
-     */
-    private static detectParameterUpdate(input: string): DetectionResult | null {
-        logger.debug(`[ParameterDetector] Checking for parameter updates: "${input}"`);
-
-        for (const { regex, field } of PARAMETER_UPDATE_PATTERNS) {
-            const match = input.match(regex);
-
-            if (match && match[1]) {
-                const rawValue = match[1];
-                let value: any = null;
-
-                if (field === "gauge" || field === "width" || field === "length" || field === "height") {
-                    value = parseFloat(rawValue);
-
-                    if (isNaN(value) || value <= 0 || value > 500) {
-                        logger.warn(`[ParameterDetector] Invalid numeric value for ${field}: ${rawValue}`);
-                        return null;
-                    }
-
-                    if (field === "gauge" && !VALID_GAUGES.includes(value)) {
-                        logger.warn(`[ParameterDetector] Invalid gauge: ${value}. Valid: ${VALID_GAUGES.join(", ")}`);
-                        return null;
-                    }
-                } else if (field === "roof_type") {
-                    value = rawValue.toLowerCase();
-                    if (!["vertical", "regular", "box", "a-frame"].includes(value)) {
-                        logger.warn(`[ParameterDetector] Invalid roof type: ${value}`);
-                        return null;
-                    }
-                } else if (field === "state_name") {
-                    value = rawValue.trim();
-                    if (value.length === 0 || value.length > 50) {
-                        logger.warn(`[ParameterDetector] Invalid state: ${value}`);
-                        return null;
-                    }
-                } else {
-                    value = rawValue.trim();
-                }
-
-                logger.info(`[ParameterDetector] ✅ Parameter update: ${field}=${value}`);
-                return { field, value };
+            // Validate structure
+            if (!parsed.field || parsed.value === undefined || parsed.value === null) {
+                logger.warn(`[AIExtractor] Invalid response structure:`, parsed);
+                return null;
             }
-        }
 
-        return null;
+            // Validate field is a known parameter
+            const validFields: Array<keyof UserFriendlyParams> = [
+                'width', 'length', 'height', 'garage_type', 'building_type',
+                'roof_type', 'gauge', 'state_name', 'color', 'utility_length'
+            ];
+
+            if (!validFields.includes(parsed.field)) {
+                logger.warn(`[AIExtractor] Unknown field: ${parsed.field}`);
+                return null;
+            }
+
+            // Log confidence
+            if (parsed.confidence === 'low') {
+                logger.warn(`[AIExtractor] Low confidence: ${parsed.reasoning}`);
+            }
+
+            return {
+                field: parsed.field as keyof UserFriendlyParams,
+                value: parsed.value
+            };
+
+        } catch (error) {
+            logger.error(`[AIExtractor] Failed to parse response:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * ✅ BATCH EXTRACTION: Extract all dimensions at once using AI
+     */
+    static async extractBatchDimensions(userInput: string): Promise<{
+        width: number | null;
+        length: number | null;
+        height: number | null;
+    } | null> {
+
+        logger.info(`[AIExtractor] Batch dimension extraction from: "${userInput}"`);
+
+        try {
+            const prompt = `Extract ALL building dimensions from user input. Handle any format.
+
+RULES:
+1. Extract width, length, and height in feet
+2. Convert word numbers: "twenty" → 20, "thirty" → 30, "ten" → 10
+3. Handle ANY format:
+   - "20x30x10" → width:20, length:30, height:10
+   - "width 20 length 30 height 10" → same
+   - "width twenty length thirty height ten" → same
+   - "20, 30, 10" → same
+4. ALL THREE dimensions must be present
+5. If any dimension is missing, return found: false
+
+RETURN ONLY JSON:
+{
+  "found": <true if all 3 dimensions present, false otherwise>,
+  "width": <number or null>,
+  "length": <number or null>,
+  "height": <number or null>,
+  "reasoning": "brief explanation"
+}
+
+EXAMPLES:
+- "20x30x10" → {"found": true, "width": 20, "length": 30, "height": 10}
+- "width twenty length thirty height ten" → {"found": true, "width": 20, "length": 30, "height": 10}
+- "width 20" → {"found": false, "width": null, "length": null, "height": null}
+
+User input: "${userInput}"
+
+ONLY JSON:`;
+
+            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
+            if (!jsonMatch) return null;
+
+            const parsed = JSON.parse(jsonMatch[0]);
+
+            if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
+                logger.info(`[AIExtractor] ✅ Batch extraction: ${parsed.width}x${parsed.length}x${parsed.height}`);
+                return {
+                    width: parsed.width,
+                    length: parsed.length,
+                    height: parsed.height
+                };
+            }
+
+            logger.debug(`[AIExtractor] Batch extraction not complete:`, parsed.reasoning);
+            return null;
+
+        } catch (error) {
+            logger.error(`[AIExtractor] Batch extraction error:`, error);
+            return null;
+        }
     }
 }
 
 /**
- * Gauge extraction helper (used by both patterns and direct input)
+ * Main export function
  */
-function extractGauge(input: string): DetectionResult | null {
-    let result: DetectionResult = ParameterExtractor.extractNumericEnum(
-        input,
-        /(?:gauge\s*)?(\d+)\s*ga?(?:uge)?/i,
-        VALID_GAUGES,
-        "gauge"
-    );
-
-    if (result) {
-        return result;
-    }
-
-    if (/^\d+$/.test(input.trim())) {
-        const value: number = parseInt(input.trim(), 10);
-
-        if (VALID_GAUGES.includes(value)) {
-            logger.info(`[ParameterDetector] gauge (standalone): ${value}`);
-            return { field: "gauge", value };
-        }
-    }
-
-    return null;
-}
-
-ParameterExtractor.extractGauge = extractGauge;
-
-/**
- * Detects parameter updates from user input with intelligent extraction
- *
- * @param input - User input string
- * @returns Detected parameter or null if no match
- */
-export async function detectParameterUpdateFromInput(input: string, currentField?: string): Promise<DetectionResult | null> {
-    return ParameterDetector.detect(input, currentField);
+export async function detectParameterUpdateFromInput(
+    input: string,
+    currentField?: string,
+    currentParams?: Partial<UserFriendlyParams>
+): Promise<DetectionResult | null> {
+    return FullyAIDrivenExtractor.extractWithAI(input, currentField, currentParams);
 }

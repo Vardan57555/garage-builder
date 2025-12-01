@@ -768,6 +768,17 @@ export class LeadAgent {
         try {
             logger.info(`[LeadAgent] detectBatchDimensions: "${userInput}"`);
 
+            // ✅ NEW: STRICT check - ONLY allow explicit dimension patterns
+            // Do NOT allow generic "garage" or "i want garage" to trigger batch extraction
+            const hasExplicitDimensions = /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)|(\d+)\s*,\s*(\d+)\s*,\s*(\d+)|width.*?(\d+)|length.*?(\d+)|height.*?(\d+)/i.test(userInput);
+
+            if (!hasExplicitDimensions) {
+                logger.info(`[LeadAgent] ❌ No explicit dimensions detected in: "${userInput}"`);
+                return null;  // ✅ Return null for generic input like "i want garage"
+            }
+
+            logger.info(`[LeadAgent] ✅ Explicit dimension pattern detected`);
+
             // Try DimensionManager patterns first
             const dimensionManager = DimensionManager.getInstance();
             const calculation = dimensionManager.calculateDimensions(userInput);
@@ -781,7 +792,7 @@ export class LeadAgent {
                 };
             }
 
-            // If patterns fail, try AI
+            // If patterns fail, try AI ONLY if we have explicit dimension keywords
             logger.info(`[LeadAgent] Pattern failed, trying AI detection...`);
             const aiResult = await this.detectBatchDimensionsWithAI(userInput);
 
@@ -799,9 +810,18 @@ export class LeadAgent {
 
     private async detectBatchDimensionsWithAI(userInput: string): Promise<{ width: number; length: number; height: number } | null> {
         try {
-            const prompt = `Extract building dimensions from user input. Return ONLY JSON:
+            const prompt = `STRICT RULES: Only extract if ALL THREE dimensions are EXPLICITLY mentioned.
+        
+"i want garage" → NO, not explicit dimensions
+"20x30x10" → YES, explicit
+"width 20 length 30 height 10" → YES, explicit
+"two car garage" → NO, car count not actual dimensions
+
+Extract ONLY if user explicitly stated width/length/height numbers.
+
+Return ONLY JSON:
 {
-  "found": <true if all 3 dimensions present, false otherwise>,
+  "found": <true ONLY if all 3 dimensions explicitly present>,
   "width": <number or null>,
   "length": <number or null>,
   "height": <number or null>
@@ -827,6 +847,7 @@ ONLY JSON:`;
 
             const parsed = JSON.parse(jsonMatch[0]);
 
+            // ✅ STRICT: Only return if found=true AND all three present
             if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
                 logger.info(`[LeadAgent] ✅ AI batch detected: ${parsed.width}x${parsed.length}x${parsed.height}`);
                 return {
@@ -836,6 +857,7 @@ ONLY JSON:`;
                 };
             }
 
+            logger.debug(`[LeadAgent] AI: Not explicit dimensions`);
             return null;
         } catch (error) {
             logger.error(`[LeadAgent] AI batch detection error:`, error);

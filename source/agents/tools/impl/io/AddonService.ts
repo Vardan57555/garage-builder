@@ -15,7 +15,7 @@ export interface AddonService
 
     process(state: LeadAgentStateType): Promise<ProcessingResult>
 
-    parse(userInput: string, addonsMenu: Addon[]): SelectedAddon[]
+    parse(userInput: string, addonsMenu: Addon[]): Promise<SelectedAddon[]>
 
     execute(state: LeadAgentStateType): Promise<ShowAddonsResponse>
 

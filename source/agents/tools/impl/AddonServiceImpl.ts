@@ -12,6 +12,7 @@ import {AddonValidator} from "@agents/tools/validators/AddonValidator";
 import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
 import {IPriceCalculatorService} from "@agents/tools/impl/io/PriceCalculatorService";
 import {AddonMenuItem, ShowAddonsResponse} from "@agents/tools/io/IShowAddons";
+import {AINumberExtractor} from "@agents/tools/impl/AINumberExtractor";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -141,8 +142,7 @@ export class AddonServiceImpl implements AddonService
     /**
      * Main parse method: orchestrates multiple parsing strategies
      */
-    public parse(userInput: string, addonsMenu: Addon[]): SelectedAddon[]
-    {
+    public async parse(userInput: string, addonsMenu: Addon[]): Promise<SelectedAddon[]> {
         logger.info(`[AddonParser] Parsing: "${userInput}" from ${addonsMenu.length} available addons`);
 
         if (addonsMenu.length === 0) {
@@ -150,6 +150,7 @@ export class AddonServiceImpl implements AddonService
             return [];
         }
 
+        // ✅ PRIORITY 1: Numeric selection (fast path)
         if (this.isNumericSelection(userInput)) {
             const result = this.parseNumericSelections(userInput, addonsMenu);
             if (result.length > 0) {
@@ -157,18 +158,93 @@ export class AddonServiceImpl implements AddonService
             }
         }
 
-        let result = this.parseQuantitySelections(userInput, addonsMenu);
+        // ✅ PRIORITY 2: Quantity + keyword with AI support
+        const result = await this.parseQuantitySelectionsWithAI(userInput, addonsMenu);
         if (result.length > 0) {
             return result;
         }
 
-        result = this.parseKeywordOnlySelection(userInput, addonsMenu);
-        if (result.length > 0) {
-            return result;
+        // ✅ PRIORITY 3: Keyword-only match
+        const keywordResult = this.parseKeywordOnlySelection(userInput, addonsMenu);
+        if (keywordResult.length > 0) {
+            return keywordResult;
         }
 
         logger.warn(`[AddonParser] No matches found for: "${userInput}"`);
         return [];
+    }
+
+    private async parseQuantitySelectionsWithAI(input: string, addonsMenu: Addon[]): Promise<SelectedAddon[]> {
+        try {
+            logger.info(`[AddonParser] Trying quantity selection with AI for: "${input}"`);
+
+            // ✅ Pattern: (optional action words) + (number/word) + (addon keyword)
+            const quantityPattern = /(?:add|also|and|get|want|need)?\s*([a-z\s]+?)\s+(window|garage\s+door|door|walk.?in|brace|anchor|cupola|truss|sectional)s?/gi;
+
+            const matches: RegExpExecArray[] = [...input.matchAll(quantityPattern)];
+
+            if (matches.length === 0) {
+                logger.debug(`[AddonParser] No quantity pattern matches`);
+                return [];
+            }
+
+            const selected: SelectedAddon[] = [];
+            const numberExtractor = AINumberExtractor.getInstance();
+
+            for (const match of matches) {
+                const quantityText = match[1].trim(); // "two", "a couple", "2", etc.
+                const keyword = match[2].trim(); // "window", "door", etc.
+
+                logger.info(`[AddonParser] Extracting quantity from: "${quantityText}" for keyword: "${keyword}"`);
+
+                // ✅ Extract quantity using AI
+                const quantity = await numberExtractor.extractNumber(
+                    quantityText,
+                    `addon quantity for ${keyword}`
+                );
+
+                if (quantity === null || quantity <= 0) {
+                    logger.warn(`[AddonParser] Could not extract valid quantity from: "${quantityText}"`);
+                    continue;
+                }
+
+                logger.info(`[AddonParser] ✅ Extracted quantity: ${quantity} for ${keyword}`);
+
+                // Find matching addons
+                const matchingAddons: Addon[] = this.findMatchingAddons(keyword, addonsMenu);
+
+                if (matchingAddons.length === 0) {
+                    logger.warn(`[AddonParser] No addons match keyword: "${keyword}"`);
+                    continue;
+                }
+
+                logger.info(`[AddonParser] Found ${matchingAddons.length} matching addons for "${keyword}"`);
+
+                // Add the requested quantity
+                for (let i = 0; i < quantity; i++) {
+                    const addon: Addon = matchingAddons[i % matchingAddons.length];
+                    selected.push({
+                        ...addon,
+                        id: `${addon.id}_${Date.now()}_${i}`,
+                    });
+                }
+
+                logger.info(`[AddonParser] Added ${quantity} x ${keyword}`);
+            }
+
+            if (selected.length > 0) {
+                logger.info(`[AddonParser] ✅ AI quantity selection succeeded: ${selected.length} addons`);
+            }
+
+            return selected;
+
+        } catch (error) {
+            logger.error(`[AddonParser] Error in AI quantity selection:`, error);
+
+            // ✅ FALLBACK: Try original digit-only parsing
+            logger.info(`[AddonParser] Falling back to digit-only parsing`);
+            return this.parseQuantitySelections(input, addonsMenu);
+        }
     }
 
     /**
@@ -213,7 +289,7 @@ export class AddonServiceImpl implements AddonService
                 return this.createResponse("Error: Addon menu not available.", "__end__", [], state.basePrice);
             }
 
-            const selectedAddons: SelectedAddon[] = this.parse(userInput!, addonsMenu!);
+            const selectedAddons: SelectedAddon[] = await this.parse(userInput!, addonsMenu!);
 
             if (selectedAddons.length === 0)
             {
