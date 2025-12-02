@@ -367,11 +367,30 @@ Return ONLY JSON:`;
             };
         }
 
-        // ✅ PRIORITY 1: Check for explicit parameter updates
         const parameterUpdate = await detectParameterUpdateFromInput(userInput, state.currentField);
         if (parameterUpdate) {
             logger.info(`[ParameterExtractor] ✅ Explicit parameter update detected: ${parameterUpdate.field} = ${parameterUpdate.value}`);
 
+            // ✅ NEW: If garage_type was detected AND dimensions were calculated
+            if (parameterUpdate.field === 'garage_type' && parameterUpdate.calculatedDimensions) {
+                logger.info(`[ParameterExtractor] 🚗 Garage type with calculated dimensions detected`);
+                logger.info(`[ParameterExtractor] Calculated: ${parameterUpdate.calculatedDimensions.width}x${parameterUpdate.calculatedDimensions.length}x${parameterUpdate.calculatedDimensions.height}`);
+
+                return {
+                    userFriendlyParams: {
+                        ...currentParams,
+                        garage_type: parameterUpdate.value,
+                        width: parameterUpdate.calculatedDimensions.width,
+                        length: parameterUpdate.calculatedDimensions.length,
+                        height: parameterUpdate.calculatedDimensions.height,
+                    },
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                    response: `✅ Updated garage type to ${parameterUpdate.value} with dimensions: ${parameterUpdate.calculatedDimensions.width}ft × ${parameterUpdate.calculatedDimensions.length}ft × ${parameterUpdate.calculatedDimensions.height}ft`,
+                };
+            }
+
+            // Standard parameter update (without dimensions)
             return {
                 userFriendlyParams: {
                     ...currentParams,

@@ -3,12 +3,21 @@ import { createLogger } from "@utils/logger/Log";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { sharedLLM } from "@llm/SharedLLM";
 import { HumanMessage } from "@langchain/core/messages";
+import {DimensionManager} from "@agents/tools/impl/DimensionManager";
 
 const logger: pino.Logger = createLogger(module);
 
 interface DetectionResult {
     field: keyof UserFriendlyParams;
     value: any;
+}
+
+interface DetectionResultWithDimensions extends DetectionResult {
+    calculatedDimensions?: {
+        width: number;
+        length: number;
+        height: number;
+    };
 }
 
 const RESET_PATTERNS = [
@@ -36,7 +45,7 @@ export class FullyAIDrivenExtractor {
         userInput: string,
         currentField?: string,
         currentParams?: Partial<UserFriendlyParams>
-    ): Promise<DetectionResult | null> {
+    ): Promise<DetectionResultWithDimensions | null> {
 
         if (!userInput?.trim()) {
             logger.warn("[AIExtractor] Empty input");
@@ -44,10 +53,8 @@ export class FullyAIDrivenExtractor {
         }
 
         // ✅ CRITICAL: If in dimension field mode, return null
-        // This forces the extraction to happen in ParameterExtractor instead
         if (currentField && ['width', 'length', 'height', 'utility_length'].includes(currentField)) {
             logger.info(`[AIExtractor] ⚠️ In dimension field mode (${currentField}) - SKIP AI extraction here`);
-            logger.info(`[AIExtractor] Let ParameterExtractor.handleDimensionField() handle this`);
             return null;
         }
 
@@ -63,6 +70,22 @@ export class FullyAIDrivenExtractor {
 
             if (result) {
                 logger.info(`[AIExtractor] ✅ Extracted: ${result.field} = ${result.value}`);
+
+                // ✅ NEW: If garage_type was detected, calculate dimensions
+                if (result.field === 'garage_type') {
+                    logger.info(`[AIExtractor] 🚗 Garage type detected: ${result.value} - calculating dimensions...`);
+
+                    const dimensions = this.calculateDimensionsFromGarageType(result.value, userInput);
+
+                    if (dimensions) {
+                        logger.info(`[AIExtractor] ✅ Calculated dimensions: ${dimensions.width}x${dimensions.length}x${dimensions.height}`);
+                        return {
+                            ...result,
+                            calculatedDimensions: dimensions
+                        };
+                    }
+                }
+
                 return result;
             }
 
@@ -75,7 +98,54 @@ export class FullyAIDrivenExtractor {
         }
     }
 
+    /**
+     * ✅ NEW: Calculate dimensions from garage_type (e.g., "2-car" → width, length, height)
+     */
+    private static calculateDimensionsFromGarageType(
+        garageType: string,
+        userInput: string
+    ): { width: number; length: number; height: number } | null {
+        try {
+            logger.info(`[AIExtractor] Calculating dimensions for garage_type: ${garageType}`);
 
+            // Extract car count from garage_type (e.g., "2-car" → 2)
+            const carMatch = String(garageType).match(/(\d+)/);
+            const numCars = carMatch ? parseInt(carMatch[1], 10) : null;
+
+            if (!numCars || numCars <= 0) {
+                logger.warn(`[AIExtractor] Could not extract car count from: ${garageType}`);
+                return null;
+            }
+
+            logger.info(`[AIExtractor] Extracted car count: ${numCars}`);
+
+            // ✅ Use DimensionManager to calculate dimensions
+            const dimensionManager = DimensionManager.getInstance();
+            const calculation = dimensionManager.calculateDimensions(userInput);
+
+            if (calculation && calculation.width && calculation.length && calculation.height) {
+                logger.info(`[AIExtractor] ✅ DimensionManager calculated: ${calculation.width}x${calculation.length}x${calculation.height}`);
+                return {
+                    width: calculation.width,
+                    length: calculation.length,
+                    height: calculation.height
+                };
+            }
+
+            // ✅ Fallback: Use standard garage dimension formula
+            logger.info(`[AIExtractor] DimensionManager failed, using fallback formula`);
+            const width = (numCars * 6) + 8;  // e.g., 2 cars = (2 * 6) + 8 = 20
+            const length = 20;
+            const height = 10;
+
+            logger.info(`[AIExtractor] ✅ Fallback dimensions: ${width}x${length}x${height}`);
+            return { width, length, height };
+
+        } catch (error) {
+            logger.error(`[AIExtractor] Error calculating dimensions:`, error);
+            return null;
+        }
+    }
 
     private static buildSmartExtractionPrompt(
         userInput: string,
@@ -105,70 +175,49 @@ ${contextInfo}${existingParams}
 1. **STRICT GARAGE_TYPE RULE - ONLY extract if explicitly stated**:
    - ✅ "2 car garage" → garage_type: "2-car"
    - ✅ "I want a 3 car garage" → garage_type: "3-car"
+   - ✅ "I want a garage for 2 cars" → garage_type: "2-car"
    - ✅ "can you quote me a 2-car" → garage_type: "2-car"
-   - ❌ "20" → DO NOT extract as garage_type (this is likely a dimension)
-   - ❌ "2" → DO NOT extract as garage_type (ambiguous - could be option number)
+   - ❌ "20" → DO NOT extract as garage_type (this is a dimension)
+   - ❌ "2" → DO NOT extract as garage_type (ambiguous)
    - ❌ Single numbers → NEVER assume it's a car count
-   - Only extract garage_type if the input contains the words "car" or "cars" explicitly
+   - Only extract garage_type if the input contains "car" or "cars" explicitly
 
 2. **CONTEXT AWARENESS**:
    - If currentField is "roof_type" and user says "3" → {"field": "roof_type", "value": "box"} (option 3)
    - If currentField is "gauge" and user says "2" → {"field": "gauge", "value": "16"} (option 2)
-   - If currentField is "building_type" and user says "1" → {"field": "building_type", "value": "garage"} (option 1)
 
 3. **DIMENSION FIELDS - ONLY when NO currentField**:
-   - "width 20" → width: 20 (only if currentField is NOT set)
+   - If currentField is set, RETURN NULL (let ParameterExtractor handle it)
    - "20x30x10" → extract all (only if currentField is NOT set)
-   - If currentField is set to "width", "length", or "height", RETURN NULL (let ParameterExtractor handle it)
 
 4. **NUMBER INTERPRETATION PRIORITY**:
    - Single number "20" → width: 20 (NOT garage_type)
-   - "20x30x10" → width, length, height (NOT garage_type)
-   - "20 feet" → width: 20 (NOT garage_type)
-   - ONLY "2 cars" or "3 car garage" → garage_type (must have "car" or "cars" word)
+   - "20x30x10" → width, length, height
+   - ONLY "2 cars", "2-car", "3 car garage" → garage_type (must have "car" or "cars")
 
 5. **NUMBER CONVERSION**:
-   - Convert ALL word numbers: "two" → 2, "twenty" → 20, "a couple" → 2
-   - Handle slang: "a few" → 3, "several" → 5, "dozen" → 12
+   - Convert ALL word numbers: "two" → 2, "twenty" → 20
+   - Handle slang: "a couple" → 2, "a few" → 3, "several" → 5
 
-6. **FIELD DETECTION (only when NO currentField)**:
-   - garage_type: "2 cars", "three car garage", "truck garage", "RV" (MUST contain "car/cars")
-   - width: "width 20", "20 feet wide", "20ft width", "20" (single number)
-   - length: "length 30", "30 feet long"
-   - height: "height 10", "10 feet tall"
-   - roof_type: "vertical", "regular", "box", "a-frame"
-   - gauge: "14ga", "16 gauge", "20GA"
-   - state_name: "Texas", "California", "in Florida"
-   - color: "red", "barn red", "white"
-
-OUTPUT FORMAT — return ONLY valid JSON (no markdown, no commentary):
+OUTPUT FORMAT — return ONLY valid JSON (no markdown):
 
 {
   "field": "<parameter_name>",
   "value": <extracted_value>,
   "confidence": "high" | "medium" | "low",
-  "reasoning": "brief explanation of what was detected"
+  "reasoning": "brief explanation"
 }
 
-EXAMPLES - CRITICAL:
+EXAMPLES:
+
+Input: "I want a garage for 2 cars" (NO currentField)
+Output: {"field": "garage_type", "value": "2-car", "confidence": "high", "reasoning": "User explicitly wants 2-car garage"}
 
 Input: "20" (NO currentField)
-Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "Single number likely width dimension, NOT garage type"}
-
-Input: "2" (NO currentField)
-Output: {"field": "width", "value": 2, "confidence": "medium", "reasoning": "Ambiguous number - could be width or dimension, treating as width"}
+Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "Single number interpreted as width"}
 
 Input: "2 cars" (NO currentField)
-Output: {"field": "garage_type", "value": "2-car", "confidence": "high", "reasoning": "Explicit car count - 2-car garage"}
-
-Input: "3 car garage" (NO currentField)
-Output: {"field": "garage_type", "value": "3-car", "confidence": "high", "reasoning": "User explicitly said 3 car garage"}
-
-Input: "20x30x10" (NO currentField)
-Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "Full dimensions provided - extracting width (first value)"}
-
-Input: "i want a building in Texas" (NO currentField)
-Output: {"field": "state_name", "value": "Texas", "confidence": "high", "reasoning": "User specified Texas"}
+Output: {"field": "garage_type", "value": "2-car", "confidence": "high", "reasoning": "Explicit car count"}
 
 User input: "${userInput}"
 
@@ -190,13 +239,11 @@ ONLY JSON:`;
 
             const parsed = JSON.parse(jsonMatch[0]);
 
-            // ✅ Validate structure
             if (!parsed.field || parsed.value === undefined || parsed.value === null) {
                 logger.warn(`[AIExtractor] Invalid response structure:`, parsed);
                 return null;
             }
 
-            // ✅ Validate field is a known parameter
             const validFields: Array<keyof UserFriendlyParams> = [
                 'width', 'length', 'height', 'garage_type', 'building_type',
                 'roof_type', 'gauge', 'state_name', 'color', 'utility_length'
@@ -231,22 +278,21 @@ ONLY JSON:`;
         logger.info(`[AIExtractor] Batch dimension extraction from: "${userInput}"`);
 
         try {
-            const prompt = `Extract ALL building dimensions from user input. Handle any format.
+            const prompt = `Extract ALL building dimensions from user input.
 
 RULES:
 1. Extract width, length, and height in feet
-2. Convert word numbers: "twenty" → 20, "thirty" → 30, "ten" → 10
+2. Convert word numbers: "twenty" → 20, "thirty" → 30
 3. Handle ANY format:
    - "20x30x10" → width:20, length:30, height:10
    - "width 20 length 30 height 10" → same
-   - "width twenty length thirty height ten" → same
    - "20, 30, 10" → same
 4. ALL THREE dimensions must be present
 5. If any dimension is missing, return found: false
 
 RETURN ONLY JSON:
 {
-  "found": <true if all 3 dimensions present, false otherwise>,
+  "found": <true if all 3 present, false otherwise>,
   "width": <number or null>,
   "length": <number or null>,
   "height": <number or null>,
@@ -288,8 +334,8 @@ export async function detectParameterUpdateFromInput(
     input: string,
     currentField?: string,
     currentParams?: Partial<UserFriendlyParams>
-): Promise<DetectionResult | null> {
-    // ✅ CRITICAL: Don't extract dimension fields here when in field mode
+): Promise<DetectionResultWithDimensions | null> {
+    // ✅ Don't extract dimension fields here when in field mode
     if (currentField && ['width', 'length', 'height', 'utility_length'].includes(currentField)) {
         logger.info(`[detectParameterUpdateFromInput] ⚠️ In dimension field mode - return null`);
         return null;
