@@ -1,9 +1,14 @@
 import {InstantiationError} from "@errors/InstantiationError";
 import {IWorkflowBuilder} from "@agents/tools/impl/io/IVisualizationNode";
 import {ComfyUIWorkflow, WorkflowConfig} from "@agents/tools/io/IVisualization";
+import pino from "pino";
+import {createLogger} from "@utils/logger/Log";
+
+const logger: pino.Logger = createLogger(module);
 
 /**
  * Builds and manages ComfyUI workflows
+ * ✅ FIXED: Calculates proper pixel dimensions from building dimensions
  */
 export class WorkflowBuilder implements IWorkflowBuilder
 {
@@ -15,7 +20,7 @@ export class WorkflowBuilder implements IWorkflowBuilder
     {
         if(enforce !== Enforce)
         {
-            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use AddonDataProvider.getInstance() instead of new.");
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use WorkflowBuilder.getInstance() instead of new.");
         }
 
         this.config = {
@@ -26,16 +31,10 @@ export class WorkflowBuilder implements IWorkflowBuilder
             scheduler: "normal",
             width: 1024,
             height: 768,
-            negativePrompt: "blurry, low quality, distorted, deformed, ugly, bad anatomy, watermark, text, signature, cartoon, sketch",
+            negativePrompt: "blurry, low quality, distorted, deformed, ugly, bad anatomy, watermark, text, signature, cartoon, sketch, wrong dimensions, incorrect scale, oversized building, undersized building",
             ...config,
         };
     }
-
-    /**
-     * Gets the singleton instance of StateReset.
-     *
-     * @returns The singleton instance of StateReset.
-     */
 
     public static getInstance(): IWorkflowBuilder
     {
@@ -48,10 +47,109 @@ export class WorkflowBuilder implements IWorkflowBuilder
     }
 
     /**
-     * Build ComfyUI workflow for garage visualization
+     * ✅ CRITICAL: Calculate pixel dimensions that match building aspect ratio
      */
-    public buildGarageWorkflow(prompt: string, width: number = this.config.width, height: number = this.config.height, seed: number = -1): ComfyUIWorkflow
-    {
+    private calculateOptimalDimensions(
+        buildingWidth: number,
+        buildingLength: number,
+        basePixelSize: number = 1024
+    ): { width: number; height: number } {
+
+        // Calculate aspect ratio from building dimensions
+        const aspectRatio = buildingWidth / buildingLength;
+
+        logger.info(`[WorkflowBuilder] Aspect ratio calculation:`, {
+            buildingWidth,
+            buildingLength,
+            aspectRatio: aspectRatio.toFixed(3),
+            basePixelSize,
+        });
+
+        let pixelWidth: number;
+        let pixelHeight: number;
+
+        // ✅ MATCH PIXEL DIMENSIONS TO BUILDING ASPECT RATIO
+        if (aspectRatio > 1.1) {
+            // Building is wider than it is long (width > length)
+            pixelWidth = basePixelSize;
+            pixelHeight = Math.round(basePixelSize / aspectRatio);
+        } else if (aspectRatio < 0.9) {
+            // Building is longer than it is wide (length > width)
+            pixelHeight = basePixelSize;
+            pixelWidth = Math.round(basePixelSize * aspectRatio);
+        } else {
+            // Building is roughly square (0.9 to 1.1 ratio)
+            pixelWidth = basePixelSize;
+            pixelHeight = basePixelSize;
+        }
+
+        // ✅ ROUND TO MULTIPLES OF 64 (Stable Diffusion requirement)
+        pixelWidth = Math.round(pixelWidth / 64) * 64;
+        pixelHeight = Math.round(pixelHeight / 64) * 64;
+
+        // ✅ ENSURE MINIMUM AND MAXIMUM DIMENSIONS
+        pixelWidth = Math.max(512, Math.min(1536, pixelWidth));
+        pixelHeight = Math.max(512, Math.min(1536, pixelHeight));
+
+        const resultAspectRatio = (pixelWidth / pixelHeight).toFixed(3);
+        const buildingAspectRatio = aspectRatio.toFixed(3);
+
+        logger.info(`[WorkflowBuilder] Calculated pixel dimensions:`, {
+            pixelWidth,
+            pixelHeight,
+            resultAspectRatio,
+            buildingAspectRatio,
+            aspectRatioMatch: Math.abs(aspectRatio - (pixelWidth / pixelHeight)) < 0.1,
+        });
+
+        return { width: pixelWidth, height: pixelHeight };
+    }
+
+    /**
+     * ✅ OVERLOADED: New signature with building dimensions
+     */
+    public buildGarageWorkflow(
+        prompt: string,
+        widthOrBuildingWidth: number = this.config.width,
+        heightOrBuildingLength: number = this.config.height,
+        seedOrWidth?: number,
+        seedOrSeed?: number
+    ): ComfyUIWorkflow {
+
+        let pixelWidth: number;
+        let pixelHeight: number;
+        let seed: number = -1;
+
+        // ✅ DETERMINE FUNCTION SIGNATURE
+        // New: buildGarageWorkflow(prompt, buildingWidth, buildingLength, seed)
+        // Old: buildGarageWorkflow(prompt, pixelWidth, pixelHeight, seed)
+
+        // Check if this looks like building dimensions (smaller values, 1-500) or pixel dimensions (larger values, 512+)
+        if (widthOrBuildingWidth < 512 && heightOrBuildingLength < 512) {
+            // ✅ NEW SIGNATURE: Building dimensions provided
+            logger.info(`[WorkflowBuilder] Using NEW signature with building dimensions`);
+
+            const buildingWidth = widthOrBuildingWidth;
+            const buildingLength = heightOrBuildingLength;
+            seed = (seedOrWidth !== undefined) ? seedOrWidth : -1;
+
+            const dims = this.calculateOptimalDimensions(buildingWidth, buildingLength);
+            pixelWidth = dims.width;
+            pixelHeight = dims.height;
+
+            logger.info(`[WorkflowBuilder] Building ${buildingWidth}×${buildingLength}ft → Pixels ${pixelWidth}×${pixelHeight}px`);
+        } else {
+            // ✅ OLD SIGNATURE: Pixel dimensions provided (backward compatible)
+            logger.info(`[WorkflowBuilder] Using legacy pixel dimensions`);
+
+            pixelWidth = widthOrBuildingWidth;
+            pixelHeight = heightOrBuildingLength;
+            seed = (seedOrWidth !== undefined) ? seedOrWidth : -1;
+
+            logger.info(`[WorkflowBuilder] Using pixel dimensions: ${pixelWidth}×${pixelHeight}px`);
+        }
+
+        // ✅ BUILD WORKFLOW WITH CALCULATED DIMENSIONS
         return {
             "1": {
                 class_type: "CheckpointLoaderSimple",
@@ -67,7 +165,11 @@ export class WorkflowBuilder implements IWorkflowBuilder
             },
             "4": {
                 class_type: "EmptyLatentImage",
-                inputs: { width, height, batch_size: 1 },
+                inputs: {
+                    width: pixelWidth,
+                    height: pixelHeight,
+                    batch_size: 1
+                },
             },
             "5": {
                 class_type: "KSampler",

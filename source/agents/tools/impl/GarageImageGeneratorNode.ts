@@ -55,8 +55,11 @@ export class GarageImageGenerator implements IGarageImageGenerator
         return { valid: true };
     }
 
-    public async generate(params: UserFriendlyParams, retries: number = this.maxRetries): Promise<GenerationResult>
-    {
+    public async generate(
+        params: UserFriendlyParams,
+        selectedAddons: any[] = [],
+        retries: number = this.maxRetries
+    ): Promise<GenerationResult> {
         const validation = this.validateParams(params);
         if (!validation.valid) {
             logger.error(`[GarageImageGenerator] Validation failed: ${validation.error}`);
@@ -66,31 +69,37 @@ export class GarageImageGenerator implements IGarageImageGenerator
             };
         }
 
-        logger.info(`[GarageImageGenerator] Generating with params:`, {
+        logger.info(`[GarageImageGenerator] Generating with exact specs:`, {
             width: params.width,
             length: params.length,
             height: params.height,
             roof_type: params.roof_type,
             color: params.color,
             gauge: params.gauge,
+            addonsCount: selectedAddons.length,
+            addons: selectedAddons.map(a => a.label)
         });
 
-        for (let attempt = 1; attempt <= retries; attempt++)
-        {
-            try
-            {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
                 logger.info(`[GarageImageGenerator] Attempt ${attempt}/${retries}...`);
 
-                const prompt: string = this.promptBuilder.buildGaragePrompt(params);
+                // ✅ CRITICAL: Pass selectedAddons to prompt builder
+                const prompt: string = this.promptBuilder.buildGaragePrompt(params, selectedAddons);
 
                 logger.debug(`[GarageImageGenerator] Generated prompt length: ${prompt.length} chars`);
-                logger.debug(`[GarageImageGenerator] Prompt preview: ${prompt.substring(0, 200)}...`);
+                logger.info(`[GarageImageGenerator] Prompt includes:`);
+                logger.info(`  - Dimensions: ${params.width}×${params.length}×${params.height}`);
+                logger.info(`  - Roof: ${params.roof_type}`);
+                logger.info(`  - Color: ${params.color}`);
+                logger.info(`  - Gauge: ${params.gauge}`);
+                logger.info(`  - Addons: ${selectedAddons.map(a => a.label).join(', ') || 'None'}`);
 
                 const seed: number = Math.floor(Math.random() * (2 ** 32 - 1));
                 const workflow: ComfyUIWorkflow = this.workflowBuilder.buildGarageWorkflow(
                     prompt,
-                    1024,
-                    768,
+                    params.width,
+                    params.length,
                     seed
                 );
 
@@ -108,13 +117,11 @@ export class GarageImageGenerator implements IGarageImageGenerator
                     imageUrl: `/generated/${filename}`,
                 };
             }
-            catch (error)
-            {
+            catch (error) {
                 const errorMsg: string = error instanceof Error ? error.message : String(error);
                 logger.warn(`[GarageImageGenerator] Attempt ${attempt} failed: ${errorMsg}`);
 
-                if (attempt < retries)
-                {
+                if (attempt < retries) {
                     const delay: number = 1000 * Math.pow(2, attempt - 1);
                     logger.info(`[GarageImageGenerator] Waiting ${delay}ms before retry...`);
                     await new Promise((resolve) => setTimeout(resolve, delay));

@@ -47,6 +47,7 @@ class VisualizationOrchestrator
                 state_name: params?.state_name,
                 basePrice,
                 addonsCount: selectedAddons.length,
+                addons: selectedAddons.map(a => a.label)
             });
 
             const finalColor = params?.color || state.color || "White";
@@ -75,7 +76,13 @@ class VisualizationOrchestrator
             let imageUrl: string | null = null;
             let base64Image: string | null = null;
 
-            const result: GenerationResult = await this.generator.generate(mergedParams, 3);
+            // ✅ CRITICAL FIX: Pass selectedAddons to generator
+            logger.info(`[VisualizationOrchestrator] Generating image with ${selectedAddons.length} addon(s)`);
+            const result: GenerationResult = await this.generator.generate(
+                mergedParams,
+                selectedAddons,  // ✅ Pass addons here
+                3
+            );
 
             if (result.success && result.base64)
             {

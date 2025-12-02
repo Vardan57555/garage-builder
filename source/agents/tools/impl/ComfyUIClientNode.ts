@@ -13,7 +13,7 @@ export class ComfyUIClient implements IComfyUIClient
 {
     private axios: AxiosInstance;
     private readonly pollInterval: number = 3000;
-    private readonly timeout: number = 120000;
+    private readonly timeout: number = 220000;
     private static instance: IComfyUIClient;
 
     constructor(enforce: () => void, comfyuiUrl: string = "http://localhost:8188")

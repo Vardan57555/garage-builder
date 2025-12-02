@@ -14,7 +14,7 @@ export interface IWorkflowBuilder
 
 export interface IPromptBuilder
 {
-    buildGaragePrompt(params: UserFriendlyParams): string;
+    buildGaragePrompt(params: UserFriendlyParams, selectedAddons?: any[]): string;
 
     buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string
 }
@@ -34,7 +34,11 @@ export interface IComfyUIClient
 
 export interface IGarageImageGenerator
 {
-    generate(params: UserFriendlyParams, retries?: number): Promise<GenerationResult>;
+    generate(
+        params: UserFriendlyParams,
+        selectedAddons?: any[],
+        retries?: number
+    ): Promise<GenerationResult>
 
     checkHealth(): Promise<HealthCheckResult>;
 }
