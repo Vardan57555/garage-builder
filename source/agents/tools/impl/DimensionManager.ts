@@ -8,35 +8,101 @@ import {DimensionResult} from "@agents/tools/io/IParameterExtraction";
 import {UpdateResult} from "@agents/tools/io/IParameterUpdate";
 const logger: pino.Logger = createLogger(module);
 
-export class DimensionManager implements IDimensionManager
-{
+export class DimensionManager implements IDimensionManager {
     private static instance: IDimensionManager;
 
-    constructor(enforce: () => void)
-    {
-        if(enforce !== Enforce)
-        {
+    constructor(enforce: () => void) {
+        if(enforce !== Enforce) {
             throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use DimensionManager.getInstance() instead of new.");
         }
     }
 
-    public static getInstance(): IDimensionManager
-    {
-        if(!DimensionManager.instance)
-        {
+    public static getInstance(): IDimensionManager {
+        if(!DimensionManager.instance) {
             DimensionManager.instance = new DimensionManager(Enforce);
         }
-
         return DimensionManager.instance;
+    }
+
+    /**
+     * ✅ CRITICAL FIX: Determine which dimension field is being asked for
+     * This ensures we don't accidentally assign length input to width
+     */
+    private getCurrentDimensionField(context?: {
+        currentField?: string;
+        userInput?: string;
+    }): 'width' | 'length' | 'height' | null {
+        if (!context?.currentField) return null;
+
+        const field = context.currentField.toLowerCase();
+        if (['width', 'length', 'height'].includes(field)) {
+            return field as 'width' | 'length' | 'height';
+        }
+        return null;
+    }
+
+    /**
+     * ✅ NEW: Parse single dimension for field mode
+     * When user is asked for ONE specific dimension, extract only that one
+     */
+    public parseSingleDimension(input: string, field: 'width' | 'length' | 'height'): number | null {
+        const trimmed = input.trim().toLowerCase();
+
+        logger.info(`[DimensionManager] Parsing single ${field}: "${input}"`);
+
+        // Match patterns like "20", "20 ft", "20 feet", "20ft", etc.
+        const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:ft|feet)?$/i);
+
+        if (!match) {
+            logger.warn(`[DimensionManager] Could not parse ${field} from: "${input}"`);
+            return null;
+        }
+
+        const value = parseFloat(match[1]);
+
+        if (!this.validateDimension(value)) {
+            logger.warn(`[DimensionManager] Invalid ${field} value: ${value}`);
+            return null;
+        }
+
+        logger.info(`[DimensionManager] ✅ Parsed ${field}: ${value}`);
+        return value;
+    }
+
+    /**
+     * ✅ CRITICAL: When in field mode, ONLY parse the requested field
+     * This prevents "20" for length from being assigned to width
+     */
+    public calculateDimensionsForField(input: string, currentField: string): { [key: string]: number } | null {
+        const field = this.getCurrentDimensionField({ currentField });
+
+        if (!field) {
+            logger.debug(`[DimensionManager] Not in dimension field mode: ${currentField}`);
+            return null;
+        }
+
+        logger.info(`[DimensionManager] Field mode: user asked for ${field}, input: "${input}"`);
+
+        const value = this.parseSingleDimension(input, field);
+
+        if (value === null) {
+            return null;
+        }
+
+        // ✅ CRITICAL: Return ONLY the requested field
+        // Do not try to infer other dimensions
+        const result: { [key: string]: number } = {};
+        result[field] = value;
+
+        logger.info(`[DimensionManager] ✅ Field mode result:`, result);
+        return result;
     }
 
     public calculateDimensions(input: string): DimensionResult {
         const lowerInput = input.toLowerCase();
         logger.info(`[DimensionManager] Input: "${input}"`);
 
-        // ✅ CRITICAL FIX: Corrected regex pattern
-        // This pattern matches: "w 20 l 20 h 10", "w20l20h10", "w:20 l:20 h:10", etc.
-        // The key is \s* (zero or more spaces) instead of \s+ (one or more spaces)
+        // ✅ PRIORITY 0: Abbreviated format - "w 20 l 20 h 10"
         const abbreviatedPattern = /w\s*:?\s*(\d+)\s*l\s*:?\s*(\d+)\s*h\s*:?\s*(\d+)/i;
         const abbreviatedMatch = input.match(abbreviatedPattern);
 
@@ -128,7 +194,7 @@ export class DimensionManager implements IDimensionManager
             /width.*?\d+.*?length.*?\d+/i,
             /\d+\s*ft.*?\d+\s*ft/i,
             /\d+\s*,\s*\d+\s*,\s*\d+/,
-            /w\s*:?\s*\d+\s*l\s*:?\s*\d+\s*h\s*:?\s*\d+/i, // ✅ ADD abbreviated format check
+            /w\s*:?\s*\d+\s*l\s*:?\s*\d+\s*h\s*:?\s*\d+/i,
         ];
 
         return explicitPatterns.some(pattern => pattern.test(input));
@@ -174,6 +240,10 @@ export class DimensionManager implements IDimensionManager
         return null;
     }
 
+    private validateDimension(value: number): boolean {
+        return value > 0 && value <= 500;
+    }
+
     private validateDimensions(w: number, l: number, h: number): boolean {
         const valid = w > 0 && l > 0 && h > 0 && w <= 500 && l <= 500 && h <= 500;
         if (!valid) {
@@ -202,22 +272,18 @@ export class DimensionManager implements IDimensionManager
         return { width, length, height, numCars: null };
     }
 
-    public isGarageTypeChanged(newGarageType?: string, oldGarageType?: string): boolean
-    {
+    public isGarageTypeChanged(newGarageType?: string, oldGarageType?: string): boolean {
         return !!(newGarageType && newGarageType !== oldGarageType);
     }
 
-    public clearDimensions(params: Record<string, any>): void
-    {
+    public clearDimensions(params: Record<string, any>): void {
         delete params.width;
         delete params.length;
         delete params.height;
     }
 
-    public applyDimensions(params: Record<string, any>, dimensions: DimensionResult): boolean
-    {
-        if (!dimensions.width || !dimensions.length || !dimensions.height)
-        {
+    public applyDimensions(params: Record<string, any>, dimensions: DimensionResult): boolean {
+        if (!dimensions.width || !dimensions.length || !dimensions.height) {
             return false;
         }
 
@@ -227,20 +293,16 @@ export class DimensionManager implements IDimensionManager
         return true;
     }
 
-    public preserveExistingDimensions(merged: Record<string, any>, current: Record<string, any>, extracted: Record<string, any>): void
-    {
-        if (current.width && !extracted.width)
-        {
+    public preserveExistingDimensions(merged: Record<string, any>, current: Record<string, any>, extracted: Record<string, any>): void {
+        if (current.width && !extracted.width) {
             merged.width = current.width;
         }
 
-        if (current.length && !extracted.length)
-        {
+        if (current.length && !extracted.length) {
             merged.length = current.length;
         }
 
-        if (current.height && !extracted.height)
-        {
+        if (current.height && !extracted.height) {
             merged.height = current.height;
         }
     }

@@ -145,27 +145,29 @@ Return ONLY JSON:`;
 
             const fieldKey = state.currentField as keyof UserFriendlyParams;
             const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
+            const isDimensionField = ['width', 'length', 'height', 'utility_length'].includes(state.currentField);
 
-            // ✅ HANDLE CHOICE FIELDS WITH AI
+            // ✅ DIMENSION FIELDS FIRST
+            if (isDimensionField) {
+                return await this.handleDimensionField(state, userInput, currentParams);
+            }
+
+            // ✅ CHOICE FIELDS
             if (isChoiceField) {
-                logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), using AI handler`);
+                logger.info(`[ParameterExtractor] Choice field: ${state.currentField}`);
 
                 const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
-
                 const availableOptions = AIDrivenChoiceHandler.getAvailableOptions(state.currentField);
 
-                if (availableOptions.length === 0) {
-                    logger.error(`[ParameterExtractor] No options available for ${state.currentField}`);
+                if (!availableOptions.length) {
                     return {
-                        validationError: `No options available for ${state.currentField}`,
-                        response: `❌ Error: Cannot process ${state.currentField}`,
+                        validationError: `No options for ${state.currentField}`,
+                        response: `❌ Error processing ${state.currentField}`,
                         nextStep: "ask_for_field",
                         currentField: state.currentField,
                         userFriendlyParams: currentParams,
                     };
                 }
-
-                logger.info(`[ParameterExtractor] Available options for ${state.currentField}:`, availableOptions);
 
                 const result = await AIDrivenChoiceHandler.processUserChoice(
                     userInput,
@@ -174,15 +176,12 @@ Return ONLY JSON:`;
                 );
 
                 if (!result) {
-                    logger.warn(`[ParameterExtractor] Could not match "${userInput}" to any option`);
-
                     const prompt = await AIDrivenChoiceHandler.generateChoicePrompt(
                         state.currentField,
                         availableOptions
                     );
-
                     return {
-                        validationError: `Could not understand "${userInput}" for ${state.currentField}`,
+                        validationError: `Could not match "${userInput}"`,
                         response: `❌ I didn't understand that.\n\n${prompt}`,
                         nextStep: "ask_for_field",
                         currentField: state.currentField,
@@ -190,53 +189,24 @@ Return ONLY JSON:`;
                     };
                 }
 
-                logger.info(`[ParameterExtractor] AI matched: "${userInput}" → "${result.value}" (confidence: ${result.confidence})`);
-
-                // In ParameterExtractionNode.ts - at the end of the choice field handling
-
-// ✅ HIGH CONFIDENCE: Accept immediately
                 if (result.confidence === "high" && !result.requiresConfirmation) {
-                    logger.info(`[ParameterExtractor] ✅ High confidence: ${result.value}`);
-
                     // @ts-ignore
                     currentParams[fieldKey] = result.value;
-
-                    // ✅ CHECK FOR NEXT FIELD
-                    const missingFields = LeadAgentHelpers.getMissingFields(currentParams);
-
-                    if (missingFields.length > 0) {
-                        // More fields needed
-                        logger.info(`[ParameterExtractor] Next missing field: ${missingFields[0]}`);
-
-                        return {
-                            userFriendlyParams: currentParams,
-                            currentField: null, // Clear current field
-                            nextStep: "check_missing_fields", // Let the graph check for next field
-                            response: `✅ Updated ${state.currentField} to ${result.value}`, // ✅ ADD RESPONSE
-                            _pendingConfirmation: null,
-                        };
-                    } else {
-                        // All fields complete
-                        logger.info(`[ParameterExtractor] ✅ All fields complete`);
-
-                        return {
-                            userFriendlyParams: currentParams,
-                            currentField: null,
-                            nextStep: "calculate_price",
-                            response: `✅ Updated ${state.currentField} to ${result.value}. Calculating price...`,
-                            _pendingConfirmation: null,
-                        };
-                    }
+                    const missing = LeadAgentHelpers.getMissingFields(currentParams);
+                    return {
+                        userFriendlyParams: currentParams,
+                        currentField: null,
+                        nextStep: missing.length > 0 ? "check_missing_fields" : "calculate_price",
+                        response: `✅ Updated ${state.currentField} to ${result.value}`,
+                        _pendingConfirmation: null,
+                    };
                 }
-
-                // ✅ MEDIUM/LOW CONFIDENCE: Ask for confirmation
-                logger.info(`[ParameterExtractor] Medium/low confidence (${result.confidence}), asking for confirmation`);
 
                 return {
                     userFriendlyParams: currentParams,
                     currentField: state.currentField,
                     nextStep: "ask_for_field",
-                    response: result.clarificationPrompt || `Did you mean "${result.value}"? (yes/no)`,
+                    response: result.clarificationPrompt || `Did you mean "${result.value}"?`,
                     _pendingConfirmation: {
                         field: state.currentField,
                         matchedValue: result.value,
@@ -244,120 +214,58 @@ Return ONLY JSON:`;
                 };
             }
 
-            // ✅ HANDLE DIMENSION FIELDS
-            if (this.isDimensionField(state.currentField)) {
-                logger.info(`[ParameterExtractor] Dimension field mode: ${state.currentField}`);
-
-                const simpleNumericResult = this.trySimpleNumericParse(userInput, state.currentField);
-                if (simpleNumericResult) {
-                    logger.info(`[ParameterExtractor] Simple numeric matched: ${simpleNumericResult}`);
-                    return {
-                        userFriendlyParams: {
-                            ...currentParams,
-                            [state.currentField]: simpleNumericResult,
-                        },
-                        currentField: null,
-                        nextStep: "check_missing_fields",
-                    };
-                }
-
-                const aiExtracted = await this.extractSingleDimensionWithAI(
-                    userInput,
-                    state.currentField as 'width' | 'length' | 'height'
-                );
-                if (aiExtracted) {
-                    logger.info(`[ParameterExtractor] AI extracted ${state.currentField}: ${aiExtracted}`);
-                    return {
-                        userFriendlyParams: {
-                            ...currentParams,
-                            [state.currentField]: aiExtracted,
-                        },
-                        currentField: null,
-                        nextStep: "check_missing_fields",
-                    };
-                }
-            }
-
-            // ✅ HANDLE STATE NAME
+            // ✅ STATE NAME
             if (state.currentField === 'state_name') {
-                logger.info(`[ParameterExtractor] Validating state name against database`);
-
                 const formatValidation = this.validateFieldInput(userInput, state.currentField);
                 if (!formatValidation.isValid) {
-                    logger.warn(`[ParameterExtractor] Invalid format for state_name: "${userInput}"`);
                     return {
                         validationError: formatValidation.error,
-                        response: `❌ ${formatValidation.error}\n\nPlease provide a valid US state name.`,
+                        response: `❌ ${formatValidation.error}`,
                         nextStep: "ask_for_field",
                         currentField: state.currentField,
                         userFriendlyParams: currentParams,
                     };
                 }
 
-                try {
-                    const { ParameterValidator } = await import("@agents/tools/validators/ParameterValidator");
+                const { ParameterValidator } = await import("@agents/tools/validators/ParameterValidator");
+                const dbValidation = await ParameterValidator.validateState(userInput, state.stateMapCache);
 
-                    const dbValidation = await ParameterValidator.validateState(
-                        userInput,
-                        state.stateMapCache
-                    );
-
-                    if (!dbValidation.isValid) {
-                        logger.warn(`[ParameterExtractor] State not found in database: "${userInput}"`);
-                        return {
-                            validationError: dbValidation.error,
-                            response: `❌ ${dbValidation.error}\n\nPlease provide a valid US state name (e.g., Texas, California, Florida).`,
-                            nextStep: "ask_for_field",
-                            currentField: state.currentField,
-                            userFriendlyParams: currentParams,
-                        };
-                    }
-
-                    // @ts-ignore
-                    currentParams[fieldKey] = dbValidation.normalizedValue;
-                    logger.info(`[ParameterExtractor] State validated: ${userInput} → ${dbValidation.normalizedValue}`);
-
+                if (!dbValidation.isValid) {
                     return {
-                        userFriendlyParams: currentParams,
-                        currentField: null,
-                        nextStep: "check_missing_fields",
-                    };
-
-                } catch (error) {
-                    logger.error(`[ParameterExtractor] Error validating state:`, error);
-                    return {
-                        validationError: `Error validating state name`,
-                        response: `❌ Error validating state. Please try again.`,
+                        validationError: dbValidation.error,
+                        response: `❌ ${dbValidation.error}`,
                         nextStep: "ask_for_field",
                         currentField: state.currentField,
                         userFriendlyParams: currentParams,
                     };
                 }
+
+                // @ts-ignore
+                currentParams[fieldKey] = dbValidation.normalizedValue;
+                return {
+                    userFriendlyParams: currentParams,
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                };
             }
 
-            // ✅ OTHER FIELDS (generic validation)
+            // ✅ OTHER FIELDS
             const validation = this.validateFieldInput(userInput, state.currentField);
-
             if (!validation.isValid) {
-                logger.warn(`[ParameterExtractor] Invalid input for ${state.currentField}: "${userInput}"`);
                 return {
                     validationError: validation.error,
-                    response: `❌ ${validation.error}\n\nPlease provide a valid ${state.currentField}.`,
+                    response: `❌ ${validation.error}`,
                     nextStep: "ask_for_field",
-                    currentField: fieldKey,
+                    currentField: state.currentField,
                     userFriendlyParams: currentParams,
                 };
             }
 
-            const parsedValue = this.parseFieldValue(userInput, state.currentField);
-
             // @ts-ignore
-            currentParams[fieldKey] = parsedValue;
-
-            logger.info(`[ParameterExtractor] Field accepted: ${state.currentField} = ${parsedValue}`);
-
+            currentParams[fieldKey] = this.parseFieldValue(userInput, state.currentField);
             return {
                 userFriendlyParams: currentParams,
+                currentField: null,
                 nextStep: "check_missing_fields",
             };
         }
@@ -897,30 +805,30 @@ Return ONLY JSON:`;
 
         // ✅ STEP 2: If patterns fail, use AI with improved prompt
         try {
-            const prompt = `Extract the building type from user input. 
+            const prompt = `Extract ONLY the building type from this text.
 
-CRITICAL RULES:
-1. If the word "garage" appears ANYWHERE → return "garage"
-2. If the word "shed" appears ANYWHERE → return "shed"  
-3. If the word "barn" appears ANYWHERE → return "barn"
-4. If user mentions "cars", "vehicles", or car count → return "garage"
-5. If NONE of the above → return "null"
+RULES:
+1. Search for these EXACT words: "garage", "shed", "barn"
+2. If ANY of these words appear → return that word
+3. Ignore all numbers, dimensions, and other details
+4. If NONE appear → return "null"
 
 EXAMPLES:
 ✅ "I want a garage" → garage
-✅ "i want a garage for 2 cars" → garage
+✅ "i want garage width 20 length 20 height 10" → garage
 ✅ "garage for 2 cars" → garage
+✅ "20x20x10 garage" → garage
 ✅ "2 car garage" → garage
-✅ "for 2 cars" → garage
 ✅ "need a shed" → shed
 ✅ "looking for barn" → barn
 ❌ "hello" → null
+❌ "20x20x10" → null
 ❌ "what's up" → null
 
-User input: "${userInput}"
+Text: "${userInput}"
 
-Return ONLY ONE WORD: garage, shed, barn, or null
-NO explanation, NO markdown, NO extra text:`;
+Return ONLY: garage, shed, barn, or null
+NO other text:`;
 
             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
@@ -1288,6 +1196,51 @@ ONLY valid JSON:`;
         this.dimensionManager.preserveExistingDimensions(merged, current, extracted);
 
         logger.info(`[ParameterExtractor] Preserved dimensions: ${merged.width}×${merged.length}×${merged.height}`);
+    }
+
+    private async handleDimensionField(
+        state: LeadAgentStateType,
+        userInput: string,
+        currentParams: any
+    ): Promise<ExtractionResult> {
+        const fieldKey = state.currentField as keyof UserFriendlyParams;
+        logger.info(`[ParameterExtractor] Dimension field: ${state.currentField}`);
+
+        // ✅ PRIORITY 1: Simple numeric (e.g., "20", "20 ft")
+        const simple = this.trySimpleNumericParse(userInput, state.currentField);
+        if (simple) {
+            logger.info(`[ParameterExtractor] ✅ Simple numeric: ${simple}`);
+            return {
+                userFriendlyParams: { ...currentParams, [fieldKey]: simple },
+                currentField: null,
+                nextStep: "check_missing_fields",
+                response: `✓ Set ${state.currentField} to ${simple}ft`,
+            };
+        }
+
+        // ✅ PRIORITY 2: AI extraction
+        const ai = await this.extractSingleDimensionWithAI(
+            userInput,
+            state.currentField as 'width' | 'length' | 'height'
+        );
+        if (ai) {
+            logger.info(`[ParameterExtractor] ✅ AI extracted: ${ai}`);
+            return {
+                userFriendlyParams: { ...currentParams, [fieldKey]: ai },
+                currentField: null,
+                nextStep: "check_missing_fields",
+                response: `✓ Set ${state.currentField} to ${ai}ft`,
+            };
+        }
+
+        // ❌ Failed
+        return {
+            validationError: `Could not parse "${userInput}" as ${state.currentField}`,
+            response: `❌ Please enter a number (e.g., "20" or "20 feet")`,
+            nextStep: "ask_for_field",
+            currentField: state.currentField,
+            userFriendlyParams: currentParams,
+        };
     }
 
     private async validateParameters(params: Record<string, any>, stateMapCache: any): Promise<ValidationResult | null> {
