@@ -6,32 +6,31 @@ import {RedisCacheUtils} from "@utils/cache/RedisCacheUtils";
 import {ProcedureExecutor} from "@utils/procedure/ProcedureExecutor";
 const logger: pino.Logger = createLogger(module);
 
-export class LeadAgentHelpers {
-    private static cacheUtils = RedisCacheUtils.getInstance();
+export class LeadAgentHelpers
+{
+    private static cacheUtils: RedisCacheUtils = RedisCacheUtils.getInstance();
 
-    static async mapStateToDB(
-        stateName: string,
-        stateMapCache: Map<string, StateMapping | null>,
-        preferredBuildingId = 1
-    ): Promise<StateMapping | null> {
+    static async mapStateToDB(stateName: string, stateMapCache: Map<string, StateMapping | null>, preferredBuildingId = 1): Promise<StateMapping | null>
+    {
         const cacheKey = `${stateName}:${preferredBuildingId}`;
-        const cachedState = stateMapCache.get(cacheKey);
+        const cachedState: StateMapping = stateMapCache.get(cacheKey);
 
-        if (cachedState !== undefined) {
+        if (cachedState !== undefined)
+        {
             return cachedState;
         }
 
-        try {
+        try
+        {
             const result = await ProcedureExecutor.getProcedureData<any>(
                 [stateName],
                 "getMapIdByStateName(?)",
                 "getMapIdByStateName"
             );
 
-            if (result?.length > 0) {
-                const preferredMapping = result.find(
-                    (item: any) => item.building_id === preferredBuildingId
-                );
+            if (result?.length > 0)
+            {
+                const preferredMapping = result.find((item: any) => item.building_id === preferredBuildingId);
                 const mapping = preferredMapping || result[0];
                 const output: StateMapping = {
                     map_id: mapping.map_id,
@@ -45,38 +44,42 @@ export class LeadAgentHelpers {
             await this.cacheUtils.put(cacheKey, null);
             stateMapCache.set(cacheKey, null);
             return null;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error("[LeadAgentHelpers] State mapping failed:", error);
             stateMapCache.set(cacheKey, null);
             return null;
         }
     }
 
-    static async mapRoofTypeToDB(
-        roofType: string,
-        mapId: number,
-        roofMapCache: Map<string, number>
-    ): Promise<number> {
+    static async mapRoofTypeToDB(roofType: string, mapId: number, roofMapCache: Map<string, number>): Promise<number>
+    {
         const normalizedRoofType: string = roofType.toLowerCase();
         const cacheKey = `${normalizedRoofType}:${mapId}`;
 
         const cachedRoofId: number = await this.cacheUtils.get(cacheKey);
-        if (cachedRoofId) {
+        if (cachedRoofId)
+        {
             return cachedRoofId;
         }
 
-        try {
+        try
+        {
             const result = await ProcedureExecutor.getProcedureData<any>(
                 [mapId, roofType],
                 "getRoofIdByType(?, ?)",
                 "roof_mapping"
             );
 
-            if (result?.length > 0) {
+            if (result?.length > 0)
+            {
                 roofMapCache.set(cacheKey, result[0].roof_id);
                 return result[0].roof_id;
             }
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error("[LeadAgentHelpers] Roof type mapping failed:", error);
         }
 
@@ -91,7 +94,8 @@ export class LeadAgentHelpers {
         return fallbackId;
     }
 
-    static formatCurrentParams(params: Partial<UserFriendlyParams>): string {
+    static formatCurrentParams(params: Partial<UserFriendlyParams>): string
+    {
         const parts: string[] = [];
 
         if (params.width) parts.push(`Width: ${params.width}ft`);
@@ -105,14 +109,17 @@ export class LeadAgentHelpers {
         return parts.length > 0 ? `📋 Current parameters: ${parts.join(" | ")}` : "";
     }
 
-    static getMissingFields(params: Partial<UserFriendlyParams>): string[] {
+    static getMissingFields(params: Partial<UserFriendlyParams>): string[]
+    {
 
         const missing: string[] = [];
 
-        for (const field of Constants.REQUIRED_FIELDS) {
-            const value = params[field as keyof UserFriendlyParams];
+        for (const field of Constants.REQUIRED_FIELDS)
+        {
+            const value: string | number | boolean = params[field as keyof UserFriendlyParams];
 
-            if (value === null || value === undefined || value === "") {
+            if (value === null || value === undefined || value === "")
+            {
                 missing.push(field);
                 logger.info(`[getMissingFields] Field "${field}" is MISSING`);
             }
@@ -122,7 +129,8 @@ export class LeadAgentHelpers {
         return missing;
     }
 
-    static formatFieldName(field: keyof UserFriendlyParams): string {
+    static formatFieldName(field: keyof UserFriendlyParams): string
+    {
         return field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, " ");
     }
 }
