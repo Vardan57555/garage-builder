@@ -84,6 +84,162 @@ export class LeadAgent {
             );
 
             const isInFieldMode = !!session.state.currentField;
+            const isInChoiceFieldMode = session.state.currentField &&
+                ["roof_type", "gauge", "building_type"].includes(session.state.currentField);
+
+            if (isInChoiceFieldMode) {
+                try {
+                    logger.info(`[LeadAgent] 🎯 In CHOICE field mode (${session.state.currentField})`);
+                    logger.info(`[LeadAgent] SKIPPING early parameter detection - letting ParameterExtractor handle it`);
+
+                    const result = await leadAgentGraph.invoke({
+                        sessionId,
+                        messages: await session.memory.chatHistory.getMessages(),
+                        userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
+                        hasGarageIntent: session.state.hasGarageIntent,
+                        priceCalculated: session.state.priceCalculated || false,
+                        currentField: session.state.currentField as keyof UserFriendlyParams,
+                        validationError: null,
+                        response: "",
+                        nextStep: "extract_parameters",
+                        stateMapCache: session.stateMapCache || new Map(),
+                        roofMapCache: session.roofMapCache || new Map(),
+                        pendingUpdates: [],
+                        pricingData: null,
+                        basePrice: 0,
+                        selectedAddons: [],
+                        finalPrice: 0,
+                        color: null,
+                        colorCost: 0,
+                        _pendingConfirmation: session.state._pendingConfirmation || null,
+                    });
+
+                    // ✅ CRITICAL: Update session state FIRST
+                    session.state.userFriendlyParams = result.userFriendlyParams;
+                    session.state.hasGarageIntent = result.hasGarageIntent;
+                    session.state.priceCalculated = result.priceCalculated || false;
+                    session.state.currentField = result.currentField; // This might be null or next field
+                    session.state.color = result.color;
+                    session.state.colorCost = result.colorCost;
+                    session.state._pendingConfirmation = result._pendingConfirmation || null;
+                    session.stateMapCache = result.stateMapCache;
+                    session.roofMapCache = result.roofMapCache;
+
+                    if (result.priceCalculated && result.pricingData) {
+                        session.state.pricingData = result.pricingData;
+                        session.state.basePrice = result.basePrice || 0;
+                        session.state.selectedAddons = result.selectedAddons || [];
+                        session.state.finalPrice = result.finalPrice || 0;
+                    }
+
+                    // ✅ LOG THE RESULT
+                    logger.info(`[LeadAgent] Graph result:`, {
+                        currentField: result.currentField,
+                        nextStep: result.nextStep,
+                        hasResponse: !!result.response,
+                        params: result.userFriendlyParams,
+                    });
+
+                    // ✅ CRITICAL FIX: If result has no response and currentField is null,
+                    // that means the field was successfully processed but we need to ask for next field
+                    if (!result.response && result.currentField === null) {
+                        logger.info(`[LeadAgent] ✅ Field processed successfully, checking for next field`);
+
+                        // Check for missing fields
+                        const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+
+                        if (missingFields.length > 0) {
+                            // Ask for the next missing field
+                            const nextField = missingFields[0];
+                            logger.info(`[LeadAgent] Next missing field: ${nextField}`);
+
+                            session.state.currentField = nextField as keyof UserFriendlyParams;
+
+                            const fieldResult = await askForFieldNode({
+                                sessionId,
+                                messages: await session.memory.chatHistory.getMessages(),
+                                userFriendlyParams: session.state.userFriendlyParams,
+                                hasGarageIntent: true,
+                                priceCalculated: false,
+                                currentField: nextField as keyof UserFriendlyParams,
+                                validationError: null,
+                                response: "",
+                                nextStep: null,
+                                stateMapCache: session.stateMapCache || new Map(),
+                                roofMapCache: session.roofMapCache || new Map(),
+                                pendingUpdates: [],
+                                pricingData: null,
+                                basePrice: 0,
+                                selectedAddons: [],
+                                finalPrice: 0,
+                                color: null,
+                                colorCost: 0,
+                                generatedImageUrl: "",
+                                _pendingConfirmation: null
+                            });
+
+                            const response = fieldResult.response;
+                            await session.memory.chatHistory.addAIChatMessage(response);
+                            return response;
+                        } else {
+                            // All fields complete - move to price calculation
+                            logger.info(`[LeadAgent] ✅ All fields complete, moving to price calculation`);
+
+                            const priceResult = await calculatePriceNode({
+                                sessionId,
+                                messages: await session.memory.chatHistory.getMessages(),
+                                userFriendlyParams: session.state.userFriendlyParams,
+                                hasGarageIntent: true,
+                                priceCalculated: false,
+                                currentField: null,
+                                validationError: null,
+                                response: "",
+                                nextStep: null,
+                                stateMapCache: session.stateMapCache || new Map(),
+                                roofMapCache: session.roofMapCache || new Map(),
+                                pendingUpdates: [],
+                                pricingData: null,
+                                basePrice: 0,
+                                selectedAddons: [],
+                                finalPrice: 0,
+                                color: null,
+                                colorCost: 0,
+                                generatedImageUrl: "",
+                                _pendingConfirmation: null
+                            });
+
+                            const response = priceResult.response;
+                            await session.memory.chatHistory.addAIChatMessage(response);
+
+                            // Update session with price data
+                            session.state.priceCalculated = true;
+                            session.state.pricingData = priceResult.pricingData;
+                            session.state.basePrice = priceResult.basePrice || 0;
+                            session.state.finalPrice = priceResult.finalPrice || 0;
+
+                            return response;
+                        }
+                    }
+
+                    // ✅ If result has a response, use it
+                    if (result.response) {
+                        await session.memory.chatHistory.addAIChatMessage(result.response);
+                        return result.response;
+                    }
+
+                    // ✅ Fallback: This shouldn't happen, but just in case
+                    logger.warn(`[LeadAgent] ⚠️ Unexpected state: no response and currentField is not null`);
+                    return "Please continue with your building specifications.";
+
+                } catch (error) {
+                    logger.error(`[LeadAgent] ERROR in choice field mode:`, error);
+
+                    // Reset to a safe state
+                    session.state.currentField = null;
+
+                    return `❌ Error processing your input. Let's try again. What are your building dimensions?`;
+                }
+            }
 
             if (isInFieldMode && this.isDimensionField(session.state.currentField)) {
                 logger.info(`[LeadAgent] In dimension field mode (${session.state.currentField}), checking for batch dimensions...`);
@@ -132,7 +288,11 @@ export class LeadAgent {
                             finalPrice: 0,
                             color: null,
                             colorCost: 0,
-                            generatedImageUrl: ""
+                            generatedImageUrl: "",
+                            _pendingConfirmation: {
+                                field: "",
+                                matchedValue: ""
+                            }
                         });
 
                         const fullResponse = `${response}\n\n${fieldResult.response}`;
@@ -183,7 +343,11 @@ export class LeadAgent {
                             finalPrice: 0,
                             color: null,
                             colorCost: 0,
-                            generatedImageUrl: ""
+                            generatedImageUrl: "",
+                            _pendingConfirmation: {
+                                field: "",
+                                matchedValue: ""
+                            }
                         });
 
                         const fullResponse = `${response}\n\n${fieldResult.response}`;
@@ -281,7 +445,11 @@ export class LeadAgent {
                         finalPrice: 0,
                         color: null,
                         colorCost: 0,
-                        generatedImageUrl: ""
+                        generatedImageUrl: "",
+                        _pendingConfirmation: {
+                            field: "",
+                            matchedValue: ""
+                        }
                     });
 
                     const fullResponse = `${response}\n\n${fieldResult.response}`;
@@ -329,7 +497,11 @@ export class LeadAgent {
                         finalPrice: 0,
                         color: "White",
                         colorCost: 0,
-                        generatedImageUrl: ""
+                        generatedImageUrl: "",
+                        _pendingConfirmation: {
+                            field: "",
+                            matchedValue: ""
+                        }
                     });
 
                     this.restoreDimensionsIfCorrupted(session, originalDimensions);
@@ -409,7 +581,9 @@ export class LeadAgent {
 
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
-            const update = await detectParameterUpdateFromInput(input,session.state.currentField || undefined);
+            const update = !isInChoiceFieldMode
+                ? await detectParameterUpdateFromInput(input, session.state.currentField || undefined)
+                : null;
 
             if (update && session.state.currentField)
             {
@@ -634,6 +808,10 @@ export class LeadAgent {
             generatedImageUrl: null,
             color: session.state.color,
             colorCost: session.state.colorCost || 0,
+            _pendingConfirmation: {
+                field: "",
+                matchedValue: ""
+            }
         };
     }
 
@@ -754,7 +932,11 @@ export class LeadAgent {
             finalPrice: 0,
             color: selectedColor.name,
             colorCost: 0,
-            generatedImageUrl: ""
+            generatedImageUrl: "",
+            _pendingConfirmation: {
+                field: "",
+                matchedValue: ""
+            }
         });
 
         this.restoreDimensionsIfCorrupted(session, originalDimensions);
@@ -814,7 +996,11 @@ export class LeadAgent {
             finalPrice: 0,
             color: null,
             colorCost: 0,
-            generatedImageUrl: ""
+            generatedImageUrl: "",
+            _pendingConfirmation: {
+                field: "",
+                matchedValue: ""
+            }
         });
 
         return `${previousMessage}\n\n${fieldResult.response}`;

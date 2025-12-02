@@ -24,4 +24,5 @@ export interface ExtractionResult {
     response?: string;
     currentField?: string;
     pendingUpdates?: any;
+    _pendingConfirmation?: any;
 }

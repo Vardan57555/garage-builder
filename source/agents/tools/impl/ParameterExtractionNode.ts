@@ -19,15 +19,14 @@ import {IDimensionManager, IParameterExtractor} from "@agents/tools/impl/io/IPar
 import {IPromptBuilder} from "@agents/tools/impl/io/IVisualizationNode";
 import {IParameterExtractionStrategy} from "@agents/tools/impl/io/IParameterExtractionStrategy";
 import {ParameterExtractionStrategy} from "@agents/tools/impl/ParameterExtractionStrategy";
-import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
-import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 import { detectParameterUpdateFromInput } from "@agents/tools/impl/DetectionHelpers";
-
+import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
+import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 class ParameterExtractor implements IParameterExtractor {
     private promptBuilder: IPromptBuilder;
-    private choiceService: IChoiceService;
+    // private choiceService: IChoiceService;
     private parameterExtractionStrategy: IParameterExtractionStrategy;
     private dimensionManager: IDimensionManager;
     private paramExtractor: PriceParamsExtractorTool;
@@ -35,7 +34,7 @@ class ParameterExtractor implements IParameterExtractor {
     constructor() {
         this.parameterExtractionStrategy = ParameterExtractionStrategy.getInstance();
         this.promptBuilder = PromptBuilder.getInstance();
-        this.choiceService = ChoiceServiceImpl.getInstance();
+        // this.choiceService = ChoiceServiceImpl.getInstance();
         this.dimensionManager = DimensionManager.getInstance();
         this.paramExtractor = PriceParamsExtractorTool.getInstance();
     }
@@ -90,6 +89,278 @@ Return ONLY JSON:`;
         const currentParams = { ...state.userFriendlyParams };
         const userInput = this.extractContextFromState(state);
 
+        if (!currentParams.building_type) {
+            const buildingType = await this.extractBuildingTypeIfMissing(userInput, currentParams);
+            if (buildingType) {
+                currentParams.building_type = buildingType;
+                logger.info(`[ParameterExtractor] ✅ Building type set to: ${buildingType}`);
+            }
+        }
+
+        if (state._pendingConfirmation && state._pendingConfirmation.field) {
+            logger.info(`[ParameterExtractor] Handling pending confirmation for ${state._pendingConfirmation.field}`);
+
+            const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
+
+            const confirmation = await AIDrivenChoiceHandler.confirmChoice(
+                userInput,
+                state._pendingConfirmation.matchedValue
+            );
+
+            if (confirmation.confirmed) {
+                logger.info(`[ParameterExtractor] ✅ Confirmed: ${state._pendingConfirmation.matchedValue}`);
+
+                const fieldKey = state._pendingConfirmation.field as keyof UserFriendlyParams;
+                // @ts-ignore
+                currentParams[fieldKey] = state._pendingConfirmation.matchedValue;
+
+                return {
+                    userFriendlyParams: currentParams,
+                    currentField: null,
+                    nextStep: "check_missing_fields",
+                    response: `✅ Updated ${state._pendingConfirmation.field} to ${state._pendingConfirmation.matchedValue}`,
+                    _pendingConfirmation: null,
+                };
+            } else {
+                logger.info(`[ParameterExtractor] ❌ Rejected confirmation, re-asking`);
+
+                const availableOptions = AIDrivenChoiceHandler.getAvailableOptions(state._pendingConfirmation.field);
+                const prompt = await AIDrivenChoiceHandler.generateChoicePrompt(
+                    state._pendingConfirmation.field,
+                    availableOptions
+                );
+
+                return {
+                    userFriendlyParams: currentParams,
+                    currentField: state._pendingConfirmation.field as keyof UserFriendlyParams,
+                    nextStep: "__end__",
+                    response: `No problem! Let's try again.\n\n${prompt}`,
+                    _pendingConfirmation: null,
+                };
+            }
+        }
+
+        if (state.currentField && typeof state.currentField === 'string') {
+            logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
+
+            const fieldKey = state.currentField as keyof UserFriendlyParams;
+            const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
+
+            // ✅ HANDLE CHOICE FIELDS WITH AI
+            if (isChoiceField) {
+                logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), using AI handler`);
+
+                const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
+
+                const availableOptions = AIDrivenChoiceHandler.getAvailableOptions(state.currentField);
+
+                if (availableOptions.length === 0) {
+                    logger.error(`[ParameterExtractor] No options available for ${state.currentField}`);
+                    return {
+                        validationError: `No options available for ${state.currentField}`,
+                        response: `❌ Error: Cannot process ${state.currentField}`,
+                        nextStep: "ask_for_field",
+                        currentField: state.currentField,
+                        userFriendlyParams: currentParams,
+                    };
+                }
+
+                logger.info(`[ParameterExtractor] Available options for ${state.currentField}:`, availableOptions);
+
+                const result = await AIDrivenChoiceHandler.processUserChoice(
+                    userInput,
+                    state.currentField,
+                    availableOptions
+                );
+
+                if (!result) {
+                    logger.warn(`[ParameterExtractor] Could not match "${userInput}" to any option`);
+
+                    const prompt = await AIDrivenChoiceHandler.generateChoicePrompt(
+                        state.currentField,
+                        availableOptions
+                    );
+
+                    return {
+                        validationError: `Could not understand "${userInput}" for ${state.currentField}`,
+                        response: `❌ I didn't understand that.\n\n${prompt}`,
+                        nextStep: "ask_for_field",
+                        currentField: state.currentField,
+                        userFriendlyParams: currentParams,
+                    };
+                }
+
+                logger.info(`[ParameterExtractor] AI matched: "${userInput}" → "${result.value}" (confidence: ${result.confidence})`);
+
+                // In ParameterExtractionNode.ts - at the end of the choice field handling
+
+// ✅ HIGH CONFIDENCE: Accept immediately
+                if (result.confidence === "high" && !result.requiresConfirmation) {
+                    logger.info(`[ParameterExtractor] ✅ High confidence: ${result.value}`);
+
+                    // @ts-ignore
+                    currentParams[fieldKey] = result.value;
+
+                    // ✅ CHECK FOR NEXT FIELD
+                    const missingFields = LeadAgentHelpers.getMissingFields(currentParams);
+
+                    if (missingFields.length > 0) {
+                        // More fields needed
+                        logger.info(`[ParameterExtractor] Next missing field: ${missingFields[0]}`);
+
+                        return {
+                            userFriendlyParams: currentParams,
+                            currentField: null, // Clear current field
+                            nextStep: "check_missing_fields", // Let the graph check for next field
+                            response: `✅ Updated ${state.currentField} to ${result.value}`, // ✅ ADD RESPONSE
+                            _pendingConfirmation: null,
+                        };
+                    } else {
+                        // All fields complete
+                        logger.info(`[ParameterExtractor] ✅ All fields complete`);
+
+                        return {
+                            userFriendlyParams: currentParams,
+                            currentField: null,
+                            nextStep: "calculate_price",
+                            response: `✅ Updated ${state.currentField} to ${result.value}. Calculating price...`,
+                            _pendingConfirmation: null,
+                        };
+                    }
+                }
+
+                // ✅ MEDIUM/LOW CONFIDENCE: Ask for confirmation
+                logger.info(`[ParameterExtractor] Medium/low confidence (${result.confidence}), asking for confirmation`);
+
+                return {
+                    userFriendlyParams: currentParams,
+                    currentField: state.currentField,
+                    nextStep: "ask_for_field",
+                    response: result.clarificationPrompt || `Did you mean "${result.value}"? (yes/no)`,
+                    _pendingConfirmation: {
+                        field: state.currentField,
+                        matchedValue: result.value,
+                    }
+                };
+            }
+
+            // ✅ HANDLE DIMENSION FIELDS
+            if (this.isDimensionField(state.currentField)) {
+                logger.info(`[ParameterExtractor] Dimension field mode: ${state.currentField}`);
+
+                const simpleNumericResult = this.trySimpleNumericParse(userInput, state.currentField);
+                if (simpleNumericResult) {
+                    logger.info(`[ParameterExtractor] Simple numeric matched: ${simpleNumericResult}`);
+                    return {
+                        userFriendlyParams: {
+                            ...currentParams,
+                            [state.currentField]: simpleNumericResult,
+                        },
+                        currentField: null,
+                        nextStep: "check_missing_fields",
+                    };
+                }
+
+                const aiExtracted = await this.extractSingleDimensionWithAI(
+                    userInput,
+                    state.currentField as 'width' | 'length' | 'height'
+                );
+                if (aiExtracted) {
+                    logger.info(`[ParameterExtractor] AI extracted ${state.currentField}: ${aiExtracted}`);
+                    return {
+                        userFriendlyParams: {
+                            ...currentParams,
+                            [state.currentField]: aiExtracted,
+                        },
+                        currentField: null,
+                        nextStep: "check_missing_fields",
+                    };
+                }
+            }
+
+            // ✅ HANDLE STATE NAME
+            if (state.currentField === 'state_name') {
+                logger.info(`[ParameterExtractor] Validating state name against database`);
+
+                const formatValidation = this.validateFieldInput(userInput, state.currentField);
+                if (!formatValidation.isValid) {
+                    logger.warn(`[ParameterExtractor] Invalid format for state_name: "${userInput}"`);
+                    return {
+                        validationError: formatValidation.error,
+                        response: `❌ ${formatValidation.error}\n\nPlease provide a valid US state name.`,
+                        nextStep: "ask_for_field",
+                        currentField: state.currentField,
+                        userFriendlyParams: currentParams,
+                    };
+                }
+
+                try {
+                    const { ParameterValidator } = await import("@agents/tools/validators/ParameterValidator");
+
+                    const dbValidation = await ParameterValidator.validateState(
+                        userInput,
+                        state.stateMapCache
+                    );
+
+                    if (!dbValidation.isValid) {
+                        logger.warn(`[ParameterExtractor] State not found in database: "${userInput}"`);
+                        return {
+                            validationError: dbValidation.error,
+                            response: `❌ ${dbValidation.error}\n\nPlease provide a valid US state name (e.g., Texas, California, Florida).`,
+                            nextStep: "ask_for_field",
+                            currentField: state.currentField,
+                            userFriendlyParams: currentParams,
+                        };
+                    }
+
+                    // @ts-ignore
+                    currentParams[fieldKey] = dbValidation.normalizedValue;
+                    logger.info(`[ParameterExtractor] State validated: ${userInput} → ${dbValidation.normalizedValue}`);
+
+                    return {
+                        userFriendlyParams: currentParams,
+                        currentField: null,
+                        nextStep: "check_missing_fields",
+                    };
+
+                } catch (error) {
+                    logger.error(`[ParameterExtractor] Error validating state:`, error);
+                    return {
+                        validationError: `Error validating state name`,
+                        response: `❌ Error validating state. Please try again.`,
+                        nextStep: "ask_for_field",
+                        currentField: state.currentField,
+                        userFriendlyParams: currentParams,
+                    };
+                }
+            }
+
+            // ✅ OTHER FIELDS (generic validation)
+            const validation = this.validateFieldInput(userInput, state.currentField);
+
+            if (!validation.isValid) {
+                logger.warn(`[ParameterExtractor] Invalid input for ${state.currentField}: "${userInput}"`);
+                return {
+                    validationError: validation.error,
+                    response: `❌ ${validation.error}\n\nPlease provide a valid ${state.currentField}.`,
+                    nextStep: "ask_for_field",
+                    currentField: fieldKey,
+                    userFriendlyParams: currentParams,
+                };
+            }
+
+            const parsedValue = this.parseFieldValue(userInput, state.currentField);
+
+            // @ts-ignore
+            currentParams[fieldKey] = parsedValue;
+
+            logger.info(`[ParameterExtractor] Field accepted: ${state.currentField} = ${parsedValue}`);
+
+            return {
+                userFriendlyParams: currentParams,
+                nextStep: "check_missing_fields",
+            };
+        }
 
         const buildingType = await this.extractBuildingTypeIfMissing(userInput, currentParams);
         if (buildingType) {
@@ -103,7 +374,7 @@ Return ONLY JSON:`;
         logger.info(`[ParameterExtractor] Has explicit car count: ${hasExplicitCarCount}`);
         logger.info(`[ParameterExtractor] Has explicit dimensions: ${hasExplicitDimensions}`);
 
-        // ✅ FIX: If user provides car count, calculate dimensions automatically
+        // ✅ Car count handling
         if (hasExplicitCarCount && !hasExplicitDimensions) {
             logger.info(`[ParameterExtractor] ✅ Car count provided, calculating dimensions...`);
 
@@ -116,7 +387,6 @@ Return ONLY JSON:`;
                 currentParams.length = dimensionCalc.length;
                 currentParams.height = dimensionCalc.height;
 
-                // Extract garage_type
                 const carMatch = userInput.match(/(\d+)\s*(?:car|cars?)/i);
                 if (carMatch) {
                     currentParams.garage_type = `${carMatch[1]}-car`;
@@ -160,7 +430,6 @@ Return ONLY JSON:`;
                 }
             );
 
-            // Don't run extraction if dimensions are complete unless explicitly requested
             if (!this.isExplicitDimensionChange(userInput)) {
                 return {
                     userFriendlyParams: currentParams,
@@ -168,7 +437,6 @@ Return ONLY JSON:`;
                 };
             }
         }
-
 
         if (!hasExplicitDimensions && !hasDimensions) {
             logger.info(`[ParameterExtractor] No explicit dimensions in: "${userInput}"`);
@@ -210,7 +478,6 @@ Return ONLY JSON:`;
         if (state.currentField && this.isDimensionField(state.currentField)) {
             logger.info(`[ParameterExtractor] Field mode: ${state.currentField}`);
 
-            // Try simple numeric parse first (fast)
             const simpleNumericResult = this.trySimpleNumericParse(userInput, state.currentField);
             if (simpleNumericResult) {
                 logger.info(`[ParameterExtractor] Simple numeric matched`);
@@ -224,7 +491,6 @@ Return ONLY JSON:`;
                 };
             }
 
-            // Use AI extraction for complex inputs
             const aiExtracted = await this.extractSingleDimensionWithAI(
                 userInput,
                 state.currentField as 'width' | 'length' | 'height'
@@ -246,40 +512,115 @@ Return ONLY JSON:`;
         logger.info(`[ParameterExtractor] Current field: ${state.currentField}`);
 
         try {
+            // ✅ PRIORITY 3: Handle field mode (including choice fields)
             if (state.currentField && typeof state.currentField === 'string') {
                 logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
 
                 const fieldKey = state.currentField as keyof UserFriendlyParams;
                 const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
 
+                // In ParameterExtractionNode.ts - REPLACE the entire choice field handling section
+
                 if (isChoiceField) {
-                    logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), passing to choice service`);
+                    logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), using AI choice handler`);
 
                     try {
-                        const result = await this.choiceService.handleChoice(
-                            state.currentField,
-                            userInput
-                        );
+                        // ✅ STEP 1: Get available options from choice service
+                        const choiceService = ChoiceServiceImpl.getInstance();
+                        let availableOptions: string[] = [];
 
-                        if (!result || result.confidence === "low") {
+                        try {
+                            const options = choiceService.getOptions(state.currentField);
+                            availableOptions = options.map(opt => opt.value);
+                            logger.info(`[ParameterExtractor] Available options for ${state.currentField}:`, availableOptions);
+                        } catch (error) {
+                            logger.warn(`[ParameterExtractor] Could not get options from service, using fallback`);
+
+                            // Fallback options
+                            const fallbackOptions: Record<string, string[]> = {
+                                "roof_type": ["vertical", "regular", "box"],
+                                "gauge": ["14", "16", "18", "20"],
+                                "building_type": ["garage", "shed", "barn"],
+                            };
+
+                            availableOptions = fallbackOptions[state.currentField] || [];
+                        }
+
+                        if (availableOptions.length === 0) {
+                            logger.error(`[ParameterExtractor] No options available for ${state.currentField}`);
                             return {
-                                validationError: `Could not understand "${userInput}" for ${state.currentField}`,
-                                response: `❌ Invalid ${state.currentField}. Please try again.`,
+                                validationError: `No options available for ${state.currentField}`,
+                                response: `❌ Error: Cannot process ${state.currentField}`,
                                 nextStep: "ask_for_field",
                                 currentField: state.currentField,
                                 userFriendlyParams: currentParams,
                             };
                         }
 
-                        // @ts-ignore
-                        currentParams[fieldKey] = result.selected;
-                        logger.info(`[ParameterExtractor] Choice field resolved: ${state.currentField} = ${result.selected}`);
+                        // ✅ STEP 2: Use AI-driven choice handler to match user input
+                        const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
+
+                        logger.info(`[ParameterExtractor] Processing choice with AI for ${state.currentField}: "${userInput}"`);
+
+                        const matchResult = await AIDrivenChoiceHandler.processUserChoice(
+                            userInput,
+                            state.currentField,
+                            availableOptions
+                        );
+
+                        // ✅ STEP 3: Handle no match
+                        if (!matchResult) {
+                            logger.warn(`[ParameterExtractor] Could not match "${userInput}" to any option`);
+
+                            const prompt = await AIDrivenChoiceHandler.generateChoicePrompt(
+                                state.currentField,
+                                availableOptions,
+                                `Please select one of the available ${state.currentField} options`
+                            );
+
+                            return {
+                                validationError: `Could not understand "${userInput}" for ${state.currentField}`,
+                                response: `❌ I didn't understand that.\n\n${prompt}`,
+                                nextStep: "ask_for_field",
+                                currentField: state.currentField,
+                                userFriendlyParams: currentParams,
+                            };
+                        }
+
+                        logger.info(`[ParameterExtractor] AI matched: "${userInput}" → "${matchResult.value}" (confidence: ${matchResult.confidence})`);
+
+                        // ✅ STEP 4: HIGH CONFIDENCE - Accept immediately
+                        if (matchResult.confidence === "high" && !matchResult.requiresConfirmation) {
+                            logger.info(`[ParameterExtractor] ✅ High confidence: ${matchResult.value}`);
+
+                            const fieldKey = state.currentField as keyof UserFriendlyParams;
+                            // @ts-ignore
+                            currentParams[fieldKey] = matchResult.value;
+
+                            logger.info(`[ParameterExtractor] Updated ${state.currentField} to ${matchResult.value}`);
+
+                            return {
+                                userFriendlyParams: currentParams,
+                                currentField: null,
+                                nextStep: "check_missing_fields",
+                                response: `✅ Updated ${state.currentField} to ${matchResult.value}`,
+                            };
+                        }
+
+                        // ✅ STEP 5: MEDIUM/LOW CONFIDENCE - Ask for confirmation
+                        logger.info(`[ParameterExtractor] Medium/low confidence (${matchResult.confidence}), asking for confirmation`);
 
                         return {
                             userFriendlyParams: currentParams,
-                            currentField: null,
-                            nextStep: "check_missing_fields",
+                            currentField: state.currentField,
+                            nextStep: "__end__",
+                            response: matchResult.clarificationPrompt || `Did you mean "${matchResult.value}"? (yes/no)`,
+                            _pendingConfirmation: {
+                                field: state.currentField,
+                                matchedValue: matchResult.value,
+                            }
                         };
+
                     } catch (error) {
                         logger.error(`[ParameterExtractor] Error resolving choice:`, error);
                         return {
@@ -292,6 +633,7 @@ Return ONLY JSON:`;
                     }
                 }
 
+                // ✅ STATE NAME VALIDATION (existing logic)
                 if (state.currentField === 'state_name') {
                     logger.info(`[ParameterExtractor] Validating state name against database`);
 
@@ -348,6 +690,7 @@ Return ONLY JSON:`;
                     }
                 }
 
+                // ✅ OTHER FIELDS (existing validation logic)
                 const validation = this.validateFieldInput(userInput, state.currentField);
 
                 if (!validation.isValid) {
@@ -521,38 +864,82 @@ Return ONLY JSON:`;
 
         logger.info(`[ParameterExtractor] Attempting to extract building_type from: "${userInput}"`);
 
+        const normalizedInput = userInput.toLowerCase().trim();
+
+        // ✅ CRITICAL FIX: More aggressive pattern matching
+        // These patterns will catch "garage" even with extra words around it
+        const patterns = [
+            // Direct mentions (HIGHEST PRIORITY)
+            { regex: /\bgarage\b/i, type: "garage" },
+            { regex: /\bshed\b/i, type: "shed" },
+            { regex: /\bbarn\b/i, type: "barn" },
+
+            // With verbs/prepositions
+            { regex: /(?:want|need|looking for|get|build|for|have|create).*?garage/i, type: "garage" },
+            { regex: /garage.*?(?:for|with)/i, type: "garage" },
+
+            // Car-related (implies garage)
+            { regex: /\d+\s*(?:car|cars?)\s*garage/i, type: "garage" },
+            { regex: /garage\s+(?:for|to fit|to hold)\s+\d+\s*(?:car|cars?)/i, type: "garage" },
+            { regex: /\d+\s*(?:car|cars?)(?!\s+(?:shed|barn))/i, type: "garage" }, // "2 cars" without shed/barn
+        ];
+
+        // ✅ STEP 1: Try pattern matching FIRST (faster and more reliable)
+        for (const pattern of patterns) {
+            if (pattern.regex.test(normalizedInput)) {
+                logger.info(`[ParameterExtractor] ✅ Pattern match: building_type = ${pattern.type}`);
+                logger.info(`[ParameterExtractor] Matched pattern: ${pattern.regex}`);
+                return pattern.type;
+            }
+        }
+
+        logger.info(`[ParameterExtractor] No pattern match, trying AI extraction...`);
+
+        // ✅ STEP 2: If patterns fail, use AI with improved prompt
         try {
-            const prompt = `Extract the building type from user input. ONLY return one of: garage, shed, barn
+            const prompt = `Extract the building type from user input. 
 
 CRITICAL RULES:
-- Only extract if user EXPLICITLY mentions the type
-- "i want garage" → garage (user is asking about garage)
-- "i want a garage" → garage
-- "need shed" → shed
-- "looking for barn" → barn
-- "just tell me" or "hello" or no building mention → return: null (do NOT guess)
+1. If the word "garage" appears ANYWHERE → return "garage"
+2. If the word "shed" appears ANYWHERE → return "shed"  
+3. If the word "barn" appears ANYWHERE → return "barn"
+4. If user mentions "cars", "vehicles", or car count → return "garage"
+5. If NONE of the above → return "null"
 
-Return ONLY: garage, shed, barn, or null (lowercase)
-NO OTHER TEXT. Just the type or null:`;
+EXAMPLES:
+✅ "I want a garage" → garage
+✅ "i want a garage for 2 cars" → garage
+✅ "garage for 2 cars" → garage
+✅ "2 car garage" → garage
+✅ "for 2 cars" → garage
+✅ "need a shed" → shed
+✅ "looking for barn" → barn
+❌ "hello" → null
+❌ "what's up" → null
 
-            const response = await sharedLLM.invoke([
-                new HumanMessage(`${prompt}\n\nUser input: "${userInput}"`)
-            ]);
+User input: "${userInput}"
+
+Return ONLY ONE WORD: garage, shed, barn, or null
+NO explanation, NO markdown, NO extra text:`;
+
+            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
             const extracted = response.trim().toLowerCase();
 
+            logger.info(`[ParameterExtractor] AI raw response: "${extracted}"`);
+
             if (extracted === 'null' || extracted === '') {
-                logger.info(`[ParameterExtractor] No explicit building_type detected`);
+                logger.info(`[ParameterExtractor] AI: No building_type detected`);
                 return null;
             }
 
             const validTypes = ['garage', 'shed', 'barn'];
             if (validTypes.includes(extracted)) {
-                logger.info(`[ParameterExtractor] ✅ Extracted building_type: ${extracted}`);
+                logger.info(`[ParameterExtractor] ✅ AI extracted building_type: ${extracted}`);
                 return extracted;
             }
 
-            logger.warn(`[ParameterExtractor] Invalid building_type: ${extracted}`);
+            logger.warn(`[ParameterExtractor] AI returned invalid building_type: ${extracted}`);
             return null;
 
         } catch (error) {
@@ -560,6 +947,7 @@ NO OTHER TEXT. Just the type or null:`;
             return null;
         }
     }
+
 
     private async tryBatchDimensionExtractionWithAI(userInput: string): Promise<Partial<UserFriendlyParams> | null> {
         if (!userInput) {

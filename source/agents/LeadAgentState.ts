@@ -100,6 +100,15 @@ export const LeadAgentState = Annotation.Root({
         value: (_, update) => update ?? null,
         default: () => null,
     }),
+
+    // ✅ NEW: Handle pending confirmation for choice fields
+    _pendingConfirmation: Annotation<{
+        field: string;
+        matchedValue: string;
+    } | null>({
+        value: (_, update) => update ?? null,
+        default: () => null,
+    }),
 });
 
 export type LeadAgentStateType = typeof LeadAgentState.State;

@@ -85,7 +85,11 @@ export class FullyAIDrivenExtractor {
         currentParams?: Partial<UserFriendlyParams>
     ): string {
         const contextInfo = currentField
-            ? `\n⚠️ CRITICAL CONTEXT: User is being asked for: "${currentField}"\n- Extract ONLY this field unless user explicitly mentions something else`
+            ? `\n⚠️ CRITICAL CONTEXT: User is being asked for: "${currentField}"
+- Extract ONLY this field unless user explicitly mentions something else
+- If input is a NUMBER and currentField is a CHOICE field (roof_type, gauge, building_type):
+  → The number is an OPTION NUMBER for that field (e.g., "3" for roof_type = option 3 = "box")
+  → DO NOT interpret as garage_type or car count`
             : '';
 
         const existingParams = currentParams && Object.keys(currentParams).length > 0
@@ -99,6 +103,30 @@ ${contextInfo}${existingParams}
 🎯 YOUR TASK: Analyze the user input and extract the MOST RELEVANT parameter.
 
 CRITICAL RULES:
+
+⚠️ **CONTEXT-AWARE NUMBER INTERPRETATION:**
+- If currentField is "roof_type" and user says "3" → {"field": "roof_type", "value": "box"} (option 3)
+- If currentField is "gauge" and user says "2" → {"field": "gauge", "value": "16"} (option 2)
+- If currentField is "building_type" and user says "1" → {"field": "building_type", "value": "garage"} (option 1)
+- If NO currentField and user says "2 cars" → {"field": "garage_type", "value": "2-car"}
+
+⚠️ **ROOF TYPE OPTIONS (when currentField = "roof_type"):**
+- Option 1 = "vertical"
+- Option 2 = "regular"
+- Option 3 = "box"
+- Option 4 = "a-frame"
+
+⚠️ **GAUGE OPTIONS (when currentField = "gauge"):**
+- Option 1 = "14"
+- Option 2 = "16"
+- Option 3 = "18"
+- Option 4 = "20"
+
+⚠️ **BUILDING TYPE OPTIONS (when currentField = "building_type"):**
+- Option 1 = "garage"
+- Option 2 = "shed"
+- Option 3 = "barn"
+
 1. **GARAGE TYPE vs DIMENSIONS**:
    - "two cars", "2 car garage", "three cars" → garage_type: "2-car", "3-car" (NOT width/length!)
    - "width 20", "20 feet wide", "20ft" → width: 20 (ONLY if clearly about width)
@@ -106,7 +134,8 @@ CRITICAL RULES:
 
 2. **CONTEXT AWARENESS**:
    - If currentField is "width" and user says "20" → width: 20
-   - If currentField is "length" and user says "30" → length: 30
+   - If currentField is "roof_type" and user says "3" → roof_type: "box" (option 3, NOT 3-car!)
+   - If currentField is "gauge" and user says "2" → gauge: "16" (option 2)
    - If NO currentField and user says "two cars" → garage_type: "2-car"
 
 3. **NUMBER CONVERSION**:
@@ -118,21 +147,16 @@ CRITICAL RULES:
    - width: "width 20", "20 feet wide", "20ft width"
    - length: "length 30", "30 feet long"
    - height: "height 10", "10 feet tall"
-   - roof_type: "vertical", "regular", "box", "a-frame"
-   - gauge: "14ga", "16 gauge", "20GA"
+   - roof_type: "vertical", "regular", "box", "a-frame", OR option numbers 1-4
+   - gauge: "14ga", "16 gauge", "20GA", OR option numbers 1-4
    - state_name: "Texas", "California", "in Florida"
    - color: "red", "barn red", "white"
 
 5. **PRIORITY**:
    - If currentField is set, try to extract that field FIRST
+   - If currentField is a choice field and input is a number, map to that choice's options
    - If user mentions a different field explicitly, extract that instead
    - For ambiguous input, use context to decide
-
-6. **GARAGE DIMENSIONS KNOWLEDGE**:
-   - 1-car garage: typically 12ft × 20ft × 10ft
-   - 2-car garage: typically 20ft × 20ft × 10ft
-   - 3-car garage: typically 30ft × 20ft × 10ft
-   - DO NOT auto-fill dimensions - only extract what user explicitly provides
 
 RETURN ONLY JSON (NO MARKDOWN, NO EXPLANATION):
 {
@@ -144,17 +168,20 @@ RETURN ONLY JSON (NO MARKDOWN, NO EXPLANATION):
 
 EXAMPLES:
 
+Input: "3" (currentField: "roof_type")
+Output: {"field": "roof_type", "value": "box", "confidence": "high", "reasoning": "User selected option 3 for roof_type which is 'box'"}
+
+Input: "2" (currentField: "gauge")
+Output: {"field": "gauge", "value": "16", "confidence": "high", "reasoning": "User selected option 2 for gauge which is '16'"}
+
+Input: "3" (NO currentField)
+Output: {"field": "garage_type", "value": "3-car", "confidence": "high", "reasoning": "User mentioned 3 in context of cars"}
+
 Input: "i want a garage for two cars" (no currentField)
 Output: {"field": "garage_type", "value": "2-car", "confidence": "high", "reasoning": "User wants a 2-car garage"}
 
 Input: "20" (currentField: "width")
 Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "User provided width value"}
-
-Input: "two" (currentField: "width")
-Output: {"field": "width", "value": 2, "confidence": "medium", "reasoning": "User said 'two' in context of width field"}
-
-Input: "width twenty length thirty height ten" (no currentField)
-Output: {"field": "width", "value": 20, "confidence": "high", "reasoning": "Extracted first dimension from batch input"}
 
 Input: "vertical roof" (no currentField)
 Output: {"field": "roof_type", "value": "vertical", "confidence": "high", "reasoning": "User specified vertical roof type"}
@@ -162,12 +189,10 @@ Output: {"field": "roof_type", "value": "vertical", "confidence": "high", "reaso
 Input: "Texas" (currentField: "state_name")
 Output: {"field": "state_name", "value": "Texas", "confidence": "high", "reasoning": "User provided state name"}
 
-Input: "three" (currentField: "garage_type")
-Output: {"field": "garage_type", "value": "3-car", "confidence": "high", "reasoning": "User wants 3-car garage"}
-
-⚠️ CRITICAL: Distinguish between:
-- "two CARS" → garage_type: "2-car" (asking for a 2-car garage)
-- "width TWO" → width: 2 (setting width to 2 feet, which is unusual)
+⚠️ CRITICAL: When currentField is set and input is a number:
+- FIRST check if currentField is a choice field
+- IF YES: Map number to that field's options
+- IF NO: Then check for garage_type/dimensions
 
 User input: "${userInput}"
 
