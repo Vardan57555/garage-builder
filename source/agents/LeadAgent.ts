@@ -1209,6 +1209,7 @@ export class LeadAgent {
         try {
             const updateService = ParameterUpdateServiceImpl.getInstance();
 
+            // ✅ STEP 1: Apply first update
             const processResult = await updateService.process(
                 update,
                 input,
@@ -1231,7 +1232,7 @@ export class LeadAgent {
                 return result.message;
             }
 
-            // Update session params
+            // Update session params with first result
             if (result.updatedParams) {
                 session.state.userFriendlyParams = {
                     ...session.state.userFriendlyParams,
@@ -1240,18 +1241,49 @@ export class LeadAgent {
                 logger.info(`[LeadAgent] ✅ Successfully updated ${update.field}`, session.state.userFriendlyParams);
             }
 
-            // Check for missing fields
+            // ✅ STEP 2: Check for pending multi-dimension updates
+            const pendingDimensions: Array<{ field: keyof UserFriendlyParams; value: any }> | undefined = (global as any).__pendingMultiDimensions;
+
+            if (pendingDimensions && pendingDimensions.length > 0) {
+                logger.info(`[LeadAgent] 🔄 Processing ${pendingDimensions.length} pending dimension updates...`);
+
+                for (const pendingUpdate of pendingDimensions) {
+                    logger.info(`[LeadAgent] Processing pending: ${pendingUpdate.field} = ${pendingUpdate.value}`);
+
+                    const pendingResult = await updateService.process(
+                        pendingUpdate,
+                        input,
+                        session.state.userFriendlyParams,
+                        session.stateMapCache || new Map()
+                    );
+
+                    if (!("error" in pendingResult) && pendingResult.result.success && pendingResult.result.updatedParams) {
+                        session.state.userFriendlyParams = {
+                            ...session.state.userFriendlyParams,
+                            ...pendingResult.result.updatedParams
+                        };
+                        logger.info(`[LeadAgent] ✅ Applied pending update: ${pendingUpdate.field} = ${pendingUpdate.value}`);
+                    }
+                }
+
+                // Clear the pending updates
+                (global as any).__pendingMultiDimensions = [];
+            }
+
+            // ✅ STEP 3: Check for missing fields
             const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
             logger.info(`[LeadAgent] After update - Missing fields: ${missingFields.length}`, missingFields);
 
             let finalResponse: string;
+            const updateMessage = result.message;
 
             if (missingFields.length === 0) {
                 // All fields complete - calculate price
+                logger.info(`[LeadAgent] ✅ All fields complete after multi-updates, calculating price`);
                 finalResponse = await this.calculatePriceAfterUpdate(session, sessionId);
             } else {
                 // Still missing fields - ask for next one
-                finalResponse = await this.askForNextField(session, sessionId, missingFields[0], result.message);
+                finalResponse = await this.askForNextField(session, sessionId, missingFields[0], updateMessage);
             }
 
             await session.memory.chatHistory.addAIChatMessage(finalResponse);

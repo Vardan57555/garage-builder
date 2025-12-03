@@ -572,6 +572,10 @@ export function calculateDimensionsFromCarCount(carCount: number): { width: numb
     return { width, length, height };
 }
 
+/**
+ * ✅ FIXED: Detect ALL dimension updates from input (e.g., "make height 20 width 10")
+ * Returns the FIRST update and stores the REST in global.__pendingMultiDimensions
+ */
 export async function detectParameterUpdateFromInput(
     input: string,
     currentField?: string
@@ -579,19 +583,39 @@ export async function detectParameterUpdateFromInput(
     logger.info(`[AIExtractor] Analyzing: "${input}" (context: ${currentField})`);
 
     try {
-        // ✅ PRIORITY 1: Check for garage/car count update (using AI)
+        // ✅ PRIORITY 1: Check for MULTIPLE dimension updates FIRST
+        const multiDimensionResult = await detectMultipleDimensionUpdates(input);
+
+        if (multiDimensionResult && multiDimensionResult.length > 0) {
+            logger.info(`[AIExtractor] ✅ Multiple dimensions detected (${multiDimensionResult.length}):`, multiDimensionResult);
+
+            // Return the first one
+            const first = multiDimensionResult[0];
+            logger.info(`[AIExtractor] Returning first: ${first.field} = ${first.value}`);
+
+            // Store the rest in global for later processing
+            if (multiDimensionResult.length > 1) {
+                (global as any).__pendingMultiDimensions = multiDimensionResult.slice(1);
+                logger.info(`[AIExtractor] Stored ${multiDimensionResult.length - 1} pending updates:`,
+                    (global as any).__pendingMultiDimensions);
+            }
+
+            return first;
+        }
+
+        // ✅ PRIORITY 2: Check for garage/car count update (using AI)
         logger.info(`[AIExtractor] Checking for garage type with AI...`);
         const garageResult = await extractGarageTypeWithAI(input);
 
         if (garageResult) {
             logger.info(`[AIExtractor] ✅ AI detected garage_type: ${garageResult.garageType}`);
             return {
-                field: 'garage_type' as keyof UserFriendlyParams,  // ✅ Type-safe
+                field: 'garage_type' as keyof UserFriendlyParams,
                 value: garageResult.garageType
             };
         }
 
-        // ✅ PRIORITY 2: Check for dimension updates (width, length, height)
+        // ✅ PRIORITY 3: Check for single dimension updates (width, length, height)
         const dimensionPatterns: Array<{ regex: RegExp; field: keyof UserFriendlyParams }> = [
             { regex: /width\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'width' as keyof UserFriendlyParams },
             { regex: /length\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'length' as keyof UserFriendlyParams },
@@ -605,9 +629,9 @@ export async function detectParameterUpdateFromInput(
             if (match) {
                 const value = parseFloat(match[1]);
                 if (value > 0 && value <= 500) {
-                    logger.info(`[AIExtractor] ✅ Detected dimension: ${pattern.field} = ${value}`);
+                    logger.info(`[AIExtractor] ✅ Detected single dimension: ${pattern.field} = ${value}`);
                     return {
-                        field: pattern.field,  // ✅ Already typed
+                        field: pattern.field,
                         value
                     };
                 }
@@ -619,6 +643,69 @@ export async function detectParameterUpdateFromInput(
 
     } catch (error) {
         logger.error(`[AIExtractor] Exception:`, error);
+        return null;
+    }
+}
+
+/**
+ * ✅ NEW: Extract ALL dimension updates from input
+ * Handles: "make width 10 length 10", "height 20 width 10", etc.
+ */
+async function detectMultipleDimensionUpdates(
+    input: string
+): Promise<Array<{ field: keyof UserFriendlyParams; value: any }> | null> {
+    try {
+        logger.info(`[detectMultipleDimensionUpdates] Analyzing: "${input}"`);
+
+        // ✅ Pattern to match multiple dimension keywords
+        const hasDimensionKeywords = /(?:width|length|height|w\s+|l\s+|h\s+).*(?:width|length|height|w\s+|l\s+|h\s+)/i.test(input);
+
+        if (!hasDimensionKeywords) {
+            logger.debug(`[detectMultipleDimensionUpdates] No multiple dimension keywords detected`);
+            return null;
+        }
+
+        const results: Array<{ field: keyof UserFriendlyParams; value: number }> = [];
+
+        // ✅ Extract ALL dimensions from input
+        const patterns = [
+            { regex: /width\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'width' as keyof UserFriendlyParams },
+            { regex: /length\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'length' as keyof UserFriendlyParams },
+            { regex: /height\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'height' as keyof UserFriendlyParams },
+            { regex: /\bw\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'width' as keyof UserFriendlyParams },
+            { regex: /\bl\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'length' as keyof UserFriendlyParams },
+            { regex: /\bh\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'height' as keyof UserFriendlyParams },
+        ];
+
+        const foundFields = new Set<string>();
+
+        for (const pattern of patterns) {
+            // Reset regex lastIndex
+            pattern.regex.lastIndex = 0;
+
+            const match = pattern.regex.exec(input);
+
+            if (match && !foundFields.has(pattern.field)) {
+                const value = parseFloat(match[1]);
+
+                if (value > 0 && value <= 500) {
+                    results.push({ field: pattern.field, value });
+                    foundFields.add(pattern.field);
+                    logger.info(`[detectMultipleDimensionUpdates] ✅ Extracted ${pattern.field} = ${value}`);
+                }
+            }
+        }
+
+        if (results.length >= 2) {
+            logger.info(`[detectMultipleDimensionUpdates] ✅ Found ${results.length} dimensions:`, results);
+            return results;
+        }
+
+        logger.debug(`[detectMultipleDimensionUpdates] Only found ${results.length} dimension(s), need 2+`);
+        return null;
+
+    } catch (error) {
+        logger.error(`[detectMultipleDimensionUpdates] Exception:`, error);
         return null;
     }
 }
