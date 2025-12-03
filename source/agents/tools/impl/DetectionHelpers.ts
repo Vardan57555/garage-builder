@@ -330,15 +330,295 @@ ONLY JSON:`;
     }
 }
 
-export async function detectParameterUpdateFromInput(
-    input: string,
-    currentField?: string,
-    currentParams?: Partial<UserFriendlyParams>
-): Promise<DetectionResultWithDimensions | null> {
-    // ✅ Don't extract dimension fields here when in field mode
-    if (currentField && ['width', 'length', 'height', 'utility_length'].includes(currentField)) {
-        logger.info(`[detectParameterUpdateFromInput] ⚠️ In dimension field mode - return null`);
+export async function extractGarageTypeWithAI(userInput: string): Promise<{ garageType: string; carCount: number } | null> {
+    try {
+        logger.info(`[AIGarageExtractor] Analyzing: "${userInput}"`);
+
+        const prompt = `Extract the garage car count from this user input.
+
+TASK: Find how many cars the user wants (garage for X cars).
+Return ONLY a JSON object with no markdown or explanation:
+
+{
+  "carCount": <number or null>,
+  "found": <true if car count found, false otherwise>
+}
+
+RULES:
+- Extract ANY mention of car count (numbers, words like "two", "three", etc.)
+- Return null if no car count mentioned
+- Look for patterns like: "2 cars", "garage for three cars", "three-car", "3-car garage"
+
+Examples:
+- "i want garage for two cars" → {"carCount": 2, "found": true}
+- "garage for three cars" → {"carCount": 3, "found": true}
+- "2 car garage" → {"carCount": 2, "found": true}
+- "i want a garage" → {"carCount": null, "found": false}
+- "just a garage" → {"carCount": null, "found": false}
+
+User input: "${userInput}"
+
+Return ONLY JSON:`;
+
+        logger.info(`[AIGarageExtractor] Sending prompt to LLM...`);
+
+        const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+        logger.debug(`[AIGarageExtractor] LLM response: "${response}"`);
+
+        // Parse JSON response
+        const parsed = parseAIResponse(response);
+
+        if (!parsed) {
+            logger.warn(`[AIGarageExtractor] Failed to parse LLM response`);
+            return null;
+        }
+
+        logger.info(`[AIGarageExtractor] Parsed:`, {
+            found: parsed.found,
+            carCount: parsed.carCount
+        });
+
+        // ✅ Validate result
+        if (parsed.found && typeof parsed.carCount === 'number' && parsed.carCount > 0 && parsed.carCount <= 20) {
+            const garageType = `${parsed.carCount}-car`;
+            logger.info(`[AIGarageExtractor] ✅ SUCCESS: garageType = "${garageType}", carCount = ${parsed.carCount}`);
+
+            return {
+                garageType,
+                carCount: parsed.carCount
+            };
+        }
+
+        logger.info(`[AIGarageExtractor] ❌ No valid car count found`);
+        return null;
+
+    } catch (error) {
+        logger.error(`[AIGarageExtractor] Exception:`, error);
         return null;
     }
-    return FullyAIDrivenExtractor.extractWithAI(input, currentField, currentParams);
+}
+
+/**
+ * ✅ Parse JSON from AI response
+ */
+function parseAIResponse(response: string): any {
+    try {
+        // Remove markdown formatting
+        let cleaned = response
+            .replace(/```json\s*/g, '')
+            .replace(/```\s*/g, '')
+            .trim();
+
+        logger.debug(`[AIGarageExtractor] Cleaned response: "${cleaned}"`);
+
+        // Extract JSON object
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+            logger.warn(`[AIGarageExtractor] No JSON found in response`);
+            return null;
+        }
+
+        const parsed = JSON.parse(jsonMatch[0]);
+        logger.info(`[AIGarageExtractor] Parsed JSON:`, parsed);
+
+        return parsed;
+    } catch (error) {
+        logger.error(`[AIGarageExtractor] JSON parse error:`, error);
+        return null;
+    }
+}
+
+export async function detectMultipleParametersWithAI(
+    userInput: string
+): Promise<Array<{ field: keyof UserFriendlyParams; value: any }> | null> {
+    try {
+        logger.info(`[AIMultiParamExtractor] Analyzing: "${userInput}"`);
+
+        const prompt = `Extract ALL parameter updates from this user input.
+
+TASK: Find ALL dimension and parameter updates (width, length, height, garage type, etc).
+Return ONLY a JSON array with no markdown or explanation:
+
+[
+  {
+    "field": <"width"|"length"|"height"|"garage_type">,
+    "value": <number for dimensions, string for garage_type>,
+    "found": <true if extracted, false otherwise>
+  }
+]
+
+RULES:
+- Extract ALL mentions of dimensions or parameters
+- Look for patterns like: "width X", "length Y", "height Z", "X cars", "X-car"
+- Return array even if only 1 parameter found
+- If NO parameters found, return empty array []
+- Dimensions must be numbers between 1-500
+- Garage type must match car count pattern
+
+Examples:
+- "make width 30 length 30" → [{"field":"width","value":30,"found":true},{"field":"length","value":30,"found":true}]
+- "width 20 height 15" → [{"field":"width","value":20,"found":true},{"field":"height","value":15,"found":true}]
+- "for 4 cars" → [{"field":"garage_type","value":"4-car","found":true}]
+- "garage for two cars width 30" → [{"field":"garage_type","value":"2-car","found":true},{"field":"width","value":30,"found":true}]
+- "just hello" → []
+
+User input: "${userInput}"
+
+Return ONLY JSON array:`;
+
+        logger.info(`[AIMultiParamExtractor] Sending prompt to LLM...`);
+
+        const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+        logger.debug(`[AIMultiParamExtractor] LLM response: "${response}"`);
+
+        // Parse JSON response
+        const parsed = parseMultiParamResponse(response);
+
+        if (!parsed || !Array.isArray(parsed)) {
+            logger.warn(`[AIMultiParamExtractor] Failed to parse response or not an array`);
+            return null;
+        }
+
+        logger.info(`[AIMultiParamExtractor] Parsed ${parsed.length} parameters:`, parsed);
+
+        // ✅ Filter and type-cast valid parameters
+        const validParams: Array<{ field: keyof UserFriendlyParams; value: any }> = [];
+
+        for (const param of parsed) {
+            if (!param.found) continue;
+
+            // Validate based on field type
+            if (param.field === 'garage_type') {
+                if (typeof param.value === 'string' && /^\d+-car$/.test(param.value)) {
+                    validParams.push({
+                        field: 'garage_type' as keyof UserFriendlyParams,
+                        value: param.value
+                    });
+                    logger.info(`[AIMultiParamExtractor] ✅ Valid garage_type: ${param.value}`);
+                }
+            } else if (['width', 'length', 'height'].includes(param.field)) {
+                const numValue = Number(param.value);
+                if (!isNaN(numValue) && numValue > 0 && numValue <= 500) {
+                    validParams.push({
+                        field: param.field as keyof UserFriendlyParams,
+                        value: numValue
+                    });
+                    logger.info(`[AIMultiParamExtractor] ✅ Valid ${param.field}: ${numValue}`);
+                }
+            }
+        }
+
+        if (validParams.length > 0) {
+            logger.info(`[AIMultiParamExtractor] ✅ SUCCESS: ${validParams.length} parameters found`);
+            return validParams;
+        }
+
+        logger.info(`[AIMultiParamExtractor] ❌ No valid parameters found`);
+        return null;
+
+    } catch (error) {
+        logger.error(`[AIMultiParamExtractor] Exception:`, error);
+        return null;
+    }
+}
+
+/**
+ * ✅ Parse JSON array from AI response
+ */
+function parseMultiParamResponse(response: string): any {
+    try {
+        // Remove markdown formatting
+        let cleaned = response
+            .replace(/```json\s*/g, '')
+            .replace(/```\s*/g, '')
+            .trim();
+
+        logger.debug(`[AIMultiParamExtractor] Cleaned response: "${cleaned}"`);
+
+        // Extract JSON array
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) {
+            logger.warn(`[AIMultiParamExtractor] No JSON array found in response`);
+            return null;
+        }
+
+        const parsed = JSON.parse(jsonMatch[0]);
+        logger.info(`[AIMultiParamExtractor] Parsed JSON:`, parsed);
+
+        return parsed;
+    } catch (error) {
+        logger.error(`[AIMultiParamExtractor] JSON parse error:`, error);
+        return null;
+    }
+}
+
+/**
+ * ✅ Calculate dimensions from car count
+ */
+export function calculateDimensionsFromCarCount(carCount: number): { width: number; length: number; height: number } | null {
+    if (!carCount || carCount <= 0 || carCount > 20) {
+        logger.error(`[calculateDimensionsFromCarCount] Invalid car count: ${carCount}`);
+        return null;
+    }
+
+    const width = (carCount * 6) + 8;   // 6ft per car + 8ft buffer
+    const length = 20;
+    const height = 10;
+
+    logger.info(`[calculateDimensionsFromCarCount] ✅ Calculated for ${carCount} cars: ${width}×${length}×${height}`);
+
+    return { width, length, height };
+}
+
+export async function detectParameterUpdateFromInput(
+    input: string,
+    currentField?: string
+): Promise<{ field: keyof UserFriendlyParams; value: any } | null> {
+    logger.info(`[AIExtractor] Analyzing: "${input}" (context: ${currentField})`);
+
+    try {
+        // ✅ PRIORITY 1: Check for garage/car count update (using AI)
+        logger.info(`[AIExtractor] Checking for garage type with AI...`);
+        const garageResult = await extractGarageTypeWithAI(input);
+
+        if (garageResult) {
+            logger.info(`[AIExtractor] ✅ AI detected garage_type: ${garageResult.garageType}`);
+            return {
+                field: 'garage_type' as keyof UserFriendlyParams,  // ✅ Type-safe
+                value: garageResult.garageType
+            };
+        }
+
+        // ✅ PRIORITY 2: Check for dimension updates (width, length, height)
+        const dimensionPatterns: Array<{ regex: RegExp; field: keyof UserFriendlyParams }> = [
+            { regex: /width\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'width' as keyof UserFriendlyParams },
+            { regex: /length\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'length' as keyof UserFriendlyParams },
+            { regex: /height\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'height' as keyof UserFriendlyParams },
+            { regex: /tall\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'height' as keyof UserFriendlyParams },
+            { regex: /deep\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'height' as keyof UserFriendlyParams },
+        ];
+
+        for (const pattern of dimensionPatterns) {
+            const match = input.match(pattern.regex);
+            if (match) {
+                const value = parseFloat(match[1]);
+                if (value > 0 && value <= 500) {
+                    logger.info(`[AIExtractor] ✅ Detected dimension: ${pattern.field} = ${value}`);
+                    return {
+                        field: pattern.field,  // ✅ Already typed
+                        value
+                    };
+                }
+            }
+        }
+
+        logger.warn(`[AIExtractor] ❌ No parameter detected`);
+        return null;
+
+    } catch (error) {
+        logger.error(`[AIExtractor] Exception:`, error);
+        return null;
+    }
 }
