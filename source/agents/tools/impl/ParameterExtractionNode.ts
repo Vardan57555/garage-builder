@@ -89,6 +89,18 @@ Return ONLY JSON:`;
         const currentParams = { ...state.userFriendlyParams };
         const userInput = this.extractContextFromState(state);
 
+        const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
+        if (multiDimResult) {
+            logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
+            return multiDimResult;
+        }
+
+        const multiParamResult = await this.detectMultipleParameterUpdates(userInput, state, currentParams);
+        if (multiParamResult) {
+            logger.info(`[ParameterExtractor] ✅ Multiple parameter update handled`);
+            return multiParamResult;
+        }
+
         if (!currentParams.building_type) {
             const buildingType = await this.extractBuildingTypeIfMissing(userInput, currentParams);
             if (buildingType) {
@@ -274,12 +286,6 @@ Return ONLY JSON:`;
         if (buildingType) {
             currentParams.building_type = buildingType;
             logger.info(`[ParameterExtractor] ✅ Building type set to: ${buildingType}`);
-        }
-
-        const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
-        if (multiDimResult) {
-            logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
-            return multiDimResult;
         }
 
         const hasExplicitCarCount = /(\d+)\s*(?:car|cars?)\s*(?:garage)?/i.test(userInput);
@@ -756,10 +762,12 @@ Return ONLY JSON:`;
     private tryExtractMultipleDimensions(userInput: string, currentParams: any): ExtractionResult | null {
         logger.info(`[ParameterExtractor] Attempting to extract multiple dimensions from: "${userInput}"`);
 
+        // ✅ Call the DimensionManager to parse multiple labeled dimensions
         const multiDimResult = this.dimensionManager.tryParseMultipleLabeledDimensions(userInput);
 
-        if (!multiDimResult || Object.keys(multiDimResult).length === 0) {
-            logger.debug(`[ParameterExtractor] No multiple dimensions found`);
+        // ✅ CRITICAL: Only return if we have 2+ dimensions
+        if (!multiDimResult || Object.keys(multiDimResult).length < 2) {
+            logger.debug(`[ParameterExtractor] Not enough dimensions found (need 2+, got ${Object.keys(multiDimResult || {}).length})`);
             return null;
         }
 
@@ -816,6 +824,91 @@ Return ONLY JSON:`;
 
     private isSimpleNumber(input: string): boolean {
         return /^\d+(?:\.\d+)?$/.test(input.trim());
+    }
+
+    private async tryParseMultipleParameterUpdates(userInput: string): Promise<Partial<UserFriendlyParams> | null> {
+        try {
+            logger.info(`[ParameterExtractor] Attempting to parse multiple parameter updates: "${userInput}"`);
+
+            const updates: Partial<UserFriendlyParams> = {};
+            let foundAny = false;
+
+            // ✅ STEP 1: Try to extract labeled dimensions
+            const multiDimResult = this.dimensionManager.tryParseMultipleLabeledDimensions(userInput);
+            if (multiDimResult && Object.keys(multiDimResult).length > 0) {
+                logger.info(`[ParameterExtractor] Found multiple labeled dimensions:`, multiDimResult);
+
+                if (multiDimResult.width !== undefined) {
+                    updates.width = multiDimResult.width;
+                    foundAny = true;
+                }
+                if (multiDimResult.length !== undefined) {
+                    updates.length = multiDimResult.length;
+                    foundAny = true;
+                }
+                if (multiDimResult.height !== undefined) {
+                    updates.height = multiDimResult.height;
+                    foundAny = true;
+                }
+            }
+
+            if (foundAny) {
+                logger.info(`[ParameterExtractor] ✅ Multi-parameter updates parsed:`, updates);
+                return updates;
+            }
+
+            return null;
+
+        } catch (error) {
+            logger.error(`[ParameterExtractor] Error parsing multiple parameter updates:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * ✅ CRITICAL: Modified detectParameterUpdateFromInput to handle multi-updates
+     * Checks if input contains multiple dimension updates like "make width 10 length 10"
+     */
+    private async detectMultipleParameterUpdates(userInput: string, state: LeadAgentStateType, currentParams: any): Promise<ExtractionResult | null> {
+        try {
+            logger.info(`[ParameterExtractor] Checking for multiple parameter updates in: "${userInput}"`);
+
+            // ✅ Only process if user input suggests multiple updates
+            const hasMultipleUpdateKeywords = /make\s+\w+\s+\d+.*(?:width|length|height|w\s+|l\s+|h\s+)/i.test(userInput) ||
+                /(?:width|length|height).*(?:width|length|height).*\d/i.test(userInput);
+
+            if (!hasMultipleUpdateKeywords) {
+                logger.debug(`[ParameterExtractor] No multiple update keywords detected`);
+                return null;
+            }
+
+            const multiUpdates = await this.tryParseMultipleParameterUpdates(userInput);
+
+            if (!multiUpdates || Object.keys(multiUpdates).length === 0) {
+                logger.debug(`[ParameterExtractor] No multiple parameter updates found`);
+                return null;
+            }
+
+            logger.info(`[ParameterExtractor] ✅ Multiple parameters detected, updating:`, multiUpdates);
+
+            const updatedParams = { ...currentParams, ...multiUpdates };
+            const updatedFields: string[] = [];
+
+            if (multiUpdates.width !== undefined) updatedFields.push(`width: ${multiUpdates.width}ft`);
+            if (multiUpdates.length !== undefined) updatedFields.push(`length: ${multiUpdates.length}ft`);
+            if (multiUpdates.height !== undefined) updatedFields.push(`height: ${multiUpdates.height}ft`);
+
+            return {
+                userFriendlyParams: updatedParams,
+                currentField: null,
+                nextStep: "check_missing_fields",
+                response: `✓ Updated ${updatedFields.join(", ")}`,
+            };
+
+        } catch (error) {
+            logger.error(`[ParameterExtractor] Error detecting multiple parameter updates:`, error);
+            return null;
+        }
     }
 
     private isExplicitDimensionChange(input: string): boolean {

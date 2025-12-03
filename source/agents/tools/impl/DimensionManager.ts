@@ -24,51 +24,6 @@ export class DimensionManager implements IDimensionManager {
         return DimensionManager.instance;
     }
 
-    /**
-     * ✅ CRITICAL FIX: Determine which dimension field is being asked for
-     * This ensures we don't accidentally assign length input to width
-     */
-    private getCurrentDimensionField(context?: {
-        currentField?: string;
-        userInput?: string;
-    }): 'width' | 'length' | 'height' | null {
-        if (!context?.currentField) return null;
-
-        const field = context.currentField.toLowerCase();
-        if (['width', 'length', 'height'].includes(field)) {
-            return field as 'width' | 'length' | 'height';
-        }
-        return null;
-    }
-
-    /**
-     * ✅ NEW: Parse single dimension for field mode
-     * When user is asked for ONE specific dimension, extract only that one
-     */
-    public parseSingleDimension(input: string, field: 'width' | 'length' | 'height'): number | null {
-        const trimmed = input.trim().toLowerCase();
-
-        logger.info(`[DimensionManager] Parsing single ${field}: "${input}"`);
-
-        // Match patterns like "20", "20 ft", "20 feet", "20ft", etc.
-        const match = trimmed.match(/^(\d+(?:\.\d+)?)\s*(?:ft|feet)?$/i);
-
-        if (!match) {
-            logger.warn(`[DimensionManager] Could not parse ${field} from: "${input}"`);
-            return null;
-        }
-
-        const value = parseFloat(match[1]);
-
-        if (!this.validateDimension(value)) {
-            logger.warn(`[DimensionManager] Invalid ${field} value: ${value}`);
-            return null;
-        }
-
-        logger.info(`[DimensionManager] ✅ Parsed ${field}: ${value}`);
-        return value;
-    }
-
     public tryParseSingleLabeledDimension(input: string): { field: 'width' | 'length' | 'height'; value: number } | null {
         const lowerInput = input.toLowerCase();
 
@@ -159,42 +114,6 @@ export class DimensionManager implements IDimensionManager {
         return null;
     }
 
-    /**
-     * ✅ CRITICAL: When in field mode, ONLY parse the requested field
-     * This prevents "20" for length from being assigned to width
-     */
-    public calculateDimensionsForField(input: string, currentField: string): { [key: string]: number } | null {
-        const field = this.getCurrentDimensionField({ currentField });
-
-        if (!field) {
-            logger.debug(`[DimensionManager] Not in dimension field mode: ${currentField}`);
-            return null;
-        }
-
-        logger.info(`[DimensionManager] Field mode: user asked for ${field}, input: "${input}"`);
-
-        const value = this.parseSingleDimension(input, field);
-
-        if (value === null) {
-            return null;
-        }
-
-        // ✅ CRITICAL: Return ONLY the requested field
-        // Do not try to infer other dimensions
-        const result: { [key: string]: number } = {};
-        result[field] = value;
-
-        logger.info(`[DimensionManager] ✅ Field mode result:`, result);
-        return result;
-    }
-
-    /**
-     * ✅ REPLACE the calculateDimensions() method in DimensionManager.ts
-     *
-     * CHANGE: Move tryParseMultipleLabeledDimensions() BEFORE tryParseSingleLabeledDimension()
-     * This ensures "make length 10 width 10" extracts BOTH dimensions
-     */
-
     public calculateDimensions(input: string): DimensionResult {
         const lowerInput = input.toLowerCase();
         logger.info(`[DimensionManager] Input: "${input}"`);
@@ -218,31 +137,13 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // ✅ PRIORITY 0.5: MULTIPLE labeled dimensions FIRST
-        // "make width 10 height 20" or "width: 20, length: 15"
-        // THIS MUST BE BEFORE tryParseSingleLabeledDimension()
-        const multiLabeledResult = this.tryParseMultipleLabeledDimensions(input);
-        if (multiLabeledResult && Object.keys(multiLabeledResult).length > 0) {
-            logger.info(`[DimensionManager] ✅ Multiple labeled dimensions found:`, multiLabeledResult);
-
-            // Return with any dimensions that were found
-            return {
-                width: multiLabeledResult.width || undefined,
-                length: multiLabeledResult.length || undefined,
-                height: multiLabeledResult.height || undefined,
-                numCars: null
-            };
-        }
-
-        // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10" (requires ALL THREE)
+        // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10"
         const labeledResult = this.tryLabeledDimensions(input);
         if (labeledResult) {
             logger.info(`[DimensionManager] ✅ Labeled format: ${JSON.stringify(labeledResult)}`);
             return labeledResult;
         }
 
-        // ✅ PRIORITY 1.5: SINGLE labeled dimension AFTER multiple (fallback)
-        // Only if multiple didn't find anything
         const singleLabeledResult = this.tryParseSingleLabeledDimension(input);
         if (singleLabeledResult) {
             logger.info(`[DimensionManager] ✅ Single labeled dimension: ${singleLabeledResult.field} = ${singleLabeledResult.value}`);
