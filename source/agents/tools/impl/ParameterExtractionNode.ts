@@ -276,6 +276,12 @@ Return ONLY JSON:`;
             logger.info(`[ParameterExtractor] ✅ Building type set to: ${buildingType}`);
         }
 
+        const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
+        if (multiDimResult) {
+            logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
+            return multiDimResult;
+        }
+
         const hasExplicitCarCount = /(\d+)\s*(?:car|cars?)\s*(?:garage)?/i.test(userInput);
         const hasExplicitDimensions = this.detectExplicitDimensions(userInput);
 
@@ -745,6 +751,49 @@ Return ONLY JSON:`;
                 userFriendlyParams: currentParams,
             };
         }
+    }
+
+    private tryExtractMultipleDimensions(userInput: string, currentParams: any): ExtractionResult | null {
+        logger.info(`[ParameterExtractor] Attempting to extract multiple dimensions from: "${userInput}"`);
+
+        const multiDimResult = this.dimensionManager.tryParseMultipleLabeledDimensions(userInput);
+
+        if (!multiDimResult || Object.keys(multiDimResult).length === 0) {
+            logger.debug(`[ParameterExtractor] No multiple dimensions found`);
+            return null;
+        }
+
+        logger.info(`[ParameterExtractor] ✅ Multiple dimensions extracted:`, multiDimResult);
+
+        // ✅ Update ALL extracted dimensions
+        const updatedParams = { ...currentParams };
+        const updatedFields: string[] = [];
+
+        if (multiDimResult.width !== undefined) {
+            updatedParams.width = multiDimResult.width;
+            updatedFields.push(`width: ${multiDimResult.width}ft`);
+        }
+
+        if (multiDimResult.length !== undefined) {
+            updatedParams.length = multiDimResult.length;
+            updatedFields.push(`length: ${multiDimResult.length}ft`);
+        }
+
+        if (multiDimResult.height !== undefined) {
+            updatedParams.height = multiDimResult.height;
+            updatedFields.push(`height: ${multiDimResult.height}ft`);
+        }
+
+        const updateMessage = updatedFields.join(", ");
+
+        logger.info(`[ParameterExtractor] ✅ Updated parameters: ${updateMessage}`);
+
+        return {
+            userFriendlyParams: updatedParams,
+            currentField: null,
+            nextStep: "check_missing_fields",
+            response: `✓ Updated ${updateMessage}`,
+        };
     }
 
     private trySimpleNumericParse(input: string, field: string): number | null {

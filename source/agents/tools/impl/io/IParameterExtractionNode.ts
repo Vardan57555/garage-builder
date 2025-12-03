@@ -16,6 +16,8 @@ export interface IDimensionManager
     preserveExistingDimensions(merged: Record<string, any>, current: Record<string, any>, extracted: Record<string, any>): void;
 
     handleGarageTypeUpdate(value: any, currentParams: Partial<UserFriendlyParams>): UpdateResult
+
+    tryParseMultipleLabeledDimensions(input: string): Partial<{ width: number; length: number; height: number }> | null
 }
 
 export interface IParameterExtractor

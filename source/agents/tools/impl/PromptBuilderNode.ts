@@ -84,12 +84,30 @@ export class PromptBuilder implements IPromptBuilder
 
         const colorDesc: string = this.getColorDescription(color);
 
+        // ✅ ROOF TYPE DESCRIPTION - CRITICAL FIX FOR GARAGE
+        let roofDescription = "";
+        const roofTypeLower = roofType ? roofType.toLowerCase() : "regular";
+
+        if (roofTypeLower === 'box') {
+            roofDescription = "flat box-style roof with minimal overhang";
+        } else if (roofTypeLower === 'vertical') {
+            roofDescription = "vertical ribbed metal roof panels";
+        } else if (roofTypeLower === 'gambrel') {
+            roofDescription = "gambrel curved barn-style roof";
+        } else if (roofTypeLower === 'monoslope') {
+            roofDescription = "single-slope angled roof design";
+        } else {
+            roofDescription = "peaked gable roof design";
+        }
+
         // ✅ Build addon specification
         let addonSpec = "";
         if (selectedAddons && selectedAddons.length > 0) {
             const addonCounts: { [key: string]: number } = {};
             selectedAddons.forEach(addon => {
-                addonCounts[addon.label] = (addonCounts[addon.label] || 0) + 1;
+                if (addon && addon.label) {
+                    addonCounts[addon.label] = (addonCounts[addon.label] || 0) + 1;
+                }
             });
 
             addonSpec = `\n\nADDON FEATURES (MUST BE INCLUDED):
@@ -103,14 +121,16 @@ These addons MUST be visible in the rendering. Do not add extra addons beyond wh
         }
 
         // ✅ CRITICAL: VERY EXPLICIT about dimensions
-        return `Professional photorealistic exterior architectural visualization of a metal garage building.
+        return `Professional photorealistic exterior architectural visualization of a METAL GARAGE BUILDING.
+
+⚠️ THIS IS A GARAGE - NOT A HOUSE - NOT RESIDENTIAL ⚠️
 
 EXACT SPECIFICATIONS - MUST MATCH THESE EXACTLY:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DIMENSIONS (CRITICAL - MATCH EXACTLY):
-⚠️ WIDTH: ${width} feet (front to back depth)
-⚠️ LENGTH: ${length} feet (side-to-side width)  
+⚠️ WIDTH: ${width} feet (front opening width)
+⚠️ LENGTH: ${length} feet (side-to-side depth)  
 ⚠️ HEIGHT: ${height} feet (floor to roof peak)
 
 This garage is ${width}ft WIDE × ${length}ft LONG × ${height}ft TALL
@@ -118,14 +138,16 @@ Render it with ACCURATE PROPORTIONS matching these dimensions
 If dimensions are unusual (e.g., 20×20×10), render the actual proportions - do NOT default to typical garage size
 
 BUILDING FEATURES:
-⚠️ Roof Style: ${roofType} roof (${roofType === 'vertical' ? 'peaked vertical panels' : roofType === 'box' ? 'low-profile box style' : 'gable/regular style'})
-⚠️ Metal Gauge: ${gauge} (${gauge === '14GA' ? 'premium thick gauge' : gauge === '16GA' ? 'standard gauge' : gauge === '18GA' ? 'lighter gauge' : 'economy gauge'} metal)
+⚠️ Building Type: METAL GARAGE (industrial, NOT residential house)
+⚠️ Roof Style: ${roofType} roof (${roofDescription})
+⚠️ Metal Gauge: ${gauge}
 ⚠️ Color: ${colorDesc}${addonSpec}
 
 DOOR & WINDOW CONFIGURATION:
 ${this.generateDoorWindowConfig(width, length, selectedAddons)}
 
 CRITICAL ARCHITECTURAL REQUIREMENTS:
+- Building MUST be a GARAGE structure with GARAGE DOORS (roll-up metal doors)
 - Building MUST be ${width}ft wide × ${length}ft long × ${height}ft tall (NOT default size)
 - Roof proportions MUST match the ${height}ft height (NOT oversized)
 - Door and window sizes MUST be realistic for a ${width}×${length}ft building
@@ -134,13 +156,14 @@ CRITICAL ARCHITECTURAL REQUIREMENTS:
 - ${colorDesc} metal siding on all walls and roof
 - ${roofType} roof in ${colorDesc}
 - Concrete foundation pad (${width}ft × ${length}ft)
+- Industrial metal garage appearance - NOT residential house
 
 VISUAL ELEMENTS:
-- Suburban residential setting with landscaping
-- Green lawn and tall trees in autumn background
-- White/gray trim around all doors and windows
-- Professional, durable appearance
-- Clean, well-maintained condition
+- Outdoor setting with landscaping
+- Green lawn and trees in background
+- Professional, industrial appearance
+- Clean, well-maintained metal construction
+- Metal corrugation visible on panels
 
 LIGHTING & PERSPECTIVE:
 - Golden hour lighting (warm, professional)
@@ -157,47 +180,76 @@ QUALITY REQUIREMENTS:
 - Premium, professional appearance
 
 STRICT CONSTRAINTS - DO NOT VIOLATE:
+✓ Building is GARAGE - NOT HOUSE - NOT RESIDENTIAL
 ✓ Building is ${width}ft × ${length}ft × ${height}ft - render at EXACT scale
-✓ Roof style is ${roofType} (${roofType === 'vertical' ? 'vertical panels' : roofType === 'box' ? 'box style' : 'regular gable'})
-✓ No extra features beyond: doors, windows, and specified addons
+✓ Roof style is ${roofType} (${roofDescription})
+✓ Roll-up metal garage doors (NOT residential doors)
+✓ No extra features beyond: garage doors, windows, and specified addons
 ✓ NO generic/template designs - use ACTUAL dimensions
 ✓ Color is ${colorDesc} - match precisely
 ✓ Metal gauge is ${gauge} - render appropriate thickness/appearance
 ✓ Addons included: ${selectedAddons?.length > 0 ? selectedAddons.map(a => a.label).join(', ') : 'None'}
+✓ Industrial metal construction - NOT residential
 
-Exclude: people, text, watermarks, signs, random vehicles`;
+EXCLUDE:
+✗ People, text, watermarks, signs
+✗ Random vehicles
+✗ House features (windows with residential trim, shutters, porches)
+✗ Living space indicators
+✗ Typical residential design
+
+FINAL CONFIRMATION: This is a ${width}×${length}×${height}ft METAL GARAGE with ${roofType} roof and ${colorDesc} color. Render as GARAGE, NOT as house.`;
     }
 
     /**
      * ✅ Generate door/window config based on actual dimensions
      */
     private generateDoorWindowConfig(width: number, length: number, selectedAddons?: any[]): string {
-        // Calculate appropriate number of garage doors based on width
-        let garageDoors = 1;
-        if (width >= 30) garageDoors = 2;
-        if (width >= 45) garageDoors = 3;
+        try {
+            // Calculate appropriate number of garage doors based on width
+            let garageDoors = 1;
+            if (width >= 30) garageDoors = 2;
+            if (width >= 45) garageDoors = 3;
 
-        const addonLabels = selectedAddons?.map(a => a.label.toLowerCase()) || [];
+            let addonDoors = 0;
+            let addonWindows = 0;
 
-        // Count addon windows and doors
-        const addonWindows = addonLabels.filter(l => l.includes('window')).length;
-        const addonDoors = addonLabels.filter(l => l.includes('door')).length;
+            // Safely count addon doors and windows
+            if (selectedAddons && Array.isArray(selectedAddons)) {
+                selectedAddons.forEach(addon => {
+                    if (addon && addon.label) {
+                        const labelLower = addon.label.toLowerCase();
+                        if (labelLower.includes('door')) {
+                            addonDoors++;
+                        }
+                        if (labelLower.includes('window')) {
+                            addonWindows++;
+                        }
+                    }
+                });
+            }
 
-        // If user specified doors/windows in addons, use those numbers
-        const totalDoors = addonDoors > 0 ? addonDoors : garageDoors;
-        const totalWindows = Math.max(addonWindows, 2); // At least 2 small windows for ventilation
+            // If user specified doors/windows in addons, use those numbers
+            const totalDoors = addonDoors > 0 ? addonDoors : garageDoors;
+            const totalWindows = Math.max(addonWindows, 2); // At least 2 small windows for ventilation
 
-        logger.info(`[PromptBuilder] Door/Window config:`, {
-            garageDoors: totalDoors,
-            windows: totalWindows,
-            addonDoors,
-            addonWindows
-        });
+            logger.info(`[PromptBuilder] Door/Window config:`, {
+                garageDoors: totalDoors,
+                windows: totalWindows,
+                addonDoors,
+                addonWindows
+            });
 
-        return `- ${totalDoors} × garage door(s) with windows and modern handles
+            return `- ${totalDoors} × roll-up metal garage door(s) with horizontal panel lines
 - ${totalWindows} × small ventilation window(s) near roof
-- White trim around all doors and windows
-- Entrance door on side (residential entry)`;
+- Dark metal trim around all doors and windows
+- Simple industrial appearance (NO residential door on side)`;
+        } catch (error) {
+            logger.error("[PromptBuilder] Error in door/window config:", error);
+            return `- 1 × roll-up metal garage door with horizontal panel lines
+- 2 × small ventilation window(s) near roof
+- Dark metal trim around all doors and windows`;
+        }
     }
 
     public buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string {

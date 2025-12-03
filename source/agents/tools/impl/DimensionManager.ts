@@ -69,6 +69,96 @@ export class DimensionManager implements IDimensionManager {
         return value;
     }
 
+    public tryParseSingleLabeledDimension(input: string): { field: 'width' | 'length' | 'height'; value: number } | null {
+        const lowerInput = input.toLowerCase();
+
+        logger.info(`[DimensionManager] Parsing single labeled dimension: "${input}"`);
+
+        // ✅ CRITICAL: Check for EACH dimension label separately
+        // "make width 10" → width = 10
+        const widthMatch = lowerInput.match(/\b(?:width|w)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        if (widthMatch) {
+            const value = parseFloat(widthMatch[1]);
+            if (this.validateDimension(value)) {
+                logger.info(`[DimensionManager] ✅ Extracted width: ${value}`);
+                return { field: 'width', value };
+            }
+        }
+
+        // "make length 10" → length = 10
+        const lengthMatch = lowerInput.match(/\b(?:length|l|len)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        if (lengthMatch) {
+            const value = parseFloat(lengthMatch[1]);
+            if (this.validateDimension(value)) {
+                logger.info(`[DimensionManager] ✅ Extracted length: ${value}`);
+                return { field: 'length', value };
+            }
+        }
+
+        // "make height 10" → height = 10
+        const heightMatch = lowerInput.match(/\b(?:height|h|tall|depth)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        if (heightMatch) {
+            const value = parseFloat(heightMatch[1]);
+            if (this.validateDimension(value)) {
+                logger.info(`[DimensionManager] ✅ Extracted height: ${value}`);
+                return { field: 'height', value };
+            }
+        }
+
+        logger.debug(`[DimensionManager] No single labeled dimension found in: "${input}"`);
+        return null;
+    }
+
+    public tryParseMultipleLabeledDimensions(input: string): Partial<{ width: number; length: number; height: number }> | null {
+        const lowerInput = input.toLowerCase();
+
+        logger.info(`[DimensionManager] Parsing multiple labeled dimensions: "${input}"`);
+
+        const result: Partial<{ width: number; length: number; height: number }> = {};
+
+        // ✅ Extract WIDTH if present
+        // Patterns: "width 10", "w 10", "width: 10", "width=10"
+        const widthMatch = lowerInput.match(/\b(?:width|w)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        if (widthMatch) {
+            const value = parseFloat(widthMatch[1]);
+            if (this.validateDimension(value)) {
+                result.width = value;
+                logger.info(`[DimensionManager] ✅ Found width: ${value}`);
+            }
+        }
+
+        // ✅ Extract LENGTH if present
+        // Patterns: "length 10", "l 10", "length: 10", "length=10"
+        const lengthMatch = lowerInput.match(/\b(?:length|l|len)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        if (lengthMatch) {
+            const value = parseFloat(lengthMatch[1]);
+            if (this.validateDimension(value)) {
+                result.length = value;
+                logger.info(`[DimensionManager] ✅ Found length: ${value}`);
+            }
+        }
+
+        // ✅ Extract HEIGHT if present
+        // Patterns: "height 10", "h 10", "height: 10", "height=10", "tall 10", "depth 10"
+        const heightMatch = lowerInput.match(/\b(?:height|h|tall|depth)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
+        if (heightMatch) {
+            const value = parseFloat(heightMatch[1]);
+            if (this.validateDimension(value)) {
+                result.height = value;
+                logger.info(`[DimensionManager] ✅ Found height: ${value}`);
+            }
+        }
+
+        // ✅ If we found at least ONE dimension, return it
+        if (Object.keys(result).length > 0) {
+            logger.info(`[DimensionManager] ✅ Multiple dimension extraction result:`, result);
+            return result;
+        }
+
+        logger.debug(`[DimensionManager] No labeled dimensions found in: "${input}"`);
+        return null;
+    }
+
     /**
      * ✅ CRITICAL: When in field mode, ONLY parse the requested field
      * This prevents "20" for length from being assigned to width
@@ -98,6 +188,13 @@ export class DimensionManager implements IDimensionManager {
         return result;
     }
 
+    /**
+     * ✅ REPLACE the calculateDimensions() method in DimensionManager.ts
+     *
+     * CHANGE: Move tryParseMultipleLabeledDimensions() BEFORE tryParseSingleLabeledDimension()
+     * This ensures "make length 10 width 10" extracts BOTH dimensions
+     */
+
     public calculateDimensions(input: string): DimensionResult {
         const lowerInput = input.toLowerCase();
         logger.info(`[DimensionManager] Input: "${input}"`);
@@ -121,11 +218,38 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10"
+        // ✅ PRIORITY 0.5: MULTIPLE labeled dimensions FIRST
+        // "make width 10 height 20" or "width: 20, length: 15"
+        // THIS MUST BE BEFORE tryParseSingleLabeledDimension()
+        const multiLabeledResult = this.tryParseMultipleLabeledDimensions(input);
+        if (multiLabeledResult && Object.keys(multiLabeledResult).length > 0) {
+            logger.info(`[DimensionManager] ✅ Multiple labeled dimensions found:`, multiLabeledResult);
+
+            // Return with any dimensions that were found
+            return {
+                width: multiLabeledResult.width || undefined,
+                length: multiLabeledResult.length || undefined,
+                height: multiLabeledResult.height || undefined,
+                numCars: null
+            };
+        }
+
+        // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10" (requires ALL THREE)
         const labeledResult = this.tryLabeledDimensions(input);
         if (labeledResult) {
             logger.info(`[DimensionManager] ✅ Labeled format: ${JSON.stringify(labeledResult)}`);
             return labeledResult;
+        }
+
+        // ✅ PRIORITY 1.5: SINGLE labeled dimension AFTER multiple (fallback)
+        // Only if multiple didn't find anything
+        const singleLabeledResult = this.tryParseSingleLabeledDimension(input);
+        if (singleLabeledResult) {
+            logger.info(`[DimensionManager] ✅ Single labeled dimension: ${singleLabeledResult.field} = ${singleLabeledResult.value}`);
+            return {
+                [singleLabeledResult.field]: singleLabeledResult.value,
+                numCars: null
+            };
         }
 
         // ✅ PRIORITY 2: X format "20x30x10"
