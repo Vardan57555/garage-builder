@@ -89,16 +89,25 @@ Return ONLY JSON:`;
         const currentParams = { ...state.userFriendlyParams };
         const userInput = this.extractContextFromState(state);
 
-        const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
-        if (multiDimResult) {
-            logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
-            return multiDimResult;
-        }
+        const dimensionMatches = userInput.match(/\b(width|length|height|w|l|h)\s*[:=]?\s*\d+/gi);
+        const hasDimensionLabels = dimensionMatches && dimensionMatches.length >= 2;
 
-        const multiParamResult = await this.detectMultipleParameterUpdates(userInput, state, currentParams);
-        if (multiParamResult) {
-            logger.info(`[ParameterExtractor] ✅ Multiple parameter update handled`);
-            return multiParamResult;
+        if (hasDimensionLabels) {
+            logger.info(`[ParameterExtractor] Multiple dimension keywords detected, attempting multi-extraction`);
+
+            const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
+            if (multiDimResult) {
+                logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
+                return multiDimResult; // ✅ EARLY RETURN HERE
+            }
+
+            const multiParamResult = await this.detectMultipleParameterUpdates(userInput, state, currentParams);
+            if (multiParamResult) {
+                logger.info(`[ParameterExtractor] ✅ Multiple parameter update handled`);
+                return multiParamResult; // ✅ EARLY RETURN HERE
+            }
+
+            logger.info(`[ParameterExtractor] Multi-dimension detection failed, proceeding to standard extraction`);
         }
 
         if (!currentParams.building_type) {
@@ -383,37 +392,24 @@ Return ONLY JSON:`;
         if (parameterUpdate) {
             logger.info(`[ParameterExtractor] ✅ Explicit parameter update detected: ${parameterUpdate.field} = ${parameterUpdate.value}`);
 
-            // ✅ NEW: If garage_type was detected AND dimensions were calculated
-            if (parameterUpdate.field === 'garage_type' && parameterUpdate.calculatedDimensions) {
-                logger.info(`[ParameterExtractor] 🚗 Garage type with calculated dimensions detected`);
-                logger.info(`[ParameterExtractor] Calculated: ${parameterUpdate.calculatedDimensions.width}x${parameterUpdate.calculatedDimensions.length}x${parameterUpdate.calculatedDimensions.height}`);
-
+            // ✅ NEW: Verify this isn't a false positive from multi-dimension input
+            const dimensionMatchesCheck = userInput.match(/\b(width|length|height|w|l|h)\s*[:=]?\s*\d+/gi);
+            const hasDimensionKeywords = dimensionMatchesCheck && dimensionMatchesCheck.length >= 2;            if (hasDimensionKeywords) {
+                logger.warn(`[ParameterExtractor] ⚠️ Detected single param but input has multiple dimensions, skipping single extraction`);
+                // Continue to standard extraction flow instead
+            } else {
+                // Standard parameter update (without dimensions)
                 return {
                     userFriendlyParams: {
                         ...currentParams,
-                        garage_type: parameterUpdate.value,
-                        width: parameterUpdate.calculatedDimensions.width,
-                        length: parameterUpdate.calculatedDimensions.length,
-                        height: parameterUpdate.calculatedDimensions.height,
+                        [parameterUpdate.field]: parameterUpdate.value,
                     },
                     currentField: null,
                     nextStep: "check_missing_fields",
-                    response: `✅ Updated garage type to ${parameterUpdate.value} with dimensions: ${parameterUpdate.calculatedDimensions.width}ft × ${parameterUpdate.calculatedDimensions.length}ft × ${parameterUpdate.calculatedDimensions.height}ft`,
                 };
             }
-
-            // Standard parameter update (without dimensions)
-            return {
-                userFriendlyParams: {
-                    ...currentParams,
-                    [parameterUpdate.field]: parameterUpdate.value,
-                },
-                currentField: null,
-                nextStep: "check_missing_fields",
-            };
         }
 
-        // ✅ PRIORITY 2: If in field mode with dimension field, handle with simple numeric or AI
         if (state.currentField && this.isDimensionField(state.currentField)) {
             logger.info(`[ParameterExtractor] Field mode: ${state.currentField}`);
 
@@ -451,7 +447,6 @@ Return ONLY JSON:`;
         logger.info(`[ParameterExtractor] Current field: ${state.currentField}`);
 
         try {
-            // ✅ PRIORITY 3: Handle field mode (including choice fields)
             if (state.currentField && typeof state.currentField === 'string') {
                 logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
 
@@ -656,8 +651,7 @@ Return ONLY JSON:`;
                 };
             }
 
-            // If simple number, ask which dimension
-            if (this.isSimpleNumber(userInput)) {
+                if (this.isSimpleNumber(userInput)) {
                 logger.info(`[ParameterExtractor] Simple number detected: "${userInput}" - asking which dimension`);
                 return {
                     userFriendlyParams: currentParams,
@@ -762,39 +756,48 @@ Return ONLY JSON:`;
     private tryExtractMultipleDimensions(userInput: string, currentParams: any): ExtractionResult | null {
         logger.info(`[ParameterExtractor] Attempting to extract multiple dimensions from: "${userInput}"`);
 
-        // ✅ Call the DimensionManager to parse multiple labeled dimensions
+        // ✅ CALL the DimensionManager method directly
         const multiDimResult = this.dimensionManager.tryParseMultipleLabeledDimensions(userInput);
 
-        // ✅ CRITICAL: Only return if we have 2+ dimensions
-        if (!multiDimResult || Object.keys(multiDimResult).length < 2) {
-            logger.debug(`[ParameterExtractor] Not enough dimensions found (need 2+, got ${Object.keys(multiDimResult || {}).length})`);
+        // ✅ Check if result exists and has dimensions
+        if (!multiDimResult) {
+            logger.debug(`[ParameterExtractor] tryParseMultipleLabeledDimensions returned null`);
             return null;
         }
 
-        logger.info(`[ParameterExtractor] ✅ Multiple dimensions extracted:`, multiDimResult);
+        const dimensionCount = Object.keys(multiDimResult).length;
+        logger.info(`[ParameterExtractor] ✅ Found ${dimensionCount} dimensions:`, multiDimResult);
 
-        // ✅ Update ALL extracted dimensions
+        // ✅ CRITICAL: Require at least 2 dimensions
+        if (dimensionCount < 2) {
+            logger.debug(`[ParameterExtractor] Only found ${dimensionCount} dimension(s), need 2+`);
+            return null;
+        }
+
+        // ✅ Build updated params with ALL extracted dimensions
         const updatedParams = { ...currentParams };
         const updatedFields: string[] = [];
 
         if (multiDimResult.width !== undefined) {
             updatedParams.width = multiDimResult.width;
             updatedFields.push(`width: ${multiDimResult.width}ft`);
+            logger.info(`[ParameterExtractor] ✅ Extracted width: ${multiDimResult.width}`);
         }
 
         if (multiDimResult.length !== undefined) {
             updatedParams.length = multiDimResult.length;
             updatedFields.push(`length: ${multiDimResult.length}ft`);
+            logger.info(`[ParameterExtractor] ✅ Extracted length: ${multiDimResult.length}`);
         }
 
         if (multiDimResult.height !== undefined) {
             updatedParams.height = multiDimResult.height;
             updatedFields.push(`height: ${multiDimResult.height}ft`);
+            logger.info(`[ParameterExtractor] ✅ Extracted height: ${multiDimResult.height}`);
         }
 
         const updateMessage = updatedFields.join(", ");
-
-        logger.info(`[ParameterExtractor] ✅ Updated parameters: ${updateMessage}`);
+        logger.info(`[ParameterExtractor] ✅ MULTI-DIMENSION UPDATE SUCCESS: ${updateMessage}`);
 
         return {
             userFriendlyParams: updatedParams,
