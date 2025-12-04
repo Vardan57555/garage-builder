@@ -22,6 +22,7 @@ import {ParameterExtractionStrategy} from "@agents/tools/impl/ParameterExtractio
 import { detectParameterUpdateFromInput } from "@agents/tools/impl/DetectionHelpers";
 import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
+import {ContextAnalyzer, ExtractionResultBuilder} from "@agents/tools/impl/ContextAnalyzer";
 const logger: pino.Logger = createLogger(module);
 
 class ParameterExtractor implements IParameterExtractor {
@@ -567,60 +568,125 @@ Return ONLY JSON:`;
                     }
                 }
 
-                // ✅ STATE NAME VALIDATION (existing logic)
                 if (state.currentField === 'state_name') {
-                    logger.info(`[ParameterExtractor] Validating state name against database`);
+                    logger.info(`[ParameterExtractor] State field with context awareness`);
+
+                    // ✅ FIX 1: Properly declare fieldKey with correct type
+                    const fieldKey: keyof UserFriendlyParams = 'state_name';
+
+                    // ✅ NEW: Analyze context for numeric inputs
+                    if (/^\d+$/.test(userInput.trim())) {
+                        logger.info(`[ParameterExtractor] Numeric input detected for state field: "${userInput}"`);
+
+                        try {
+                            const contextAnalyzer = ContextAnalyzer.getInstance();
+
+                            // ✅ FIX 2: Safely extract recent context
+                            let recentContext = '';
+                            try {
+                                recentContext = state.messages
+                                    .slice(-3)
+                                    .map((msg: any) => {
+                                        const content = typeof msg.content === "string"
+                                            ? msg.content
+                                            : Array.isArray(msg.content)
+                                                ? msg.content
+                                                    .map((c: any) => typeof c === "string" ? c : "text" in c ? c.text : "")
+                                                    .join(" ")
+                                                : "";
+                                        const msgType = typeof msg._getType === 'function' ? msg._getType() : 'message';
+                                        return `${msgType}: ${content}`;
+                                    })
+                                    .join("\n");
+                            } catch (contextError) {
+                                logger.warn(`[ParameterExtractor] Could not extract recent context:`, contextError);
+                                recentContext = '';
+                            }
+
+                            const intent = await contextAnalyzer.analyzeNumericInput(
+                                userInput,
+                                state.currentField,
+                                recentContext
+                            );
+
+                            logger.info(`[ParameterExtractor] Context analysis result: ${intent}`);
+
+                            if (intent === "dimension") {
+                                logger.warn(`[ParameterExtractor] User sent dimension-like input while asking for STATE`);
+
+                                // ✅ FIX 3: Use ExtractionResultBuilder for consistent return type
+                                return ExtractionResultBuilder.error(
+                                    currentParams,
+                                    state.currentField,
+                                    `Detected dimension number, but asking for state`,
+                                    `❌ I need your state name (not a number).\n\nPlease provide your state:\n• Texas\n• California\n• Florida\n• etc.`
+                                );
+                            }
+                        } catch (analyzerError) {
+                            logger.error(`[ParameterExtractor] Context analyzer error:`, analyzerError);
+                            // Continue with normal validation if analyzer fails
+                        }
+                    }
+
+                    // ✅ Continue with normal state validation
+                    logger.info(`[ParameterExtractor] Validating state format`);
 
                     const formatValidation = this.validateFieldInput(userInput, state.currentField);
                     if (!formatValidation.isValid) {
-                        logger.warn(`[ParameterExtractor] Invalid format for state_name: "${userInput}"`);
-                        return {
-                            validationError: formatValidation.error,
-                            response: `❌ ${formatValidation.error}\n\nPlease provide a valid US state name.`,
-                            nextStep: "ask_for_field",
-                            currentField: state.currentField,
-                            userFriendlyParams: currentParams,
-                        };
+                        // ✅ FIX 4: Use ExtractionResultBuilder with all required properties
+                        return ExtractionResultBuilder.error(
+                            currentParams,
+                            state.currentField,
+                            formatValidation.error || 'Invalid format',
+                            `❌ ${formatValidation.error}\n\nPlease provide a valid US state name (e.g., Texas, California, Florida).`
+                        );
                     }
 
-                    try {
-                        const { ParameterValidator } = await import("@agents/tools/validators/ParameterValidator");
+                    // ✅ FIX 5: Database validation with proper error handling
+                    logger.info(`[ParameterExtractor] Validating state against database`);
 
+                    try {
                         const dbValidation = await ParameterValidator.validateState(
                             userInput,
                             state.stateMapCache
                         );
 
                         if (!dbValidation.isValid) {
-                            logger.warn(`[ParameterExtractor] State not found in database: "${userInput}"`);
-                            return {
-                                validationError: dbValidation.error,
-                                response: `❌ ${dbValidation.error}\n\nPlease provide a valid US state name (e.g., Texas, California, Florida).`,
-                                nextStep: "ask_for_field",
-                                currentField: state.currentField,
-                                userFriendlyParams: currentParams,
-                            };
+                            // ✅ FIX 6: Use ExtractionResultBuilder for consistency
+                            return ExtractionResultBuilder.error(
+                                currentParams,
+                                state.currentField,
+                                dbValidation.error,
+                                `❌ ${dbValidation.error}\n\nPlease provide a valid US state name.`
+                            );
                         }
 
-                        // @ts-ignore
-                        currentParams[fieldKey] = dbValidation.normalizedValue;
-                        logger.info(`[ParameterExtractor] State validated: ${userInput} → ${dbValidation.normalizedValue}`);
-
-                        return {
-                            userFriendlyParams: currentParams,
-                            currentField: null,
-                            nextStep: "check_missing_fields",
+                        // ✅ FIX 7: Properly type the updated params
+                        const updatedParams: Partial<UserFriendlyParams> = {
+                            ...currentParams,
+                            [fieldKey]: dbValidation.normalizedValue,
                         };
 
-                    } catch (error) {
-                        logger.error(`[ParameterExtractor] Error validating state:`, error);
-                        return {
-                            validationError: `Error validating state name`,
-                            response: `❌ Error validating state. Please try again.`,
-                            nextStep: "ask_for_field",
-                            currentField: state.currentField,
-                            userFriendlyParams: currentParams,
-                        };
+                        logger.info(`[ParameterExtractor] ✅ State validated: ${dbValidation.normalizedValue}`);
+
+                        // ✅ FIX 8: Use ExtractionResultBuilder for success response
+                        return ExtractionResultBuilder.success(
+                            updatedParams,
+                            null, // Clear current field
+                            `✅ State confirmed: ${dbValidation.normalizedValue}`,
+                            'check_missing_fields'
+                        );
+
+                    } catch (dbError) {
+                        logger.error(`[ParameterExtractor] Database validation error:`, dbError);
+
+                        // ✅ FIX 9: Graceful error handling with ExtractionResultBuilder
+                        return ExtractionResultBuilder.error(
+                            currentParams,
+                            state.currentField,
+                            'Database validation error',
+                            `❌ Error validating state. Please try again.`
+                        );
                     }
                 }
 
@@ -925,6 +991,10 @@ Return ONLY JSON:`;
         return changeKeywords.some(pattern => pattern.test(input));
     }
 
+    /**
+     * ✅ CRITICAL FIX: Only extract building_type if we have ZERO dimensions
+     * If user has already provided dimensions (like "20"), don't try to extract building type
+     */
     private async extractBuildingTypeIfMissing(
         userInput: string,
         currentParams: Partial<UserFriendlyParams>
@@ -934,12 +1004,31 @@ Return ONLY JSON:`;
             return currentParams.building_type;
         }
 
+        // ✅ CRITICAL: Check if user is providing a dimension value
+        // If input is just a number (like "20"), it's a dimension, not a building type
+        const isJustANumber = /^\d+(?:\.\d+)?$/.test(userInput.trim());
+        if (isJustANumber) {
+            logger.info(`[ParameterExtractor] Input is just a number (${userInput}) - treating as dimension, not building type`);
+            return null;
+        }
+
+        // ✅ CRITICAL: Only try to extract building_type if we have NO dimensions yet
+        const hasSomeDimensions = !!(
+            currentParams.width ||
+            currentParams.length ||
+            currentParams.height
+        );
+
+        if (hasSomeDimensions) {
+            logger.info(`[ParameterExtractor] Already have dimensions, skipping building_type extraction`);
+            return null;
+        }
+
         logger.info(`[ParameterExtractor] Attempting to extract building_type from: "${userInput}"`);
 
         const normalizedInput = userInput.toLowerCase().trim();
 
         // ✅ CRITICAL FIX: More aggressive pattern matching
-        // These patterns will catch "garage" even with extra words around it
         const patterns = [
             // Direct mentions (HIGHEST PRIORITY)
             { regex: /\bgarage\b/i, type: "garage" },
@@ -965,59 +1054,10 @@ Return ONLY JSON:`;
             }
         }
 
-        logger.info(`[ParameterExtractor] No pattern match, trying AI extraction...`);
-
-        // ✅ STEP 2: If patterns fail, use AI with improved prompt
-        try {
-            const prompt = `Extract ONLY the building type from this text.
-
-RULES:
-1. Search for these EXACT words: "garage", "shed", "barn"
-2. If ANY of these words appear → return that word
-3. Ignore all numbers, dimensions, and other details
-4. If NONE appear → return "null"
-
-EXAMPLES:
-✅ "I want a garage" → garage
-✅ "i want garage width 20 length 20 height 10" → garage
-✅ "garage for 2 cars" → garage
-✅ "20x20x10 garage" → garage
-✅ "2 car garage" → garage
-✅ "need a shed" → shed
-✅ "looking for barn" → barn
-❌ "hello" → null
-❌ "20x20x10" → null
-❌ "what's up" → null
-
-Text: "${userInput}"
-
-Return ONLY: garage, shed, barn, or null
-NO other text:`;
-
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
-
-            const extracted = response.trim().toLowerCase();
-
-            logger.info(`[ParameterExtractor] AI raw response: "${extracted}"`);
-
-            if (extracted === 'null' || extracted === '') {
-                logger.info(`[ParameterExtractor] AI: No building_type detected`);
-                return null;
-            }
-
-            const validTypes = ['garage', 'shed', 'barn'];
-            if (validTypes.includes(extracted)) {
-                logger.info(`[ParameterExtractor] ✅ AI extracted building_type: ${extracted}`);
-                return extracted;
-            }
-
-            logger.warn(`[ParameterExtractor] AI returned invalid building_type: ${extracted}`);
-            return null;
-
-        } catch (error) {
-            logger.error(`[ParameterExtractor] Error extracting building_type:`, error);
-            return null;
-        }
+        logger.info(`[ParameterExtractor] No pattern match - returning null (will ask user to clarify)`);
+        // ✅ CRITICAL: Return null if no patterns match
+        // Don't use AI as fallback for single numbers or short inputs
+        return null;
     }
 
 

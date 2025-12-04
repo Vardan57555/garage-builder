@@ -663,9 +663,19 @@ export class LeadAgent {
 
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
-            const update = !isInChoiceFieldMode
+            const shouldSkipGarageDetection = await this.shouldSkipGarageDetectionForState(
+                input,
+                session.state.currentField
+            );
+
+            logger.info(`[LeadAgent] Should skip garage detection: ${shouldSkipGarageDetection}`);
+
+
+            const update = (!isInChoiceFieldMode && !shouldSkipGarageDetection)
                 ? await detectParameterUpdateFromInput(input, session.state.currentField || undefined)
                 : null;
+
+            logger.info(`[LeadAgent] Parameter update detected: ${update ? `${update.field} = ${update.value}` : 'none'}`);
 
             if (update && session.state.currentField)
             {
@@ -798,6 +808,67 @@ export class LeadAgent {
                 originalDimensions
             );
         }
+    }
+
+    private async shouldSkipGarageDetectionForState(
+        userInput: string,
+        currentField: string | null | undefined
+    ): Promise<boolean> {
+        logger.info(`[LeadAgent] Checking if should skip garage detection...`);
+        logger.info(`[LeadAgent] Input: "${userInput}", Current field: "${currentField}"`);
+
+        const trimmedInput = userInput.trim();
+        const isJustNumber = /^\d+(?:\.\d+)?$/.test(trimmedInput);
+
+        // ✅ RULE 1: If asking for choice fields (NOT state), skip garage detection
+        if (currentField && ["roof_type", "gauge", "building_type"].includes(currentField)) {
+            logger.info(`[LeadAgent] ⚠️ Currently asking for CHOICE FIELD (${currentField}) - skipping garage detection`);
+            return true;
+        }
+
+        // ✅ RULE 2: If asking for dimensions, skip garage detection
+        if (currentField && ["width", "length", "height", "utility_length"].includes(currentField)) {
+            logger.info(`[LeadAgent] ⚠️ Currently asking for DIMENSION (${currentField}) - skipping garage detection`);
+            return true;
+        }
+
+        // ✅ RULE 3: If asking for STATE and input is a SINGLE NUMBER, skip garage detection
+        // This prevents "10" from being interpreted as "10-car" when asking for state
+        if (currentField === "state_name" && isJustNumber) {
+            logger.info(`[LeadAgent] ⚠️ Currently asking for STATE with numeric input "${userInput}" - skipping garage detection`);
+            return true;
+        }
+
+        // ✅ RULE 4: If asking for STATE but input mentions cars/garage, ALLOW garage detection
+        if (currentField === "state_name") {
+            const isGarageRelated = /\b(car|cars|garage|2-car|3-car|4-car|for\s+\d+)\b/i.test(userInput);
+            if (isGarageRelated) {
+                logger.info(`[LeadAgent] ✅ Garage-related input while asking for STATE - allowing garage detection`);
+                return false;
+            }
+        }
+
+        // ✅ RULE 5: INITIAL FLOW - If NO current field and input is JUST A NUMBER
+        // Single numbers at the start should be treated as dimensions (width), not garage
+        // Example: "20" at start = width 20ft, NOT 20-car garage
+        if (!currentField && isJustNumber) {
+            logger.info(`[LeadAgent] ⚠️ Single number in initial flow ("${userInput}") - treating as dimension, not garage`);
+            logger.info(`[LeadAgent] User should say "20 cars" or "for 2 cars" to update garage`);
+            return true; // Skip garage detection for bare numbers
+        }
+
+        // ✅ RULE 6: If no current field and input is EXPLICIT GARAGE mention, allow detection
+        // Examples: "garage for 2 cars", "2-car", "i want 3 cars"
+        if (!currentField) {
+            const isExplicitGarage = /\b(garage|car|cars|2-car|3-car|for\s+\d+\s+car)\b/i.test(userInput);
+            if (isExplicitGarage && !isJustNumber) {
+                logger.info(`[LeadAgent] ✅ Explicit garage mention in initial flow - allowing garage detection`);
+                return false;
+            }
+        }
+
+        logger.info(`[LeadAgent] ✅ Safe to run garage detection`);
+        return false;
     }
 
     private getOrCreateSession(sessionId: string): any {
