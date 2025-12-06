@@ -615,7 +615,16 @@ export async function detectParameterUpdateFromInput(
             };
         }
 
-        // ✅ PRIORITY 3: Check for single dimension updates (width, length, height)
+        logger.info(`[AIExtractor] Checking for dimension updates (with typo tolerance)...`);
+
+// Try the new typo-tolerant extractor
+        const typoResult = await extractDimensionWithTypoTolerance(input);
+        if (typoResult) {
+            logger.info(`[AIExtractor] ✅ Typo-tolerant detection: ${typoResult.field} = ${typoResult.value}`);
+            return typoResult;
+        }
+
+// Fallback to original patterns
         const dimensionPatterns: Array<{ regex: RegExp; field: keyof UserFriendlyParams }> = [
             { regex: /width\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'width' as keyof UserFriendlyParams },
             { regex: /length\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'length' as keyof UserFriendlyParams },
@@ -643,6 +652,90 @@ export async function detectParameterUpdateFromInput(
 
     } catch (error) {
         logger.error(`[AIExtractor] Exception:`, error);
+        return null;
+    }
+}
+
+export async function extractDimensionWithTypoTolerance(
+    userInput: string
+): Promise<{ field: keyof UserFriendlyParams; value: number } | null> {
+    if (!userInput?.trim()) {
+        return null;
+    }
+
+    try {
+        logger.info(`[extractDimensionWithTypoTolerance] Analyzing: "${userInput}"`);
+
+        // ✅ Try pattern matching FIRST (fast path)
+        const patterns = [
+            { regex: /\b(?:widt?h?|w)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'width' as keyof UserFriendlyParams },
+            { regex: /\b(?:lengt?h?|l)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'length' as keyof UserFriendlyParams },
+            { regex: /\b(?:heigt?h?|h|tall|deep)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'height' as keyof UserFriendlyParams },
+        ];
+
+        for (const pattern of patterns) {
+            const match = userInput.match(pattern.regex);
+            if (match) {
+                const value = parseFloat(match[1]);
+                if (value > 0 && value <= 500) {
+                    logger.info(`[extractDimensionWithTypoTolerance] ✅ Pattern match: ${pattern.field} = ${value}`);
+                    return { field: pattern.field, value };
+                }
+            }
+        }
+
+        // ✅ AI fallback for EXTREME typos
+        const prompt = `Extract a building dimension from user input with EXTREME typo tolerance.
+
+CRITICAL: User may have severe typos:
+- "widt", "wiDT", "widht", "wwwidt" = width
+- "lengt", "leng", "legnth" = length
+- "heigt", "hieght", "higt" = height
+
+If you find a dimension keyword (even with typos) and a number, extract them.
+
+Return ONLY JSON:
+{
+  "field": "width" | "length" | "height" | null,
+  "value": <number or null>,
+  "found": <true if found, false otherwise>
+}
+
+Examples:
+- "widt 10" → {"field": "width", "value": 10, "found": true}
+- "i want lengt 20" → {"field": "length", "value": 20, "found": true}
+- "heigt 12 for garage" → {"field": "height", "value": 12, "found": true}
+- "hello" → {"field": null, "value": null, "found": false}
+
+User input: "${userInput}"
+
+ONLY JSON:`;
+
+        const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+
+        const cleaned = response.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+
+        if (!jsonMatch) {
+            logger.info(`[extractDimensionWithTypoTolerance] No JSON in AI response`);
+            return null;
+        }
+
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        if (parsed.found && parsed.field && typeof parsed.value === 'number' && parsed.value > 0 && parsed.value <= 500) {
+            logger.info(`[extractDimensionWithTypoTolerance] ✅ AI extracted: ${parsed.field} = ${parsed.value}`);
+            return {
+                field: parsed.field as keyof UserFriendlyParams,
+                value: parsed.value
+            };
+        }
+
+        logger.info(`[extractDimensionWithTypoTolerance] No dimension found`);
+        return null;
+
+    } catch (error) {
+        logger.error(`[extractDimensionWithTypoTolerance] Error:`, error);
         return null;
     }
 }

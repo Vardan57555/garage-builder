@@ -21,6 +21,10 @@
     import {DimensionManager} from "@agents/tools/impl/DimensionManager";
     import {ColorChangeHandler} from "@agents/tools/impl/ColorChangeHandler";
     import {ParameterUpdateDetector} from "@agents/tools/impl/ParameterUpdateDetector";
+    import {fuzzyMatcher} from "@agents/tools/impl/FuzzyIntentMatcher";
+    import { aiDimensionDetector } from "./tools/impl/AIDimensionDetector";
+    import {garageDimensionHandler} from "@agents/tools/impl/GarageDimensionHandler";
+    import {fuzzyChoiceMatcher} from "@agents/tools/impl/FuzzyChoiceMatcher";
     const logger: pino.Logger = createLogger(module);
 
     export class LeadAgent {
@@ -72,72 +76,139 @@
                 const session = this.getOrCreateSession(sessionId);
                 await session.memory.chatHistory.addUserMessage(input);
 
-                const originalDimensions = {
-                    width: session.state.userFriendlyParams.width,
-                    length: session.state.userFriendlyParams.length,
-                    height: session.state.userFriendlyParams.height,
-                };
-                logger.info(`[LeadAgent] Original dimensions stored:`, originalDimensions);
+                // ============================================================================
+                // ✅ PRIORITY 1: GARAGE INTENT DETECTION (MUST BE FIRST)
+                // ============================================================================
+                // This prevents "garage for two cars" from being treated as dimensions
+                // CRITICAL: This must run BEFORE the AI dimension detection below
 
-                const hasDimensions = !!(
-                    originalDimensions.width &&
-                    originalDimensions.length &&
-                    originalDimensions.height
+                logger.info(`[LeadAgent] 🚗 Checking for garage intent...`);
+
+                const garageResult = await garageDimensionHandler.processGarageIntentSafely(
+                    input,
+                    session.state.userFriendlyParams
                 );
 
-                const isInFieldMode = !!session.state.currentField;
-                const isInChoiceFieldMode = session.state.currentField &&
-                    ["roof_type", "gauge", "building_type"].includes(session.state.currentField);
-                const isInDimensionFieldMode = session.state.currentField &&
-                    ['width', 'length', 'height', 'utility_length'].includes(session.state.currentField);
+                if (garageResult.handled) {
+                    logger.info(`[LeadAgent] ✅ GARAGE INTENT HANDLED SAFELY`);
+                    logger.info(`[LeadAgent] Garage type: ${garageResult.garageType}`);
+                    logger.info(`[LeadAgent] Calculated dimensions: ${JSON.stringify(garageResult.calculatedDimensions)}`);
 
-                if (isInDimensionFieldMode) {
-                    logger.info(`[LeadAgent] 🎯 In DIMENSION field mode (${session.state.currentField})`);
-                    logger.info(`[LeadAgent] SKIPPING all early parameter detection - letting ParameterExtractor handle it`);
+                    // ✅ Apply dimensions SAFELY (no corruption)
+                    session.state.userFriendlyParams = {
+                        ...session.state.userFriendlyParams,
+                        ...garageResult.updatedParams
+                    };
 
-                    const result = await leadAgentGraph.invoke({
-                        sessionId,
-                        messages: await session.memory.chatHistory.getMessages(),
-                        userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
-                        hasGarageIntent: session.state.hasGarageIntent,
-                        priceCalculated: session.state.priceCalculated || false,
-                        currentField: session.state.currentField as keyof UserFriendlyParams,
-                        validationError: null,
-                        response: "",
-                        nextStep: "extract_parameters",
-                        stateMapCache: session.stateMapCache || new Map(),
-                        roofMapCache: session.roofMapCache || new Map(),
-                        pendingUpdates: [],
-                        pricingData: null,
-                        basePrice: 0,
-                        selectedAddons: [],
-                        finalPrice: 0,
-                        color: null,
-                        colorCost: 0,
-                        _pendingConfirmation: session.state._pendingConfirmation || null,
-                    });
+                    session.state.hasGarageIntent = true;
+                    session.state.currentField = null; // Clear any current field
 
-                    // ✅ Update session state
-                    session.state.userFriendlyParams = result.userFriendlyParams;
-                    session.state.currentField = result.currentField;
-                    session.state.color = result.color;
-                    session.stateMapCache = result.stateMapCache;
-                    session.roofMapCache = result.roofMapCache;
+                    await session.memory.chatHistory.addAIChatMessage(garageResult.response);
 
-                    if (result.priceCalculated && result.pricingData) {
-                        session.state.pricingData = result.pricingData;
-                        session.state.basePrice = result.basePrice || 0;
-                        session.state.finalPrice = result.finalPrice || 0;
-                    }
-
-                    if (result.response) {
-                        await session.memory.chatHistory.addAIChatMessage(result.response);
-                        return result.response;
-                    }
-
-                    // If no response, check for next field
+                    // ✅ Check for next missing fields
                     const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                    logger.info(`[LeadAgent] Missing fields after garage: ${missingFields.length}`, missingFields);
+
+                    if (missingFields.length === 0) {
+                        // All fields complete!
+                        logger.info(`[LeadAgent] ✅ All fields complete, moving to price calculation`);
+                        return garageResult.response + "\n\nMoving to price calculation...";
+                    } else {
+                        // Ask for next field
+                        const nextField = missingFields[0];
+                        session.state.currentField = nextField as keyof UserFriendlyParams;
+
+                        logger.info(`[LeadAgent] Next field: ${nextField}`);
+
+                        const fieldResult = await askForFieldNode({
+                            sessionId,
+                            messages: await session.memory.chatHistory.getMessages(),
+                            userFriendlyParams: session.state.userFriendlyParams,
+                            hasGarageIntent: true,
+                            priceCalculated: false,
+                            currentField: nextField as keyof UserFriendlyParams,
+                            validationError: null,
+                            response: "",
+                            nextStep: null,
+                            stateMapCache: session.stateMapCache || new Map(),
+                            roofMapCache: session.roofMapCache || new Map(),
+                            pendingUpdates: [],
+                            pricingData: null,
+                            basePrice: 0,
+                            selectedAddons: [],
+                            finalPrice: 0,
+                            color: null,
+                            colorCost: 0,
+                            generatedImageUrl: "",
+                            _pendingConfirmation: null
+                        });
+
+                        const fullResponse = `${garageResult.response}\n\n${fieldResult.response}`;
+                        await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                        return fullResponse;
+                    }
+                }
+
+                // ============================================================================
+                // ✅ PRIORITY 2: AI-POWERED DIMENSION DETECTION (SECOND - runs if NOT garage)
+                // ============================================================================
+                // This runs BEFORE any field-specific logic to catch dimension updates
+                // Works in ANY context: asking for state, roof_type, etc.
+
+                logger.info(`[LeadAgent] 🤖 Running AI dimension detection...`);
+
+                const dimensionDetection = await aiDimensionDetector.detectDimensionAwareOfContext(
+                    input,
+                    session.state.currentField as keyof UserFriendlyParams | null
+                );
+
+                if (dimensionDetection.isDimension && dimensionDetection.confidence !== 'low') {
+                    logger.info(
+                        `[LeadAgent] ✅ DIMENSION DETECTED OUTSIDE CONTEXT: ${dimensionDetection.field} = ${dimensionDetection.value}`
+                    );
+                    logger.info(`[LeadAgent] Reasoning: ${dimensionDetection.reasoning}`);
+
+                    // ✅ Apply the dimension update immediately
+                    const fieldKey = dimensionDetection.field as keyof UserFriendlyParams;
+                    session.state.userFriendlyParams[fieldKey] = dimensionDetection.value;
+
+                    logger.info(
+                        `[LeadAgent] ✅ UPDATED: ${fieldKey} = ${dimensionDetection.value}`
+                    );
+
+                    // ✅ Build response acknowledging the update
+                    let response = `✓ Got it! Updated ${fieldKey} to ${dimensionDetection.value}ft`;
+
+                    if (dimensionDetection.reasoning.toLowerCase().includes('typo')) {
+                        response = `✓ I understood "${input}" as ${fieldKey}: ${dimensionDetection.value}ft`;
+                    }
+
+                    // ✅ Check for more dimensions in same input (batch)
+                    const batchDimensions = await aiDimensionDetector.detectMultipleDimensions(input);
+
+                    if (batchDimensions && batchDimensions.length > 1) {
+                        logger.info(`[LeadAgent] 📦 Batch dimensions detected:`, batchDimensions);
+
+                        // Apply remaining dimensions
+                        for (const dim of batchDimensions.slice(1)) {
+                            const key = dim.field as keyof UserFriendlyParams;
+                            session.state.userFriendlyParams[key] = dim.value;
+                            logger.info(`[LeadAgent] ✅ Applied batch: ${key} = ${dim.value}`);
+                        }
+
+                        response += ` | ${batchDimensions[1].field}: ${batchDimensions[1].value}ft`;
+                        if (batchDimensions.length > 2) {
+                            response += ` | ${batchDimensions[2].field}: ${batchDimensions[2].value}ft`;
+                        }
+                    }
+
+                    await session.memory.chatHistory.addAIChatMessage(response);
+
+                    // ✅ Check if we need to continue asking or move forward
+                    const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+
                     if (missingFields.length > 0) {
+                        // Still missing fields - ask for next one
                         const nextField = missingFields[0];
                         session.state.currentField = nextField as keyof UserFriendlyParams;
 
@@ -164,29 +235,192 @@
                             _pendingConfirmation: null
                         });
 
+                        const fullResponse = `${response}\n\n${fieldResult.response}`;
                         await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
-                        return fieldResult.response;
+                        return fullResponse;
+                    } else {
+                        // All fields complete
+                        logger.info(`[LeadAgent] ✅ All dimensions complete!`);
+                        return response + "\n\nAll set! Let me calculate your quote...";
                     }
+                }
 
-                    return "All fields complete. Calculating price...";
+                // ============================================================================
+                // ✅ CONTINUE WITH EXISTING LOGIC (unchanged)
+                // ============================================================================
+                // Everything below stays the same - these checks now run AFTER garage + dimension checks
+
+                const originalDimensions = {
+                    width: session.state.userFriendlyParams.width,
+                    length: session.state.userFriendlyParams.length,
+                    height: session.state.userFriendlyParams.height,
+                };
+
+                logger.info(`[LeadAgent] Original dimensions stored:`, originalDimensions);
+
+                const hasDimensions = !!(
+                    originalDimensions.width &&
+                    originalDimensions.length &&
+                    originalDimensions.height
+                );
+
+                const isInFieldMode = !!session.state.currentField;
+                const isInChoiceFieldMode = session.state.currentField &&
+                    ["roof_type", "gauge", "building_type"].includes(session.state.currentField);
+                const isInDimensionFieldMode = session.state.currentField &&
+                    ['width', 'length', 'height', 'utility_length'].includes(session.state.currentField);
+
+                if (isInDimensionFieldMode) {
+                    logger.info(`[LeadAgent] 🎯 DIMENSION FIELD MODE: ${session.state.currentField}`);
+                    logger.info(`[LeadAgent] User input: "${input}"`);
+                    logger.info(`[LeadAgent] ⚠️ BEFORE UPDATE - Params:`, JSON.stringify(session.state.userFriendlyParams));
+
+                    try {
+                        // ✅ STEP 1: Use AI fuzzy matcher to extract dimension with EXTREME typo tolerance
+                        logger.info(`[LeadAgent] Calling fuzzy matcher with typo correction...`);
+
+                        const dimensionResult = await fuzzyMatcher.extractDimensionWithValue(
+                            input,
+                            session.state.currentField as 'width' | 'length' | 'height'
+                        );
+
+                        logger.info(`[LeadAgent] Fuzzy matcher returned:`, JSON.stringify(dimensionResult));
+
+                        // ✅ STEP 2: Enhanced validation with better error messages
+                        if (!dimensionResult.value || dimensionResult.confidence === 'low') {
+                            logger.warn(`[LeadAgent] ❌ Fuzzy matcher failed or low confidence`);
+                            logger.warn(`[LeadAgent] Result:`, dimensionResult);
+
+                            // Build helpful error message based on what went wrong
+                            let errorMsg = `❌ I couldn't understand "${input}" as a dimension.\n\n`;
+
+                            if (dimensionResult.reasoning) {
+                                errorMsg += `Reason: ${dimensionResult.reasoning}\n\n`;
+                            }
+
+                            errorMsg += `💡 Try:\n`;
+                            errorMsg += `• Just the number: "20"\n`;
+                            errorMsg += `• With units: "20 feet" or "20ft"\n`;
+                            errorMsg += `• Even with typos: "widt 20" works!\n\n`;
+                            errorMsg += `Asking for: **${session.state.currentField}**`;
+
+                            await session.memory.chatHistory.addAIChatMessage(errorMsg);
+                            return errorMsg;
+                        }
+
+                        // ✅ STEP 3: Validate dimension value is reasonable
+                        const newValue = dimensionResult.value;
+                        if (newValue <= 0 || newValue > 500) {
+                            const rangeError = `❌ ${newValue}ft is outside the valid range.\n\nPlease enter a dimension between 1 and 500 feet.`;
+                            await session.memory.chatHistory.addAIChatMessage(rangeError);
+                            return rangeError;
+                        }
+
+                        // ✅ STEP 4: CRITICAL - Apply the update DIRECTLY to session state
+                        const fieldKey = session.state.currentField as keyof UserFriendlyParams;
+
+                        logger.info(`[LeadAgent] ✅ APPLYING UPDATE: ${fieldKey} = ${newValue}`);
+                        logger.info(`[LeadAgent] AI understood: "${input}" → ${fieldKey} = ${newValue}`);
+
+                        // DIRECT assignment - bypassing any graph processing
+                        session.state.userFriendlyParams[fieldKey] = newValue;
+                        session.state.currentField = null; // Clear field mode
+
+                        logger.info(`[LeadAgent] ✅ AFTER UPDATE - Params:`, JSON.stringify(session.state.userFriendlyParams));
+
+                        // ✅ Verification check
+                        const verifyValue = session.state.userFriendlyParams[fieldKey];
+                        if (verifyValue !== newValue) {
+                            logger.error(`[LeadAgent] ❌ CRITICAL: Update verification FAILED!`);
+                            logger.error(`[LeadAgent] Expected: ${newValue}, Got: ${verifyValue}`);
+                            throw new Error(`Dimension update verification failed`);
+                        } else {
+                            logger.info(`[LeadAgent] ✅ Update verification PASSED: ${fieldKey} = ${verifyValue}`);
+                        }
+
+                        // ✅ STEP 5: Build success response with what AI understood
+                        let response = `✓ Got it! Set ${fieldKey} to ${newValue}ft`;
+
+                        // If there was a typo, acknowledge it in a friendly way
+                        if (dimensionResult.reasoning && dimensionResult.reasoning.toLowerCase().includes('typo')) {
+                            response = `✓ I understood "${input}" as ${fieldKey}: ${newValue}ft`;
+                        }
+
+                        await session.memory.chatHistory.addAIChatMessage(response);
+
+                        // ✅ STEP 6: Check for next missing field
+                        const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                        logger.info(`[LeadAgent] Missing fields after update:`, missingFields);
+
+                        if (missingFields.length > 0) {
+                            const nextField = missingFields[0];
+                            session.state.currentField = nextField as keyof UserFriendlyParams;
+
+                            logger.info(`[LeadAgent] Moving to next field: ${nextField}`);
+
+                            const fieldResult = await askForFieldNode({
+                                sessionId,
+                                messages: await session.memory.chatHistory.getMessages(),
+                                userFriendlyParams: session.state.userFriendlyParams,
+                                hasGarageIntent: true,
+                                priceCalculated: false,
+                                currentField: nextField as keyof UserFriendlyParams,
+                                validationError: null,
+                                response: "",
+                                nextStep: null,
+                                stateMapCache: session.stateMapCache || new Map(),
+                                roofMapCache: session.roofMapCache || new Map(),
+                                pendingUpdates: [],
+                                pricingData: null,
+                                basePrice: 0,
+                                selectedAddons: [],
+                                finalPrice: 0,
+                                color: null,
+                                colorCost: 0,
+                                generatedImageUrl: "",
+                                _pendingConfirmation: null
+                            });
+
+                            const fullResponse = `${response}\n\n${fieldResult.response}`;
+                            await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                            return fullResponse;
+                        }
+
+                        // ✅ All dimensions collected
+                        logger.info(`[LeadAgent] ✅ All dimensions complete!`);
+
+                        // Check if ALL required fields are complete
+                        const allMissingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+
+                        if (allMissingFields.length === 0) {
+                            // Move to price calculation
+                            logger.info(`[LeadAgent] All fields complete, moving to price calculation...`);
+                            return response + "\n\nGreat! Let me calculate your quote...";
+                        }
+
+                        return response;
+
+                    } catch (error) {
+                        logger.error(`[LeadAgent] ❌ ERROR in dimension field mode:`, error);
+
+                        const errorMsg = `❌ Sorry, something went wrong processing that dimension.\n\nPlease try again with a simple number like "20"`;
+                        await session.memory.chatHistory.addAIChatMessage(errorMsg);
+                        return errorMsg;
+                    }
                 }
 
                 if (isInChoiceFieldMode) {
                     try {
                         logger.info(`[LeadAgent] 🎯 In CHOICE field mode (${session.state.currentField})`);
 
-                        // ✅ CHECK FIRST: If price calculated and user wants to change color, handle it immediately
+                        // ✅ CHECK FIRST: If price calculated and user wants to change color
                         if (session.state.priceCalculated && session.state.currentField !== "color") {
                             logger.info(`[LeadAgent] 🎨 Price already calculated, checking for color change request...`);
-
                             try {
                                 const colorHandler = ColorChangeHandler.getInstance();
                                 const colorIntent = await colorHandler.extractColorIntent(input);
-
                                 if (colorIntent.isColorChangeRequest) {
-                                    logger.info(
-                                        `[LeadAgent] 🎨 AI detected color change during choice field mode: "${colorIntent.colorName}"`
-                                    );
+                                    logger.info(`[LeadAgent] 🎨 AI detected color change during choice field mode`);
                                     return await this.handleColorChangeRequest(session, sessionId, input);
                                 }
                             } catch (error) {
@@ -194,29 +428,22 @@
                             }
                         }
 
-                        // ✅ CRITICAL FIX: Check if input is a simple option number (1, 2, 3, etc.)
-                        // These should NOT be treated as parameter updates - they're choice selections!
+                        // ✅ Check if input is a simple option number
                         const trimmedInput = input.trim();
                         const isSimpleNumber = /^\d+$/.test(trimmedInput);
                         const isLikelyChoiceSelection = isSimpleNumber && parseInt(trimmedInput) >= 1 && parseInt(trimmedInput) <= 10;
 
                         if (isLikelyChoiceSelection) {
-                            logger.info(`[LeadAgent] ⚠️ Input "${trimmedInput}" looks like a choice selection, skipping parameter update detection`);
-                            // Skip parameter update detection and let the choice handler process it
+                            logger.info(`[LeadAgent] ⚠️ Input "${trimmedInput}" is a choice number, skipping parameter detection`);
                         } else {
-                            // ✅ Only check for parameter updates if NOT a simple choice number
+                            // ✅ Check for parameter updates if NOT a simple choice number
                             logger.info(`[LeadAgent] 🔄 Checking for parameter updates during choice field mode...`);
-
                             try {
                                 const paramDetector = ParameterUpdateDetector.getInstance();
                                 const paramUpdate = await paramDetector.detectParameterUpdate(input);
 
                                 if (paramUpdate.isUpdate && paramUpdate.field && paramUpdate.confidence !== "low") {
-                                    logger.info(
-                                        `[LeadAgent] 🔄 Parameter update detected during choice field: ${paramUpdate.field} = ${paramUpdate.value}`
-                                    );
-
-                                    // ✅ Handle the parameter update
+                                    logger.info(`[LeadAgent] 🔄 Parameter update detected: ${paramUpdate.field} = ${paramUpdate.value}`);
                                     return await this.handleParameterUpdate(session, sessionId, paramUpdate, input);
                                 }
                             } catch (error) {
@@ -224,60 +451,116 @@
                             }
                         }
 
-                        // ✅ Continue with normal choice field processing
-                        logger.info(`[LeadAgent] Processing choice field normally`);
+                        // ============================================================================
+                        // ✅ CRITICAL: After parameter check, NOW use fuzzy matcher
+                        // This is where "vert" gets matched to "Vertical"
+                        // ============================================================================
 
-                        const result = await leadAgentGraph.invoke({
-                            sessionId,
-                            messages: await session.memory.chatHistory.getMessages(),
-                            userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
-                            hasGarageIntent: session.state.hasGarageIntent,
-                            priceCalculated: session.state.priceCalculated || false,
-                            currentField: session.state.currentField as keyof UserFriendlyParams,
-                            validationError: null,
-                            response: "",
-                            nextStep: "extract_parameters",
-                            stateMapCache: session.stateMapCache || new Map(),
-                            roofMapCache: session.roofMapCache || new Map(),
-                            pendingUpdates: [],
-                            pricingData: null,
-                            basePrice: 0,
-                            selectedAddons: [],
-                            finalPrice: 0,
-                            color: null,
-                            colorCost: 0,
-                            _pendingConfirmation: session.state._pendingConfirmation || null,
-                        });
+                        logger.info(`[LeadAgent] 🎯 NOW USING FUZZY MATCHER for field: ${session.state.currentField}`);
 
-                        // ✅ Update session state
-                        session.state.userFriendlyParams = result.userFriendlyParams;
-                        session.state.hasGarageIntent = result.hasGarageIntent;
-                        session.state.priceCalculated = result.priceCalculated || false;
-                        session.state.currentField = result.currentField;
-                        session.state.color = result.color;
-                        session.state.colorCost = result.colorCost;
-                        session.state._pendingConfirmation = result._pendingConfirmation || null;
-                        session.stateMapCache = result.stateMapCache;
-                        session.roofMapCache = result.roofMapCache;
+                        const currentField = session.state.currentField as keyof UserFriendlyParams;
+                        let choiceResult: any = null;
+                        let matchedValue: string | null = null;
 
-                        if (result.priceCalculated && result.pricingData) {
-                            session.state.pricingData = result.pricingData;
-                            session.state.basePrice = result.basePrice || 0;
-                            session.state.selectedAddons = result.selectedAddons || [];
-                            session.state.finalPrice = result.finalPrice || 0;
+                        switch (currentField) {
+                            case 'roof_type':
+                                logger.info(`[LeadAgent] 🏠 Using fuzzyChoiceMatcher.matchRoofType("${input}")`);
+                                choiceResult = await fuzzyChoiceMatcher.matchRoofType(input);
+
+                                if (choiceResult.matched) {
+                                    logger.info(`[LeadAgent] ✅ Roof type MATCHED: ${choiceResult.roofType} (${choiceResult.confidence})`);
+                                    matchedValue = choiceResult.roofType;
+                                    session.state.userFriendlyParams.roof_type = choiceResult.roofType;
+                                } else {
+                                    logger.warn(`[LeadAgent] ❌ Roof type NOT matched. Confidence: ${choiceResult.confidence}`);
+                                }
+                                break;
+
+                            case 'gauge':
+                                logger.info(`[LeadAgent] 📏 Using fuzzyChoiceMatcher.matchGauge("${input}")`);
+                                choiceResult = await fuzzyChoiceMatcher.matchGauge(input);
+
+                                if (choiceResult.matched) {
+                                    logger.info(`[LeadAgent] ✅ Gauge MATCHED: ${choiceResult.gauge} (${choiceResult.confidence})`);
+                                    matchedValue = choiceResult.gauge;
+                                    session.state.userFriendlyParams.gauge = choiceResult.gauge;
+                                } else {
+                                    logger.warn(`[LeadAgent] ❌ Gauge NOT matched. Confidence: ${choiceResult.confidence}`);
+                                }
+                                break;
+
+                            case 'building_type':
+                                logger.info(`[LeadAgent] 🏢 Using fuzzyChoiceMatcher.matchBuildingType("${input}")`);
+                                choiceResult = await fuzzyChoiceMatcher.matchBuildingType(input);
+
+                                if (choiceResult.matched) {
+                                    logger.info(`[LeadAgent] ✅ Building type MATCHED: ${choiceResult.buildingType} (${choiceResult.confidence})`);
+                                    matchedValue = choiceResult.buildingType;
+                                    session.state.userFriendlyParams.building_type = choiceResult.buildingType;
+                                } else {
+                                    logger.warn(`[LeadAgent] ❌ Building type NOT matched. Confidence: ${choiceResult.confidence}`);
+                                }
+                                break;
+
+                            case 'color':
+                                logger.info(`[LeadAgent] 🎨 Using fuzzyChoiceMatcher.matchColor("${input}")`);
+                                const allColors: ColorOption[] = await this.colorService.get();
+
+                                if (!allColors || allColors.length === 0) {
+                                    logger.error(`[LeadAgent] ❌ NO COLORS IN DATABASE!`);
+                                    return `❌ Error: No colors available. Please try again.`;
+                                }
+
+                                const colorMatch = await fuzzyChoiceMatcher.matchColor(input, allColors);
+
+                                if (colorMatch.matched && colorMatch.color) {
+                                    logger.info(`[LeadAgent] ✅ Color MATCHED: ${colorMatch.color.name} (${colorMatch.confidence})`);
+
+                                    const fullColorOption = allColors.find(
+                                        c => c.name.toLowerCase() === colorMatch.color!.name.toLowerCase()
+                                    );
+
+                                    if (fullColorOption) {
+                                        return await this.applyColorAndCalculatePrice(session, sessionId, fullColorOption);
+                                    } else {
+                                        logger.error(`[LeadAgent] ❌ Could not find full color object for: ${colorMatch.color.name}`);
+                                        return `❌ Error: Color not found in database.`;
+                                    }
+                                } else {
+                                    logger.warn(`[LeadAgent] ❌ Color NOT matched. Confidence: ${colorMatch.confidence}`);
+                                    const suggestions = allColors.slice(0, 3).map(c => c.name).join(", ");
+                                    return `I didn't find that color. Try: ${suggestions} or "any" for White`;
+                                }
+
+                            default:
+                                logger.warn(`[LeadAgent] ⚠️ Unknown choice field: ${currentField}`);
+                                return `Unknown field. Please contact support.`;
                         }
 
-                        // ✅ If result has no response and currentField is null, ask for next field
-                        if (!result.response && result.currentField === null) {
-                            logger.info(`[LeadAgent] ✅ Field processed successfully, checking for next field`);
+                        // ============================================================================
+                        // ✅ Handle the fuzzy match result
+                        // ============================================================================
 
+                        if (!choiceResult) {
+                            logger.error(`[LeadAgent] ❌ choiceResult is null for ${currentField}`);
+                            return `❌ Error processing choice. Please try again.`;
+                        }
+
+                        // ✅ HIGH CONFIDENCE MATCH - Success!
+                        if (choiceResult.matched) {
+                            logger.info(`[LeadAgent] ✅ FUZZY MATCH SUCCESS: ${currentField} = ${matchedValue}`);
+
+                            const response = `✓ Got it! ${currentField}: ${matchedValue}`;
+                            await session.memory.chatHistory.addAIChatMessage(response);
+
+                            // Check for next missing field
                             const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                            logger.info(`[LeadAgent] Missing fields after match: ${missingFields.length}`, missingFields);
 
                             if (missingFields.length > 0) {
                                 const nextField = missingFields[0];
-                                logger.info(`[LeadAgent] Next missing field: ${nextField}`);
-
                                 session.state.currentField = nextField as keyof UserFriendlyParams;
+                                logger.info(`[LeadAgent] Moving to next field: ${nextField}`);
 
                                 const fieldResult = await askForFieldNode({
                                     sessionId,
@@ -302,63 +585,49 @@
                                     _pendingConfirmation: null
                                 });
 
-                                const response = fieldResult.response;
-                                await session.memory.chatHistory.addAIChatMessage(response);
-                                return response;
+                                const fullResponse = `${response}\n\n${fieldResult.response}`;
+                                await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                                return fullResponse;
                             } else {
-                                // All fields complete - move to price calculation
-                                logger.info(`[LeadAgent] ✅ All fields complete, moving to price calculation`);
-
-                                const priceResult = await calculatePriceNode({
-                                    sessionId,
-                                    messages: await session.memory.chatHistory.getMessages(),
-                                    userFriendlyParams: session.state.userFriendlyParams,
-                                    hasGarageIntent: true,
-                                    priceCalculated: false,
-                                    currentField: null,
-                                    validationError: null,
-                                    response: "",
-                                    nextStep: null,
-                                    stateMapCache: session.stateMapCache || new Map(),
-                                    roofMapCache: session.roofMapCache || new Map(),
-                                    pendingUpdates: [],
-                                    pricingData: null,
-                                    basePrice: 0,
-                                    selectedAddons: [],
-                                    finalPrice: 0,
-                                    color: null,
-                                    colorCost: 0,
-                                    generatedImageUrl: "",
-                                    _pendingConfirmation: null
-                                });
-
-                                const response = priceResult.response;
-                                await session.memory.chatHistory.addAIChatMessage(response);
-
-                                // Update session with price data
-                                session.state.priceCalculated = true;
-                                session.state.pricingData = priceResult.pricingData;
-                                session.state.basePrice = priceResult.basePrice || 0;
-                                session.state.finalPrice = priceResult.finalPrice || 0;
-
-                                return response;
+                                logger.info(`[LeadAgent] ✅ All fields complete!`);
+                                return response + "\n\nAll set! Let me calculate your quote...";
                             }
                         }
 
-                        // ✅ If result has a response, use it
-                        if (result.response) {
-                            await session.memory.chatHistory.addAIChatMessage(result.response);
-                            return result.response;
+                        // ✅ MEDIUM CONFIDENCE - Ask for confirmation
+                        if (choiceResult.confidence === 'medium') {
+                            logger.info(`[LeadAgent] ⚠️ MEDIUM CONFIDENCE: ${currentField} = ${matchedValue}`);
+                            const confirmMsg = `Did you mean ${matchedValue}? Say "yes" to confirm or try again.`;
+                            await session.memory.chatHistory.addAIChatMessage(confirmMsg);
+                            return confirmMsg;
                         }
 
-                        // ✅ Fallback
-                        logger.warn(`[LeadAgent] ⚠️ Unexpected state: no response and currentField is not null`);
-                        return "Please continue with your building specifications.";
+                        // ✅ LOW CONFIDENCE - Ask for retry
+                        logger.info(`[LeadAgent] ❌ LOW CONFIDENCE: Could not match ${currentField}`);
+
+                        let suggestions = "";
+                        switch (currentField) {
+                            case 'roof_type':
+                                suggestions = "Choose: Vertical, Regular, or Box";
+                                break;
+                            case 'gauge':
+                                suggestions = "Choose: 14 Gauge or 16 Gauge";
+                                break;
+                            case 'building_type':
+                                suggestions = "Choose: Garage, Shed, Barn, or Workshop";
+                                break;
+                            default:
+                                suggestions = "Please try again.";
+                        }
+
+                        const retryMsg = `I didn't understand that. ${suggestions}`;
+                        await session.memory.chatHistory.addAIChatMessage(retryMsg);
+                        return retryMsg;
 
                     } catch (error) {
                         logger.error(`[LeadAgent] ERROR in choice field mode:`, error);
                         session.state.currentField = null;
-                        return `❌ Error processing your input. Let's try again. What are your building dimensions?`;
+                        return `❌ Error processing your input. Let's try again.`;
                     }
                 }
 
@@ -713,9 +982,9 @@
 
                     const userInput = input.toLowerCase().trim();
 
-                    // ✅ CHECK 1: Skip addons FIRST
-                    if (this.shouldSkipAddons(userInput)) {
-                        logger.info(`[LeadAgent] 🎨 User skipped addons - DIRECT VISUALIZATION`);
+                    const skipResult = await fuzzyMatcher.isSkipIntent(userInput);
+                    if (skipResult.isSkip && skipResult.confidence !== 'low') {
+                        logger.info(`[LeadAgent] 🎨 User skipped addons`);
                         return await this.handleUserDeclinesAddons(session, sessionId);
                     }
 
@@ -1251,20 +1520,26 @@
                     return `❌ Could not determine color preference.`;
                 }
 
-                // ✅ STEP 3: Apply color and recalculate price
-                logger.info(`[LeadAgent] ✅ Color selected: ${result.color.name}`);
+                // ✅ STEP 3: Find the full ColorOption from allColors
+                const fullColorOption = allColors.find(
+                    c => c.name.toLowerCase() === result.color!.name.toLowerCase()
+                );
 
-                const colorChangeMessage = await this.applyColorAndCalculatePrice(session, sessionId, {
-                    name: result.color.name,
-                    cost: result.color.cost,
-                    id: 0,
-                    hex_value: "",
-                    red_value: 0,
-                    green_value: 0,
-                    blue_value: 0
-                });
+                if (!fullColorOption) {
+                    logger.error(`[LeadAgent] ❌ Could not find full color object for: ${result.color.name}`);
+                    return `❌ Error: Color not found in database.`;
+                }
 
-                // ✅ STEP 4: Add alternatives suggestion if available
+                logger.info(`[LeadAgent] ✅ Color selected: ${fullColorOption.name}`);
+
+                // ✅ STEP 4: Apply color and recalculate price
+                const colorChangeMessage = await this.applyColorAndCalculatePrice(
+                    session,
+                    sessionId,
+                    fullColorOption  // ✅ Pass full ColorOption with all properties
+                );
+
+                // ✅ STEP 5: Add alternatives suggestion if available
                 if (result.alternatives && result.alternatives.length > 0) {
                     const altList = result.alternatives
                         .slice(0, 3)
@@ -1335,12 +1610,30 @@
 
                 logger.info(`[LeadAgent] Attempting to match user input: "${input}"`);
 
-                const selectedColor: ColorOption = this.colorService.detect(input, displayColors);
+                // ✅ FIXED: Use fuzzyChoiceMatcher to match color
+                const colorMatch = await fuzzyChoiceMatcher.matchColor(input, allColors);
 
-                if (selectedColor) {
-                    return await this.applyColorAndCalculatePrice(session, sessionId, selectedColor);
+                if (colorMatch.matched && colorMatch.color) {
+                    logger.info(`[LeadAgent] 🎨 Color matched: ${colorMatch.color.name}`);
+
+                    // ✅ FIX: Find the full ColorOption object from allColors
+                    const fullColorOption = allColors.find(
+                        c => c.name.toLowerCase() === colorMatch.color!.name.toLowerCase()
+                    );
+
+                    if (fullColorOption) {
+                        return await this.applyColorAndCalculatePrice(
+                            session,
+                            sessionId,
+                            fullColorOption  // ✅ Pass full ColorOption with all properties
+                        );
+                    } else {
+                        logger.error(`[LeadAgent] ❌ Could not find full color object for: ${colorMatch.color.name}`);
+                        return `❌ Error: Color not found in database.`;
+                    }
                 } else {
-                    return this.buildColorNotFoundMessage(input, displayColors);
+                    const suggestions = allColors.slice(0, 3).map(c => c.name).join(", ");
+                    return `I didn't find that color. Try: ${suggestions} or "any" for White`;
                 }
             } catch (error) {
                 logger.error(`[LeadAgent] ❌ ERROR in color phase:`, error);
@@ -1406,18 +1699,6 @@
                 await session.memory.chatHistory.addAIChatMessage(priceResult.response);
                 return priceResult.response;
             }
-        }
-
-        private buildColorNotFoundMessage(input: string, displayColors: ColorOption[]): string
-        {
-            logger.warn(`[LeadAgent] ❌ Color not matched for input: "${input}"`);
-
-            const suggestions = displayColors
-                .slice(0, 3)
-                .map((c, i) => `${i + 1}. ${c.name}`)
-                .join(", ");
-
-            return `❌ Color "${input}" not recognized.\n\nTry:\n• "1" or "2" to select by number\n• "Barn Red" or "barn red" for exact color\n• "red" to search\n• "any" for default (White)\n\n💡 Example colors: ${suggestions}...`;
         }
 
         private async askForNextField(session: any, sessionId: string, nextField: string, previousMessage: string): Promise<string>
@@ -1573,6 +1854,129 @@
             logger.info(`[LeadAgent] 🔄 Parameter update detected: ${update.field} = ${update.value} (while asking for ${session.state.currentField})`);
 
             try {
+                // ============================================================================
+                // ✅ SPECIAL HANDLING FOR CHOICE FIELDS WITH FUZZY MATCHER
+                // If the detected update is for a choice field (roof_type, gauge, building_type)
+                // Use the fuzzy matcher instead of the update service
+                // ============================================================================
+
+                const choiceFields = ['roof_type', 'gauge', 'building_type'];
+
+                if (choiceFields.includes(update.field)) {
+                    logger.info(`[LeadAgent] 🎯 Detected choice field update: ${update.field}`);
+                    logger.info(`[LeadAgent] Using fuzzy matcher instead of update service`);
+
+                    let choiceResult: any = null;
+                    let matchedValue: string | null = null;
+
+                    switch (update.field) {
+                        case 'roof_type':
+                            logger.info(`[LeadAgent] 🏠 Using fuzzyChoiceMatcher.matchRoofType("${update.value}")`);
+                            choiceResult = await fuzzyChoiceMatcher.matchRoofType(update.value);
+
+                            if (choiceResult.matched) {
+                                matchedValue = choiceResult.roofType;
+                                session.state.userFriendlyParams.roof_type = choiceResult.roofType;
+                            }
+                            break;
+
+                        case 'gauge':
+                            logger.info(`[LeadAgent] 📏 Using fuzzyChoiceMatcher.matchGauge("${update.value}")`);
+                            choiceResult = await fuzzyChoiceMatcher.matchGauge(update.value);
+
+                            if (choiceResult.matched) {
+                                matchedValue = choiceResult.gauge;
+                                session.state.userFriendlyParams.gauge = choiceResult.gauge;
+                            }
+                            break;
+
+                        case 'building_type':
+                            logger.info(`[LeadAgent] 🏢 Using fuzzyChoiceMatcher.matchBuildingType("${update.value}")`);
+                            choiceResult = await fuzzyChoiceMatcher.matchBuildingType(update.value);
+
+                            if (choiceResult.matched) {
+                                matchedValue = choiceResult.buildingType;
+                                session.state.userFriendlyParams.building_type = choiceResult.buildingType;
+                            }
+                            break;
+                    }
+
+                    // ✅ HANDLE FUZZY MATCH RESULT FOR CHOICE FIELD
+                    if (choiceResult && choiceResult.matched) {
+                        logger.info(`[LeadAgent] ✅ Choice field match: ${update.field} = ${matchedValue}`);
+
+                        const response = `✅ Updated ${update.field} to ${matchedValue}`;
+                        await session.memory.chatHistory.addAIChatMessage(response);
+
+                        // Check for next missing field
+                        const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                        logger.info(`[LeadAgent] Missing fields after update: ${missingFields.length}`, missingFields);
+
+                        if (missingFields.length > 0) {
+                            const nextField = missingFields[0];
+                            session.state.currentField = nextField as keyof UserFriendlyParams;
+                            logger.info(`[LeadAgent] Moving to next field: ${nextField}`);
+
+                            const fieldResult = await askForFieldNode({
+                                sessionId,
+                                messages: await session.memory.chatHistory.getMessages(),
+                                userFriendlyParams: session.state.userFriendlyParams,
+                                hasGarageIntent: true,
+                                priceCalculated: false,
+                                currentField: nextField as keyof UserFriendlyParams,
+                                validationError: null,
+                                response: "",
+                                nextStep: null,
+                                stateMapCache: session.stateMapCache || new Map(),
+                                roofMapCache: session.roofMapCache || new Map(),
+                                pendingUpdates: [],
+                                pricingData: null,
+                                basePrice: 0,
+                                selectedAddons: [],
+                                finalPrice: 0,
+                                color: null,
+                                colorCost: 0,
+                                generatedImageUrl: "",
+                                _pendingConfirmation: null
+                            });
+
+                            const fullResponse = `${response}\n\n${fieldResult.response}`;
+                            await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+                            return fullResponse;
+                        } else {
+                            logger.info(`[LeadAgent] ✅ All fields complete!`);
+                            return response + "\n\nAll set! Let me calculate your quote...";
+                        }
+                    } else if (choiceResult && choiceResult.confidence === 'medium') {
+                        logger.info(`[LeadAgent] ⚠️ Medium confidence for ${update.field}`);
+                        const confirmMsg = `Did you mean ${matchedValue}? Say "yes" or try again.`;
+                        await session.memory.chatHistory.addAIChatMessage(confirmMsg);
+                        return confirmMsg;
+                    } else {
+                        logger.warn(`[LeadAgent] ❌ Could not match ${update.field} with fuzzy matcher`);
+                        let suggestions = "";
+                        switch (update.field) {
+                            case 'roof_type':
+                                suggestions = "Try: Vertical, Regular, or Box";
+                                break;
+                            case 'gauge':
+                                suggestions = "Try: 14 Gauge or 16 Gauge";
+                                break;
+                            case 'building_type':
+                                suggestions = "Try: Garage, Shed, Barn, or Workshop";
+                                break;
+                        }
+                        const retryMsg = `I didn't understand that. ${suggestions}`;
+                        await session.memory.chatHistory.addAIChatMessage(retryMsg);
+                        return retryMsg;
+                    }
+                }
+
+                // ============================================================================
+                // ✅ NORMAL HANDLING FOR DIMENSION FIELDS (width, length, height, etc.)
+                // Use the existing update service
+                // ============================================================================
+
                 const updateService = ParameterUpdateServiceImpl.getInstance();
 
                 // ✅ STEP 1: Apply first update
@@ -1803,27 +2207,10 @@
         /**
          * ✅ NEW: Helper to detect skip intent
          */
-        private shouldSkipAddons(userInput: string): boolean {
-            const skipKeywords = [
-                "any",
-                "skip",
-                "no",
-                "none",
-                "without",
-                "don't need",
-                "no addons",
-                "no add-ons",
-                "nope",
-                "nah",
-                "not needed",
-                "nothing",
-            ];
-
-            const trimmed = userInput.toLowerCase().trim();
-
-            return skipKeywords.some(keyword => {
-                return trimmed === keyword || trimmed.startsWith(keyword);
-            });
+        private async shouldSkipAddons(userInput: string): Promise<boolean> {
+            const result = await fuzzyMatcher.isSkipIntent(userInput);
+            logger.info(`[LeadAgent] Skip intent: ${result.isSkip} (confidence: ${result.confidence})`);
+            return result.isSkip && result.confidence !== 'low';
         }
     }
 
