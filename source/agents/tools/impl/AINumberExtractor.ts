@@ -14,7 +14,6 @@ export class AINumberExtractor {
     private readonly cache: Map<string, number | null> = new Map();
     private readonly maxCacheSize = 1000;
 
-    // ✅ NEW: Word-to-number mapping for common cases (fast path)
     private readonly WORD_TO_NUMBER: Record<string, number> = {
         'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
         'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
@@ -46,7 +45,6 @@ export class AINumberExtractor {
 
         const trimmed = text.trim().toLowerCase();
 
-        // ✅ FAST PATH 1: Direct digit match
         const digitMatch = trimmed.match(/^\d+(\.\d+)?$/);
         if (digitMatch) {
             const value = parseFloat(digitMatch[0]);
@@ -54,21 +52,18 @@ export class AINumberExtractor {
             return value;
         }
 
-        // ✅ FAST PATH 2: Word-to-number dictionary lookup
         const directWordMatch = this.tryDirectWordMatch(trimmed);
         if (directWordMatch !== null) {
             logger.debug(`[AINumberExtractor] Direct word match: "${text}" → ${directWordMatch}`);
             return directWordMatch;
         }
 
-        // ✅ FAST PATH 3: Extract digit from text (e.g., "2 cars", "width 20")
         const extractedDigit = this.tryExtractDigitFromText(trimmed);
         if (extractedDigit !== null) {
             logger.debug(`[AINumberExtractor] Extracted digit: "${text}" → ${extractedDigit}`);
             return extractedDigit;
         }
 
-        // ✅ CHECK CACHE before AI
         const cacheKey = `${trimmed}:${context}`;
         if (this.cache.has(cacheKey)) {
             const cached = this.cache.get(cacheKey);
@@ -76,7 +71,6 @@ export class AINumberExtractor {
             return cached;
         }
 
-        // ✅ SLOW PATH: AI extraction (only if fast paths failed)
         try {
             logger.info(`[AINumberExtractor] Using AI for: "${text}" (context: ${context})`);
 
@@ -85,7 +79,6 @@ export class AINumberExtractor {
 
             const result = this.parseAIResponse(response);
 
-            // Cache result
             this.cacheResult(cacheKey, result);
 
             logger.info(`[AINumberExtractor] ✅ AI extracted: "${text}" → ${result}`);
@@ -94,7 +87,6 @@ export class AINumberExtractor {
         } catch (error) {
             logger.error(`[AINumberExtractor] AI extraction failed for "${text}":`, error);
 
-            // ✅ FINAL FALLBACK: Try one more pattern match
             const fallbackResult = this.tryFallbackExtraction(trimmed);
             if (fallbackResult !== null) {
                 logger.info(`[AINumberExtractor] ✅ Fallback extraction: "${text}" → ${fallbackResult}`);
@@ -110,19 +102,17 @@ export class AINumberExtractor {
      * ✅ NEW: Try direct word-to-number mapping
      */
     private tryDirectWordMatch(text: string): number | null {
-        // Exact match
         if (this.WORD_TO_NUMBER[text] !== undefined) {
             return this.WORD_TO_NUMBER[text];
         }
 
-        // Try compound numbers (e.g., "twenty three" → 23)
         const words = text.split(/\s+/);
         if (words.length === 2) {
             const first = this.WORD_TO_NUMBER[words[0]];
             const second = this.WORD_TO_NUMBER[words[1]];
 
             if (first !== undefined && second !== undefined && first >= 20 && second < 10) {
-                return first + second; // e.g., twenty (20) + three (3) = 23
+                return first + second;
             }
         }
 
@@ -133,7 +123,6 @@ export class AINumberExtractor {
      * ✅ NEW: Extract digit from text patterns
      */
     private tryExtractDigitFromText(text: string): number | null {
-        // Pattern: "2 cars", "width 20", "twenty feet", etc.
         const patterns = [
             /(\d+(?:\.\d+)?)\s*(?:car|cars|window|windows|door|doors|ft|feet|foot)?/,
             /(?:width|length|height|gauge)[\s:=]*(\d+(?:\.\d+)?)/,
@@ -156,7 +145,6 @@ export class AINumberExtractor {
      * ✅ NEW: Final fallback extraction using aggressive pattern matching
      */
     private tryFallbackExtraction(text: string): number | null {
-        // Look for ANY digit in the text
         const digitMatch = text.match(/\d+(?:\.\d+)?/);
         if (digitMatch) {
             const value = parseFloat(digitMatch[0]);
@@ -166,7 +154,6 @@ export class AINumberExtractor {
             }
         }
 
-        // Try word combinations more aggressively
         const wordMatches = text.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/);
         if (wordMatches) {
             return this.WORD_TO_NUMBER[wordMatches[1]];
@@ -220,13 +207,11 @@ ONLY JSON:`;
      */
     private parseAIResponse(response: string): number | null {
         try {
-            // Clean response
             let cleaned = response
                 .replace(/```json\s*/g, '')
                 .replace(/```\s*/g, '')
                 .trim();
 
-            // Extract JSON
             const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
                 logger.warn(`[AINumberExtractor] No JSON in response`);
@@ -235,13 +220,11 @@ ONLY JSON:`;
 
             const parsed = JSON.parse(jsonMatch[0]);
 
-            // Validate response structure
             if (typeof parsed.number !== 'number' && parsed.number !== null) {
                 logger.warn(`[AINumberExtractor] Invalid number type:`, parsed);
                 return null;
             }
 
-            // Log confidence for monitoring
             if (parsed.confidence === 'low') {
                 logger.warn(`[AINumberExtractor] Low confidence extraction: ${parsed.interpretation}`);
             }
@@ -258,7 +241,6 @@ ONLY JSON:`;
      * Cache result with LRU eviction
      */
     private cacheResult(key: string, value: number | null): void {
-        // Simple LRU: if cache too large, clear it
         if (this.cache.size >= this.maxCacheSize) {
             logger.info(`[AINumberExtractor] Cache full, clearing`);
             this.cache.clear();

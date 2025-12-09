@@ -36,7 +36,6 @@ export class AIDrivenChoiceHandler {
             return null;
         }
 
-        // ✅ STEP 1: Use AI to match user input to available options
         const matchResult = await this.matchUserInputToOption(
             userInput,
             fieldName,
@@ -48,7 +47,6 @@ export class AIDrivenChoiceHandler {
             return null;
         }
 
-        // ✅ STEP 2: Generate clarification prompt if confidence is medium/low
         let clarificationPrompt: string | undefined;
         if (matchResult.confidence === "medium" || matchResult.confidence === "low") {
             clarificationPrompt = await this.generateClarificationPrompt(
@@ -86,7 +84,6 @@ export class AIDrivenChoiceHandler {
         try {
             const normalizedInput = userInput.trim().toLowerCase();
 
-            // ✅ FIX 1: Check for EXACT MATCH first (before AI)
             const exactMatch = availableOptions.find(
                 opt => opt.toLowerCase() === normalizedInput
             );
@@ -100,7 +97,6 @@ export class AIDrivenChoiceHandler {
                 };
             }
 
-            // ✅ FIX 2: Check if input is a NUMBER and matches an option number
             const inputAsNumber = parseInt(normalizedInput, 10);
             if (!isNaN(inputAsNumber) && inputAsNumber >= 1 && inputAsNumber <= availableOptions.length) {
                 const selectedOption = availableOptions[inputAsNumber - 1];
@@ -112,7 +108,6 @@ export class AIDrivenChoiceHandler {
                 };
             }
 
-            // ✅ FIX 3: Only use AI for fuzzy/ambiguous matches
             logger.info(`[matchUserInputToOption] No exact match, using AI for fuzzy matching...`);
 
             const examplesForField = availableOptions
@@ -164,7 +159,6 @@ ONLY valid JSON:`;
                 return null;
             }
 
-            // ✅ VALIDATE: Ensure matched value is in available options
             const isValidOption = availableOptions.some(
                 opt => opt.toLowerCase() === (parsed.value?.toLowerCase() || "")
             );

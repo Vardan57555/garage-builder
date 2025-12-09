@@ -150,7 +150,6 @@ export class AddonServiceImpl implements AddonService
             return [];
         }
 
-        // ✅ PRIORITY 1: Numeric selection (fast path)
         if (this.isNumericSelection(userInput)) {
             const result = this.parseNumericSelections(userInput, addonsMenu);
             if (result.length > 0) {
@@ -158,13 +157,11 @@ export class AddonServiceImpl implements AddonService
             }
         }
 
-        // ✅ PRIORITY 2: Quantity + keyword with AI support
         const result = await this.parseQuantitySelectionsWithAI(userInput, addonsMenu);
         if (result.length > 0) {
             return result;
         }
 
-        // ✅ PRIORITY 3: Keyword-only match
         const keywordResult = this.parseKeywordOnlySelection(userInput, addonsMenu);
         if (keywordResult.length > 0) {
             return keywordResult;
@@ -178,8 +175,6 @@ export class AddonServiceImpl implements AddonService
         try {
             logger.info(`[AddonParser] Trying quantity selection with AI for: "${input}"`);
 
-            // ✅ NEW: More flexible pattern that captures ANY quantity expression
-            // Pattern: (optional action) + (any text that could be a number) + (addon keyword)
             const flexiblePattern = /(?:add|also|and|get|want|need|i\s+want|i'd\s+like)?\s*([a-z0-9\s]+?)\s+(window|garage\s*door|door|walk\s*in|brace|anchor|cupola|truss|sectional|overhead)s?(?:\s|$|,)/gi;
 
             const matches: RegExpExecArray[] = [...input.matchAll(flexiblePattern)];
@@ -193,12 +188,11 @@ export class AddonServiceImpl implements AddonService
             const numberExtractor = AINumberExtractor.getInstance();
 
             for (const match of matches) {
-                const quantityText = match[1].trim(); // "two", "a couple", "2", "three", etc.
-                const keyword = match[2].trim(); // "window", "door", etc.
+                const quantityText = match[1].trim();
+                const keyword = match[2].trim();
 
                 logger.info(`[AddonParser] Extracting quantity from: "${quantityText}" for keyword: "${keyword}"`);
 
-                // ✅ Use AINumberExtractor to handle word numbers
                 const quantity = await numberExtractor.extractNumber(
                     quantityText,
                     `addon quantity for ${keyword}`
@@ -211,7 +205,6 @@ export class AddonServiceImpl implements AddonService
 
                 logger.info(`[AddonParser] ✅ Extracted quantity: ${quantity} for ${keyword}`);
 
-                // Find matching addons
                 const matchingAddons: Addon[] = this.findMatchingAddons(keyword, addonsMenu);
                 if (matchingAddons.length === 0) {
                     logger.warn(`[AddonParser] No addons match keyword: "${keyword}"`);
@@ -220,7 +213,6 @@ export class AddonServiceImpl implements AddonService
 
                 logger.info(`[AddonParser] Found ${matchingAddons.length} matching addons for "${keyword}"`);
 
-                // ✅ Add the requested quantity
                 for (let i = 0; i < quantity; i++) {
                     const addon: Addon = matchingAddons[i % matchingAddons.length];
                     selected.push({
@@ -240,7 +232,6 @@ export class AddonServiceImpl implements AddonService
 
         } catch (error) {
             logger.error(`[AddonParser] Error in AI quantity selection:`, error);
-            // ✅ FALLBACK: Try original digit-only parsing
             logger.info(`[AddonParser] Falling back to digit-only parsing`);
             return this.parseQuantitySelections(input, addonsMenu);
         }
@@ -262,13 +253,12 @@ export class AddonServiceImpl implements AddonService
                 return this.createResponse("Please specify which addons you'd like.", "__end__", [], state.basePrice);
             }
 
-            // ✅ NEW: Check for skip intent first
             if (this.shouldSkipAddons(userInput!))
             {
                 logger.info(`[AddonsProcessor] User declined addons`);
                 return this.createResponse(
                     undefined,
-                    "generate_visualization", // ✅ Go directly to visualization
+                    "generate_visualization",
                     [],
                     state.basePrice,
                     true
@@ -653,11 +643,9 @@ export class AddonServiceImpl implements AddonService
             const quantityRaw = match[1];
             const keyword = match[2].trim();
 
-            // ✅ Try to parse as digit first
             if (/^\d+$/.test(quantityRaw)) {
                 quantity = parseInt(quantityRaw, 10);
             } else {
-                // ✅ Use AINumberExtractor for word numbers
                 try {
                     quantity = await numberExtractor.extractNumber(
                         quantityRaw,
