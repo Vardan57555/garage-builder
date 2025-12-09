@@ -101,7 +101,6 @@ export const LeadAgentState = Annotation.Root({
         default: () => null,
     }),
 
-    // ✅ NEW: Handle pending confirmation for choice fields
     _pendingConfirmation: Annotation<{
         field: string;
         matchedValue: string;

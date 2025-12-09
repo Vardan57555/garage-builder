@@ -27,7 +27,6 @@ const logger: pino.Logger = createLogger(module);
 
 class ParameterExtractor implements IParameterExtractor {
     private promptBuilder: IPromptBuilder;
-    // private choiceService: IChoiceService;
     private parameterExtractionStrategy: IParameterExtractionStrategy;
     private dimensionManager: IDimensionManager;
     private paramExtractor: PriceParamsExtractorTool;
@@ -35,7 +34,6 @@ class ParameterExtractor implements IParameterExtractor {
     constructor() {
         this.parameterExtractionStrategy = ParameterExtractionStrategy.getInstance();
         this.promptBuilder = PromptBuilder.getInstance();
-        // this.choiceService = ChoiceServiceImpl.getInstance();
         this.dimensionManager = DimensionManager.getInstance();
         this.paramExtractor = PriceParamsExtractorTool.getInstance();
     }
@@ -99,13 +97,13 @@ Return ONLY JSON:`;
             const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
             if (multiDimResult) {
                 logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
-                return multiDimResult; // ✅ EARLY RETURN HERE
+                return multiDimResult;
             }
 
             const multiParamResult = await this.detectMultipleParameterUpdates(userInput, state, currentParams);
             if (multiParamResult) {
                 logger.info(`[ParameterExtractor] ✅ Multiple parameter update handled`);
-                return multiParamResult; // ✅ EARLY RETURN HERE
+                return multiParamResult;
             }
 
             logger.info(`[ParameterExtractor] Multi-dimension detection failed, proceeding to standard extraction`);
@@ -169,12 +167,10 @@ Return ONLY JSON:`;
             const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
             const isDimensionField = ['width', 'length', 'height', 'utility_length'].includes(state.currentField);
 
-            // ✅ DIMENSION FIELDS FIRST
             if (isDimensionField) {
                 return await this.handleDimensionField(state, userInput, currentParams);
             }
 
-            // ✅ CHOICE FIELDS
             if (isChoiceField) {
                 logger.info(`[ParameterExtractor] Choice field: ${state.currentField}`);
 
@@ -236,7 +232,6 @@ Return ONLY JSON:`;
                 };
             }
 
-            // ✅ STATE NAME
             if (state.currentField === 'state_name') {
                 const formatValidation = this.validateFieldInput(userInput, state.currentField);
                 if (!formatValidation.isValid) {
@@ -271,7 +266,6 @@ Return ONLY JSON:`;
                 };
             }
 
-            // ✅ OTHER FIELDS
             const validation = this.validateFieldInput(userInput, state.currentField);
             if (!validation.isValid) {
                 return {
@@ -304,7 +298,6 @@ Return ONLY JSON:`;
         logger.info(`[ParameterExtractor] Has explicit car count: ${hasExplicitCarCount}`);
         logger.info(`[ParameterExtractor] Has explicit dimensions: ${hasExplicitDimensions}`);
 
-        // ✅ Car count handling
         if (hasExplicitCarCount && !hasExplicitDimensions) {
             logger.info(`[ParameterExtractor] ✅ Car count provided, calculating dimensions...`);
 
@@ -393,13 +386,10 @@ Return ONLY JSON:`;
         if (parameterUpdate) {
             logger.info(`[ParameterExtractor] ✅ Explicit parameter update detected: ${parameterUpdate.field} = ${parameterUpdate.value}`);
 
-            // ✅ NEW: Verify this isn't a false positive from multi-dimension input
             const dimensionMatchesCheck = userInput.match(/\b(width|length|height|w|l|h)\s*[:=]?\s*\d+/gi);
             const hasDimensionKeywords = dimensionMatchesCheck && dimensionMatchesCheck.length >= 2;            if (hasDimensionKeywords) {
                 logger.warn(`[ParameterExtractor] ⚠️ Detected single param but input has multiple dimensions, skipping single extraction`);
-                // Continue to standard extraction flow instead
             } else {
-                // Standard parameter update (without dimensions)
                 return {
                     userFriendlyParams: {
                         ...currentParams,
@@ -454,13 +444,11 @@ Return ONLY JSON:`;
                 const fieldKey = state.currentField as keyof UserFriendlyParams;
                 const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
 
-                // In ParameterExtractionNode.ts - REPLACE the entire choice field handling section
 
                 if (isChoiceField) {
                     logger.info(`[ParameterExtractor] Choice field detected (${state.currentField}), using AI choice handler`);
 
                     try {
-                        // ✅ STEP 1: Get available options from choice service
                         const choiceService = ChoiceServiceImpl.getInstance();
                         let availableOptions: string[] = [];
 
@@ -471,7 +459,6 @@ Return ONLY JSON:`;
                         } catch (error) {
                             logger.warn(`[ParameterExtractor] Could not get options from service, using fallback`);
 
-                            // Fallback options
                             const fallbackOptions: Record<string, string[]> = {
                                 "roof_type": ["vertical", "regular", "box"],
                                 "gauge": ["14", "16", "18", "20"],
@@ -492,7 +479,6 @@ Return ONLY JSON:`;
                             };
                         }
 
-                        // ✅ STEP 2: Use AI-driven choice handler to match user input
                         const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
 
                         logger.info(`[ParameterExtractor] Processing choice with AI for ${state.currentField}: "${userInput}"`);
@@ -503,7 +489,6 @@ Return ONLY JSON:`;
                             availableOptions
                         );
 
-                        // ✅ STEP 3: Handle no match
                         if (!matchResult) {
                             logger.warn(`[ParameterExtractor] Could not match "${userInput}" to any option`);
 
@@ -524,7 +509,6 @@ Return ONLY JSON:`;
 
                         logger.info(`[ParameterExtractor] AI matched: "${userInput}" → "${matchResult.value}" (confidence: ${matchResult.confidence})`);
 
-                        // ✅ STEP 4: HIGH CONFIDENCE - Accept immediately
                         if (matchResult.confidence === "high" && !matchResult.requiresConfirmation) {
                             logger.info(`[ParameterExtractor] ✅ High confidence: ${matchResult.value}`);
 
@@ -542,7 +526,6 @@ Return ONLY JSON:`;
                             };
                         }
 
-                        // ✅ STEP 5: MEDIUM/LOW CONFIDENCE - Ask for confirmation
                         logger.info(`[ParameterExtractor] Medium/low confidence (${matchResult.confidence}), asking for confirmation`);
 
                         return {
@@ -571,17 +554,14 @@ Return ONLY JSON:`;
                 if (state.currentField === 'state_name') {
                     logger.info(`[ParameterExtractor] State field with context awareness`);
 
-                    // ✅ FIX 1: Properly declare fieldKey with correct type
                     const fieldKey: keyof UserFriendlyParams = 'state_name';
 
-                    // ✅ NEW: Analyze context for numeric inputs
                     if (/^\d+$/.test(userInput.trim())) {
                         logger.info(`[ParameterExtractor] Numeric input detected for state field: "${userInput}"`);
 
                         try {
                             const contextAnalyzer = ContextAnalyzer.getInstance();
 
-                            // ✅ FIX 2: Safely extract recent context
                             let recentContext = '';
                             try {
                                 recentContext = state.messages
@@ -614,7 +594,6 @@ Return ONLY JSON:`;
                             if (intent === "dimension") {
                                 logger.warn(`[ParameterExtractor] User sent dimension-like input while asking for STATE`);
 
-                                // ✅ FIX 3: Use ExtractionResultBuilder for consistent return type
                                 return ExtractionResultBuilder.error(
                                     currentParams,
                                     state.currentField,
@@ -624,16 +603,13 @@ Return ONLY JSON:`;
                             }
                         } catch (analyzerError) {
                             logger.error(`[ParameterExtractor] Context analyzer error:`, analyzerError);
-                            // Continue with normal validation if analyzer fails
                         }
                     }
 
-                    // ✅ Continue with normal state validation
                     logger.info(`[ParameterExtractor] Validating state format`);
 
                     const formatValidation = this.validateFieldInput(userInput, state.currentField);
                     if (!formatValidation.isValid) {
-                        // ✅ FIX 4: Use ExtractionResultBuilder with all required properties
                         return ExtractionResultBuilder.error(
                             currentParams,
                             state.currentField,
@@ -642,7 +618,6 @@ Return ONLY JSON:`;
                         );
                     }
 
-                    // ✅ FIX 5: Database validation with proper error handling
                     logger.info(`[ParameterExtractor] Validating state against database`);
 
                     try {
@@ -652,7 +627,6 @@ Return ONLY JSON:`;
                         );
 
                         if (!dbValidation.isValid) {
-                            // ✅ FIX 6: Use ExtractionResultBuilder for consistency
                             return ExtractionResultBuilder.error(
                                 currentParams,
                                 state.currentField,
@@ -661,7 +635,6 @@ Return ONLY JSON:`;
                             );
                         }
 
-                        // ✅ FIX 7: Properly type the updated params
                         const updatedParams: Partial<UserFriendlyParams> = {
                             ...currentParams,
                             [fieldKey]: dbValidation.normalizedValue,
@@ -669,7 +642,6 @@ Return ONLY JSON:`;
 
                         logger.info(`[ParameterExtractor] ✅ State validated: ${dbValidation.normalizedValue}`);
 
-                        // ✅ FIX 8: Use ExtractionResultBuilder for success response
                         return ExtractionResultBuilder.success(
                             updatedParams,
                             null, // Clear current field
@@ -680,7 +652,6 @@ Return ONLY JSON:`;
                     } catch (dbError) {
                         logger.error(`[ParameterExtractor] Database validation error:`, dbError);
 
-                        // ✅ FIX 9: Graceful error handling with ExtractionResultBuilder
                         return ExtractionResultBuilder.error(
                             currentParams,
                             state.currentField,
@@ -690,7 +661,6 @@ Return ONLY JSON:`;
                     }
                 }
 
-                // ✅ OTHER FIELDS (existing validation logic)
                 const validation = this.validateFieldInput(userInput, state.currentField);
 
                 if (!validation.isValid) {
@@ -727,7 +697,6 @@ Return ONLY JSON:`;
                 };
             }
 
-            // ✅ PROTECTION: Store dimensions before extraction
             const dimensionsBefore = {
                 width: currentParams.width,
                 length: currentParams.length,
@@ -747,7 +716,6 @@ Return ONLY JSON:`;
 
             await this.processDimensions(currentParams, extractedParams, mergedParams);
 
-            // ✅ PROTECTION: Validate dimensions didn't change unexpectedly
             if (
                 extractedParams.width === undefined &&
                 extractedParams.length === undefined &&
@@ -822,10 +790,8 @@ Return ONLY JSON:`;
     private tryExtractMultipleDimensions(userInput: string, currentParams: any): ExtractionResult | null {
         logger.info(`[ParameterExtractor] Attempting to extract multiple dimensions from: "${userInput}"`);
 
-        // ✅ CALL the DimensionManager method directly
         const multiDimResult = this.dimensionManager.tryParseMultipleLabeledDimensions(userInput);
 
-        // ✅ Check if result exists and has dimensions
         if (!multiDimResult) {
             logger.debug(`[ParameterExtractor] tryParseMultipleLabeledDimensions returned null`);
             return null;
@@ -834,13 +800,11 @@ Return ONLY JSON:`;
         const dimensionCount = Object.keys(multiDimResult).length;
         logger.info(`[ParameterExtractor] ✅ Found ${dimensionCount} dimensions:`, multiDimResult);
 
-        // ✅ CRITICAL: Require at least 2 dimensions
         if (dimensionCount < 2) {
             logger.debug(`[ParameterExtractor] Only found ${dimensionCount} dimension(s), need 2+`);
             return null;
         }
 
-        // ✅ Build updated params with ALL extracted dimensions
         const updatedParams = { ...currentParams };
         const updatedFields: string[] = [];
 
@@ -902,7 +866,6 @@ Return ONLY JSON:`;
             const updates: Partial<UserFriendlyParams> = {};
             let foundAny = false;
 
-            // ✅ STEP 1: Try to extract labeled dimensions
             const multiDimResult = this.dimensionManager.tryParseMultipleLabeledDimensions(userInput);
             if (multiDimResult && Object.keys(multiDimResult).length > 0) {
                 logger.info(`[ParameterExtractor] Found multiple labeled dimensions:`, multiDimResult);
@@ -942,7 +905,6 @@ Return ONLY JSON:`;
         try {
             logger.info(`[ParameterExtractor] Checking for multiple parameter updates in: "${userInput}"`);
 
-            // ✅ Only process if user input suggests multiple updates
             const hasMultipleUpdateKeywords = /make\s+\w+\s+\d+.*(?:width|length|height|w\s+|l\s+|h\s+)/i.test(userInput) ||
                 /(?:width|length|height).*(?:width|length|height).*\d/i.test(userInput);
 
@@ -1004,15 +966,12 @@ Return ONLY JSON:`;
             return currentParams.building_type;
         }
 
-        // ✅ CRITICAL: Check if user is providing a dimension value
-        // If input is just a number (like "20"), it's a dimension, not a building type
         const isJustANumber = /^\d+(?:\.\d+)?$/.test(userInput.trim());
         if (isJustANumber) {
             logger.info(`[ParameterExtractor] Input is just a number (${userInput}) - treating as dimension, not building type`);
             return null;
         }
 
-        // ✅ CRITICAL: Only try to extract building_type if we have NO dimensions yet
         const hasSomeDimensions = !!(
             currentParams.width ||
             currentParams.length ||
@@ -1028,24 +987,19 @@ Return ONLY JSON:`;
 
         const normalizedInput = userInput.toLowerCase().trim();
 
-        // ✅ CRITICAL FIX: More aggressive pattern matching
         const patterns = [
-            // Direct mentions (HIGHEST PRIORITY)
             { regex: /\bgarage\b/i, type: "garage" },
             { regex: /\bshed\b/i, type: "shed" },
             { regex: /\bbarn\b/i, type: "barn" },
 
-            // With verbs/prepositions
             { regex: /(?:want|need|looking for|get|build|for|have|create).*?garage/i, type: "garage" },
             { regex: /garage.*?(?:for|with)/i, type: "garage" },
 
-            // Car-related (implies garage)
             { regex: /\d+\s*(?:car|cars?)\s*garage/i, type: "garage" },
             { regex: /garage\s+(?:for|to fit|to hold)\s+\d+\s*(?:car|cars?)/i, type: "garage" },
-            { regex: /\d+\s*(?:car|cars?)(?!\s+(?:shed|barn))/i, type: "garage" }, // "2 cars" without shed/barn
+            { regex: /\d+\s*(?:car|cars?)(?!\s+(?:shed|barn))/i, type: "garage" },
         ];
 
-        // ✅ STEP 1: Try pattern matching FIRST (faster and more reliable)
         for (const pattern of patterns) {
             if (pattern.regex.test(normalizedInput)) {
                 logger.info(`[ParameterExtractor] ✅ Pattern match: building_type = ${pattern.type}`);
@@ -1055,8 +1009,6 @@ Return ONLY JSON:`;
         }
 
         logger.info(`[ParameterExtractor] No pattern match - returning null (will ask user to clarify)`);
-        // ✅ CRITICAL: Return null if no patterns match
-        // Don't use AI as fallback for single numbers or short inputs
         return null;
     }
 
@@ -1070,7 +1022,6 @@ Return ONLY JSON:`;
         try {
             logger.info(`[tryBatchDimensionExtractionWithAI] Starting batch extraction for: "${userInput}"`);
 
-            // ✅ STEP 1: Try DimensionManager patterns first (fast path)
             logger.info(`[tryBatchDimensionExtractionWithAI] Attempting pattern matching...`);
             const calculation = this.dimensionManager.calculateDimensions(userInput);
 
@@ -1089,7 +1040,6 @@ Return ONLY JSON:`;
                 };
             }
 
-            // ✅ STEP 2: If patterns fail, use AI to detect batch dimensions
             logger.info(`[tryBatchDimensionExtractionWithAI] Pattern match failed, attempting AI detection...`);
             const aiResult = await this.detectBatchDimensionsWithAI(userInput);
 
@@ -1167,7 +1117,6 @@ ONLY valid JSON:`;
                 return null;
             }
 
-            // ✅ STRICT: Only return if ALL three found
             if (parsed.found === true && parsed.width && parsed.length && parsed.height) {
                 logger.info(`[detectBatchDimensionsWithAI] ✅ AI SUCCESS: ${parsed.width}x${parsed.length}x${parsed.height}`);
                 return {
@@ -1395,8 +1344,6 @@ ONLY valid JSON:`;
             return;
         }
 
-        // ✅ CRITICAL: DON'T auto-calculate dimensions based on garage_type
-        // Just preserve existing dimensions and let user provide them
         this.dimensionManager.preserveExistingDimensions(merged, current, extracted);
 
         logger.info(`[ParameterExtractor] Preserved dimensions: ${merged.width}×${merged.length}×${merged.height}`);
@@ -1410,7 +1357,6 @@ ONLY valid JSON:`;
         const fieldKey = state.currentField as keyof UserFriendlyParams;
         logger.info(`[ParameterExtractor] Dimension field: ${state.currentField}`);
 
-        // ✅ PRIORITY 1: Simple numeric (e.g., "20", "20 ft")
         const simple = this.trySimpleNumericParse(userInput, state.currentField);
         if (simple) {
             logger.info(`[ParameterExtractor] ✅ Simple numeric: ${simple}`);
@@ -1422,7 +1368,6 @@ ONLY valid JSON:`;
             };
         }
 
-        // ✅ PRIORITY 2: AI extraction
         const ai = await this.extractSingleDimensionWithAI(
             userInput,
             state.currentField as 'width' | 'length' | 'height'
@@ -1437,7 +1382,6 @@ ONLY valid JSON:`;
             };
         }
 
-        // ❌ Failed
         return {
             validationError: `Could not parse "${userInput}" as ${state.currentField}`,
             response: `❌ Please enter a number (e.g., "20" or "20 feet")`,
