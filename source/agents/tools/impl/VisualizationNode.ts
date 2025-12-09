@@ -76,11 +76,10 @@ class VisualizationOrchestrator
             let imageUrl: string | null = null;
             let base64Image: string | null = null;
 
-            // ✅ CRITICAL FIX: Pass selectedAddons to generator
             logger.info(`[VisualizationOrchestrator] Generating image with ${selectedAddons.length} addon(s)`);
             const result: GenerationResult = await this.generator.generate(
                 mergedParams,
-                selectedAddons,  // ✅ Pass addons here
+                selectedAddons,
                 3
             );
 

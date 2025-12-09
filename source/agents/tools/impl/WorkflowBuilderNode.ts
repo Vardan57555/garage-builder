@@ -55,7 +55,6 @@ export class WorkflowBuilder implements IWorkflowBuilder
         basePixelSize: number = 1024
     ): { width: number; height: number } {
 
-        // Calculate aspect ratio from building dimensions
         const aspectRatio = buildingWidth / buildingLength;
 
         logger.info(`[WorkflowBuilder] Aspect ratio calculation:`, {
@@ -68,26 +67,20 @@ export class WorkflowBuilder implements IWorkflowBuilder
         let pixelWidth: number;
         let pixelHeight: number;
 
-        // ✅ MATCH PIXEL DIMENSIONS TO BUILDING ASPECT RATIO
         if (aspectRatio > 1.1) {
-            // Building is wider than it is long (width > length)
             pixelWidth = basePixelSize;
             pixelHeight = Math.round(basePixelSize / aspectRatio);
         } else if (aspectRatio < 0.9) {
-            // Building is longer than it is wide (length > width)
             pixelHeight = basePixelSize;
             pixelWidth = Math.round(basePixelSize * aspectRatio);
         } else {
-            // Building is roughly square (0.9 to 1.1 ratio)
             pixelWidth = basePixelSize;
             pixelHeight = basePixelSize;
         }
 
-        // ✅ ROUND TO MULTIPLES OF 64 (Stable Diffusion requirement)
         pixelWidth = Math.round(pixelWidth / 64) * 64;
         pixelHeight = Math.round(pixelHeight / 64) * 64;
 
-        // ✅ ENSURE MINIMUM AND MAXIMUM DIMENSIONS
         pixelWidth = Math.max(512, Math.min(1536, pixelWidth));
         pixelHeight = Math.max(512, Math.min(1536, pixelHeight));
 
@@ -120,13 +113,7 @@ export class WorkflowBuilder implements IWorkflowBuilder
         let pixelHeight: number;
         let seed: number = -1;
 
-        // ✅ DETERMINE FUNCTION SIGNATURE
-        // New: buildGarageWorkflow(prompt, buildingWidth, buildingLength, seed)
-        // Old: buildGarageWorkflow(prompt, pixelWidth, pixelHeight, seed)
-
-        // Check if this looks like building dimensions (smaller values, 1-500) or pixel dimensions (larger values, 512+)
         if (widthOrBuildingWidth < 512 && heightOrBuildingLength < 512) {
-            // ✅ NEW SIGNATURE: Building dimensions provided
             logger.info(`[WorkflowBuilder] Using NEW signature with building dimensions`);
 
             const buildingWidth = widthOrBuildingWidth;
@@ -139,7 +126,6 @@ export class WorkflowBuilder implements IWorkflowBuilder
 
             logger.info(`[WorkflowBuilder] Building ${buildingWidth}×${buildingLength}ft → Pixels ${pixelWidth}×${pixelHeight}px`);
         } else {
-            // ✅ OLD SIGNATURE: Pixel dimensions provided (backward compatible)
             logger.info(`[WorkflowBuilder] Using legacy pixel dimensions`);
 
             pixelWidth = widthOrBuildingWidth;
@@ -149,7 +135,6 @@ export class WorkflowBuilder implements IWorkflowBuilder
             logger.info(`[WorkflowBuilder] Using pixel dimensions: ${pixelWidth}×${pixelHeight}px`);
         }
 
-        // ✅ BUILD WORKFLOW WITH CALCULATED DIMENSIONS
         return {
             "1": {
                 class_type: "CheckpointLoaderSimple",
