@@ -117,8 +117,6 @@ ONLY valid JSON:`;
         try {
             logger.info(`[ColorChangeHandler] Matching "${extractedColor}" to database colors`);
 
-            // ✅ FIRST: Try simple case-insensitive substring matching for exact matches
-            // This handles "Royal Blue" → "Royal Blue" without AI overhead
             const extractedLower = extractedColor.toLowerCase().trim();
             const exactMatch = availableColors.find(c =>
                 c.name.toLowerCase() === extractedLower ||
@@ -195,7 +193,6 @@ ONLY valid JSON:`;
                 reasoning: parsed.reasoning
             });
 
-            // Check if we have an exact match
             if (parsed.bestMatch && parsed.isExactMatch) {
                 const matched = availableColors.find(
                     (c) => c.name.toLowerCase() === parsed.bestMatch.toLowerCase()
@@ -206,7 +203,6 @@ ONLY valid JSON:`;
                         `[ColorChangeHandler] ✅ EXACT MATCH: "${extractedColor}" → "${matched.name}"`
                     );
 
-                    // Get alternatives even for exact matches
                     const alternatives = (parsed.alternativeMatches || [])
                         .slice(0, 2)
                         .map((altName: string) =>
@@ -226,7 +222,6 @@ ONLY valid JSON:`;
                 }
             }
 
-            // Check for best approximation match
             if (parsed.bestMatch) {
                 const matched = availableColors.find(
                     (c) => c.name.toLowerCase() === parsed.bestMatch.toLowerCase()
@@ -242,7 +237,6 @@ ONLY valid JSON:`;
                         `[ColorChangeHandler] ✅ APPROXIMATION MATCH: "${extractedColor}" → "${matched.name}" (confidence: ${parsed.confidence})`
                     );
 
-                    // Get alternatives
                     const alternatives = (parsed.alternativeMatches || [])
                         .slice(0, 2)
                         .map((altName: string) =>
@@ -262,7 +256,6 @@ ONLY valid JSON:`;
                 }
             }
 
-            // If no match found, provide suggestions
             logger.warn(`[ColorChangeHandler] No color match found for "${extractedColor}"`);
 
             const suggestions = availableColors.slice(0, 5);
@@ -309,7 +302,6 @@ ONLY valid JSON:`;
         logger.info(`[ColorChangeHandler] Handling color change request: "${userInput}"`);
 
         try {
-            // STEP 1: Detect if this is a color change request
             const intent = await this.extractColorIntent(userInput);
 
             if (!intent.isColorChangeRequest) {
@@ -332,13 +324,11 @@ ONLY valid JSON:`;
                 };
             }
 
-            // STEP 2: Match to available colors (with intelligent approximation)
             const matchResult = await this.matchColorToDatabase(intent.colorName, availableColors);
 
             if (!matchResult.match) {
                 logger.warn(`[ColorChangeHandler] No color match found`);
 
-                // Build suggestions message
                 let suggestionsText = "";
                 if (matchResult.alternatives && matchResult.alternatives.length > 0) {
                     suggestionsText = "\n\nAvailable colors:\n" +
@@ -357,14 +347,12 @@ ONLY valid JSON:`;
                 };
             }
 
-            // STEP 3: Success! Build response with alternatives
             logger.info(
                 `[ColorChangeHandler] ✅ Color change successful: ${matchResult.match.name}`
             );
 
             let successMessage = matchResult.message;
 
-            // Add alternatives suggestion if available
             if (matchResult.alternatives && matchResult.alternatives.length > 0) {
                 const alternativesList = matchResult.alternatives
                     .map(c => c.name)
