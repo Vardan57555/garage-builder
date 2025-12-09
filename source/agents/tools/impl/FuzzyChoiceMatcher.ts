@@ -28,7 +28,8 @@ export class FuzzyChoiceMatcher {
      */
     public async matchChoice(
         userInput: string,
-        choices: string[] | Array<{ name: string; label?: string; id?: string }>
+        choices: string[] | Array<{ name: string; label?: string; id?: string }>,
+        displayOrder?: string[] // NEW: Explicit display order
     ): Promise<{
         matched: boolean;
         choice: string | null;
@@ -50,12 +51,44 @@ export class FuzzyChoiceMatcher {
                 typeof c === 'string' ? c : c.name || c.label || ''
             ).filter(c => c.length > 0);
 
-            logger.info(`[FuzzyChoiceMatcher] Matching "${userInput}" against ${choiceList.length} choices`);
+            // ✅ NEW: Use displayOrder if provided, otherwise use choiceList
+            const orderedList = displayOrder || choiceList;
 
+            logger.info(`[FuzzyChoiceMatcher] Matching "${userInput}" against ${orderedList.length} choices`);
+
+            // ✅ CRITICAL: Log the EXACT order being used for matching
+            logger.info(`[FuzzyChoiceMatcher] Display order for number matching:`);
+            orderedList.forEach((c, i) => {
+                logger.info(`  [${i}] → Display #${i + 1}: "${c}"`);
+            });
+
+            // ✅ NEW: Check if input is a number FIRST
+            const trimmed = userInput.trim();
+            const isNumber = /^\d+$/.test(trimmed);
+
+            if (isNumber) {
+                const index = parseInt(trimmed, 10) - 1;
+
+                if (index >= 0 && index < orderedList.length) {
+                    const selectedChoice = orderedList[index];
+                    logger.info(`[FuzzyChoiceMatcher] ✅ NUMBER MATCH: "${trimmed}" → index ${index} → "${selectedChoice}"`);
+
+                    return {
+                        matched: true,
+                        choice: selectedChoice,
+                        confidence: 'high',
+                        reasoning: `User selected option ${trimmed} (${selectedChoice})`
+                    };
+                } else {
+                    logger.warn(`[FuzzyChoiceMatcher] Number ${trimmed} out of range (1-${orderedList.length})`);
+                }
+            }
+
+            // ✅ Continue with AI matching if not a valid number
             const prompt = `Match user input to one of these choices with EXTREME typo tolerance.
 
-AVAILABLE CHOICES:
-${choiceList.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+AVAILABLE CHOICES (IN ORDER):
+${orderedList.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
 USER INPUT: "${userInput}"
 
@@ -130,7 +163,7 @@ Input: "red"
 Output: {"matched": false, "choice": null, "confidence": "low", "reasoning": "Ambiguous - 'red' appears in both Burgundy and could mean Barn Red"}
 
 USER INPUT TO MATCH: "${userInput}"
-AVAILABLE CHOICES: ${choiceList.join(', ')}
+AVAILABLE CHOICES: ${orderedList.join(', ')}
 
 STRICT: Only return true if you're reasonably confident (high or medium).
 Return false if uncertain.
@@ -138,7 +171,7 @@ Return false if uncertain.
 ONLY JSON:`;
 
             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
-            const result = this.parseResponse(response, choiceList);
+            const result = this.parseResponse(response, orderedList);
 
             if (result) {
                 logger.info(`[FuzzyChoiceMatcher] Match result:`, result);
@@ -165,10 +198,13 @@ ONLY JSON:`;
     /**
      * ✅ Match color with AI
      * "gren" → "Evergreen", "burgun" → "Burgundy", "wht" → "White"
+     *
+     * ✅ CRITICAL: displayOrder MUST match the order shown to the user
      */
     public async matchColor(
         userInput: string,
-        colors: Array<{ name: string; cost?: number; hex_value?: string }>
+        colors: Array<{ name: string; cost?: number; hex_value?: string }>,
+        displayOrder?: string[] // NEW: Order as shown in UI
     ): Promise<{
         matched: boolean;
         color: { name: string; cost?: number } | null;
@@ -186,7 +222,9 @@ ONLY JSON:`;
 
         try {
             const colorNames = colors.map(c => c.name);
-            const result = await this.matchChoice(userInput, colorNames);
+
+            // ✅ NEW: Use displayOrder if provided
+            const result = await this.matchChoice(userInput, colorNames, displayOrder);
 
             if (result.matched && result.choice) {
                 const matchedColor = colors.find(c => c.name === result.choice);
