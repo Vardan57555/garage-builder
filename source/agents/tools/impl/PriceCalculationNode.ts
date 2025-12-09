@@ -351,7 +351,6 @@ export class PriceCalculatorService implements IPriceCalculatorService
             colorCost: breakdown.colorCost,
         });
 
-        // ✅ CRITICAL: Return object with all required fields
         const result: PriceCalculationResult = {
             response: formattedPrice,
             userFriendlyParams: params,
@@ -359,7 +358,7 @@ export class PriceCalculatorService implements IPriceCalculatorService
             basePrice: breakdown.kitPrice,
             priceCalculated: true,
             currentField: null,
-            nextStep: "show_addons",  // ✅ CRITICAL: Set this so graph knows to go to show_addons
+            nextStep: "show_addons",
             selectedAddons: [],
             finalPrice: breakdown.finalTotal,
             color: colorName ?? null,
@@ -393,17 +392,15 @@ export const calculatePriceNode = async (state: LeadAgentStateType): Promise<Pri
     try {
         const result = await PriceCalculatorService.getInstance().calculatePrice(state);
 
-        // ✅ CRITICAL FIX: Always set nextStep to show_addons after successful price calculation
         if (result.priceCalculated && result.response) {
             logger.info(`[calculatePriceNode] ✅ Price calculated successfully, transitioning to show_addons`);
 
             return {
                 ...result,
-                nextStep: "show_addons",  // ✅ THIS IS CRITICAL
+                nextStep: "show_addons",
             };
         }
 
-        // If price calculation failed, end
         logger.warn(`[calculatePriceNode] Price calculation failed`);
         return {
             ...result,

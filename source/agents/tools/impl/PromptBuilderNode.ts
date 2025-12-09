@@ -84,129 +84,199 @@ export class PromptBuilder implements IPromptBuilder
 
         const colorDesc: string = this.getColorDescription(color);
 
-        // ✅ ROOF TYPE DESCRIPTION - CRITICAL FIX FOR GARAGE
         let roofDescription = "";
         const roofTypeLower = roofType ? roofType.toLowerCase() : "regular";
 
-        if (roofTypeLower === 'box') {
-            roofDescription = "flat box-style roof with minimal overhang";
-        } else if (roofTypeLower === 'vertical') {
-            roofDescription = "vertical ribbed metal roof panels";
-        } else if (roofTypeLower === 'gambrel') {
+        if (roofTypeLower === 'box')
+        {
+            roofDescription = "flat horizontal box eave roof with minimal overhang";
+        }
+        else if (roofTypeLower === 'vertical')
+        {
+            roofDescription = "vertical ribbed metal roof with ridge running length of building";
+        }
+        else if (roofTypeLower === 'gambrel')
+        {
             roofDescription = "gambrel curved barn-style roof";
-        } else if (roofTypeLower === 'monoslope') {
-            roofDescription = "single-slope angled roof design";
-        } else {
-            roofDescription = "peaked gable roof design";
+        }
+        else
+        {
+            roofDescription = "peaked A-frame gable roof with metal ridge cap";
         }
 
-        // ✅ Build addon specification
-        let addonSpec = "";
-        if (selectedAddons && selectedAddons.length > 0) {
-            const addonCounts: { [key: string]: number } = {};
+        const doorWindowConfig = this.generateDoorWindowConfig(width, length, selectedAddons);
+
+        let garageDoorCount = 1;
+        if (width >= 30) garageDoorCount = 2;
+        if (width >= 45) garageDoorCount = 3;
+
+        let addonDoorCount = 0;
+        if (selectedAddons && Array.isArray(selectedAddons)) {
             selectedAddons.forEach(addon => {
-                if (addon && addon.label) {
-                    addonCounts[addon.label] = (addonCounts[addon.label] || 0) + 1;
+                if (addon && addon.label && addon.label.toLowerCase().includes('door')) {
+                    addonDoorCount++;
                 }
             });
+        }
+        const totalDoors = addonDoorCount > 0 ? addonDoorCount : garageDoorCount;
 
-            addonSpec = `\n\nADDON FEATURES (MUST BE INCLUDED):
-${Object.entries(addonCounts)
-                .map(([label, count]) => `- ${count} × ${label}`)
-                .join("\n")}
+        let addonSpec = "";
+        if (selectedAddons && selectedAddons.length > 0) {
+            const addonList = selectedAddons
+                .filter(a => a && a.label)
+                .map(a => `- ${a.label}`)
+                .join("\n");
 
-These addons MUST be visible in the rendering. Do not add extra addons beyond what is specified.`;
+            addonSpec = `
 
-            logger.info(`[PromptBuilder] Addons included:`, addonCounts);
+ADDITIONAL FEATURES (include these):
+${addonList}`;
+
+            logger.info(`[PromptBuilder] Addons:`, selectedAddons.map(a => a.label));
         }
 
-        // ✅ CRITICAL: VERY EXPLICIT about dimensions
-        return `Professional photorealistic exterior architectural visualization of a METAL GARAGE BUILDING.
+        return `INDUSTRIAL COMMERCIAL METAL BUILDING - STEEL GARAGE STRUCTURE
 
-⚠️ THIS IS A GARAGE - NOT A HOUSE - NOT RESIDENTIAL ⚠️
-
-EXACT SPECIFICATIONS - MUST MATCH THESE EXACTLY:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ CRITICAL: THIS IS A COMMERCIAL STEEL GARAGE BUILDING
+⚠️ NOT A RESIDENTIAL HOUSE - NOT A HOME - NOT WOOD SIDING
+⚠️ THIS IS AN ALL-METAL INDUSTRIAL GARAGE STRUCTURE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-DIMENSIONS (CRITICAL - MATCH EXACTLY):
-⚠️ WIDTH: ${width} feet (front opening width)
-⚠️ LENGTH: ${length} feet (side-to-side depth)  
-⚠️ HEIGHT: ${height} feet (floor to roof peak)
+BUILDING SPECIFICATIONS:
+━━━━━━━━━━━━━━━━━━━━
+Type: PRE-ENGINEERED METAL BUILDING (COMMERCIAL GARAGE)
+Width: ${width} feet (front face with doors)
+Length: ${length} feet (side depth)
+Height: ${height} feet (eave height to roof peak)
+Proportions: ${width}ft × ${length}ft × ${height}ft
 
-This garage is ${width}ft WIDE × ${length}ft LONG × ${height}ft TALL
-Render it with ACCURATE PROPORTIONS matching these dimensions
-If dimensions are unusual (e.g., 20×20×10), render the actual proportions - do NOT default to typical garage size
+CONSTRUCTION MATERIALS:
+━━━━━━━━━━━━━━━━━━━━
+⚠️ ALL-METAL CONSTRUCTION - NO WOOD, NO RESIDENTIAL MATERIALS
+- ${colorDesc} corrugated steel panels on ALL walls
+- ${colorDesc} metal roof panels (${roofType} style: ${roofDescription})
+- ${gauge} steel gauge thickness
+- Vertical or horizontal metal ribbing visible on panels
+- Metal ridge caps and trim pieces
+- Exposed metal fasteners/screws visible
+- Industrial steel beam framework (visible at corners)
+- Concrete slab foundation (${width}ft × ${length}ft pad)
 
-BUILDING FEATURES:
-⚠️ Building Type: METAL GARAGE (industrial, NOT residential house)
-⚠️ Roof Style: ${roofType} roof (${roofDescription})
-⚠️ Metal Gauge: ${gauge}
-⚠️ Color: ${colorDesc}${addonSpec}
+DOOR CONFIGURATION:
+━━━━━━━━━━━━━━━━━
+⚠️ ROLL-UP STEEL GARAGE DOORS (NOT GLASS DOORS, NOT RESIDENTIAL DOORS)
+${doorWindowConfig}
+- White or almond colored door panels
+- Black or dark metal door tracks on sides
+- Industrial garage door hardware visible
+- Each door approximately 9-10ft wide × 8-10ft tall
+- Metal door frames and trim in dark color${addonSpec}
 
-DOOR & WINDOW CONFIGURATION:
-${this.generateDoorWindowConfig(width, length, selectedAddons)}
+WINDOWS (OPTIONAL):
+- 2-4 small rectangular windows for ventilation (if any)
+- Simple metal-framed windows, industrial style
+- NO residential-style windows with shutters or trim
 
-CRITICAL ARCHITECTURAL REQUIREMENTS:
-- Building MUST be a GARAGE structure with GARAGE DOORS (roll-up metal doors)
-- Building MUST be ${width}ft wide × ${length}ft long × ${height}ft tall (NOT default size)
-- Roof proportions MUST match the ${height}ft height (NOT oversized)
-- Door and window sizes MUST be realistic for a ${width}×${length}ft building
-- Foundation pad MUST exactly match the ${width}×${length}ft footprint
-- NO EXTRA features beyond what's specified above
-- ${colorDesc} metal siding on all walls and roof
-- ${roofType} roof in ${colorDesc}
-- Concrete foundation pad (${width}ft × ${length}ft)
-- Industrial metal garage appearance - NOT residential house
+ROOF DETAILS:
+━━━━━━━━━━━
+- ${roofType} roof style: ${roofDescription}
+- ${colorDesc} metal roof panels matching wall color
+- Metal ridge cap at roof peak
+- Minimal roof overhang (6-12 inches)
+- Gutters and downspouts (same color as building)
+- Clean industrial appearance
 
-VISUAL ELEMENTS:
-- Outdoor setting with landscaping
-- Green lawn and trees in background
-- Professional, industrial appearance
-- Clean, well-maintained metal construction
-- Metal corrugation visible on panels
+VISUAL REQUIREMENTS:
+━━━━━━━━━━━━━━━━━
+⚠️ INDUSTRIAL METAL BUILDING AESTHETIC - NOT RESIDENTIAL
+- Clean, professional commercial garage appearance
+- All surfaces: corrugated steel panels in ${colorDesc}
+- Visible metal ribbing/corrugation texture
+- Simple rectangular box shape with ${roofType} roof
+- NO decorative elements, NO residential features
+- NO wood siding, NO stone accents, NO shutters
+- Industrial utilitarian design
+- Professional metal building manufacturer quality
 
-LIGHTING & PERSPECTIVE:
+SETTING & ENVIRONMENT:
+━━━━━━━━━━━━━━━━━━
+- Outdoor setting with green lawn
+- Trees or vegetation in background
+- Concrete foundation pad visible (${width}ft × ${length}ft)
+- Gravel or grass around building perimeter
+- Clear blue sky
 - Golden hour lighting (warm, professional)
-- Clear blue sky with subtle clouds
-- 3/4 front corner architectural view
-- Camera positioned to clearly show all dimensions
-- Perspective must make the ${width}×${length}×${height} proportions obvious
 
-QUALITY REQUIREMENTS:
-- Professional architectural visualization style
-- 8k resolution, sharp focus, detailed textures
-- Accurate ${colorDesc} color rendering
-- Realistic ${gauge} metal appearance and weathering
-- Premium, professional appearance
+CAMERA & COMPOSITION:
+━━━━━━━━━━━━━━━━━━
+- 3/4 corner view showing front and one side
+- Eye-level perspective (6ft camera height)
+- Wide angle showing full building
+- Professional architectural photography style
+- Sharp focus, high detail
+- Building fills 70-80% of frame
 
-STRICT CONSTRAINTS - DO NOT VIOLATE:
-✓ Building is GARAGE - NOT HOUSE - NOT RESIDENTIAL
-✓ Building is ${width}ft × ${length}ft × ${height}ft - render at EXACT scale
-✓ Roof style is ${roofType} (${roofDescription})
-✓ Roll-up metal garage doors (NOT residential doors)
-✓ No extra features beyond: garage doors, windows, and specified addons
-✓ NO generic/template designs - use ACTUAL dimensions
-✓ Color is ${colorDesc} - match precisely
-✓ Metal gauge is ${gauge} - render appropriate thickness/appearance
-✓ Addons included: ${selectedAddons?.length > 0 ? selectedAddons.map(a => a.label).join(', ') : 'None'}
-✓ Industrial metal construction - NOT residential
+QUALITY STANDARDS:
+━━━━━━━━━━━━━━
+- 8K photorealistic rendering
+- Sharp metal texture detail
+- Accurate ${colorDesc} color representation
+- Professional commercial building appearance
+- Industrial-grade quality visualization
+- Realistic ${gauge} steel gauge appearance
 
-EXCLUDE:
-✗ People, text, watermarks, signs
-✗ Random vehicles
-✗ House features (windows with residential trim, shutters, porches)
-✗ Living space indicators
-✗ Typical residential design
+STRICT CONSTRAINTS - MUST FOLLOW:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ ALL-METAL construction (steel panels, metal roof)
+✅ INDUSTRIAL GARAGE appearance (NOT residential house)
+✅ ROLL-UP GARAGE DOORS (NOT glass doors, NOT residential entry doors)
+✅ ${colorDesc} color on ALL surfaces (walls + roof)
+✅ ${roofType} roof style: ${roofDescription}
+✅ ${width}×${length}×${height}ft dimensions EXACTLY
+✅ Simple rectangular metal building shape
+✅ Commercial/industrial aesthetic (NOT decorative/residential)
+✅ Corrugated steel panel texture visible
+✅ ${gauge} metal gauge appropriate appearance
+✅ Concrete foundation pad ${width}×${length}ft
 
-FINAL CONFIRMATION: This is a ${width}×${length}×${height}ft METAL GARAGE with ${roofType} roof and ${colorDesc} color. Render as GARAGE, NOT as house.`;
+ABSOLUTELY FORBIDDEN - DO NOT INCLUDE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ NO residential house features (porches, columns, decorative trim)
+❌ NO wood siding or natural wood materials
+❌ NO stone or brick accents
+❌ NO glass entry doors or French doors
+❌ NO residential windows with shutters or decorative frames
+❌ NO landscaping attached to building (planters, flower boxes)
+❌ NO people, vehicles, text, or watermarks
+❌ NO residential architectural style
+❌ NO large overhangs or decorative roof features
+❌ NO complex architectural details
+
+BUILDING CATEGORY: PRE-ENGINEERED METAL BUILDING (PEMB)
+INDUSTRY: Commercial steel garage structures
+MANUFACTURER STYLE: Metal building company (Mueller, General Steel, etc.)
+APPEARANCE: Industrial, utilitarian, functional metal garage
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FINAL CONFIRMATION:
+This is a ${width}×${length}×${height}ft ALL-METAL INDUSTRIAL GARAGE
+Color: ${colorDesc} steel panels
+Roof: ${roofType} style metal roof
+Doors: ${totalDoors} roll-up steel garage doors
+Appearance: COMMERCIAL METAL BUILDING - NOT RESIDENTIAL HOUSE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
     }
+
+    /**
+     * Get a color description or fallback to the lowercase color name
+     */
 
     /**
      * ✅ Generate door/window config based on actual dimensions
      */
     private generateDoorWindowConfig(width: number, length: number, selectedAddons?: any[]): string {
         try {
-            // Calculate appropriate number of garage doors based on width
             let garageDoors = 1;
             if (width >= 30) garageDoors = 2;
             if (width >= 45) garageDoors = 3;
@@ -214,7 +284,6 @@ FINAL CONFIRMATION: This is a ${width}×${length}×${height}ft METAL GARAGE with
             let addonDoors = 0;
             let addonWindows = 0;
 
-            // Safely count addon doors and windows
             if (selectedAddons && Array.isArray(selectedAddons)) {
                 selectedAddons.forEach(addon => {
                     if (addon && addon.label) {
@@ -229,9 +298,8 @@ FINAL CONFIRMATION: This is a ${width}×${length}×${height}ft METAL GARAGE with
                 });
             }
 
-            // If user specified doors/windows in addons, use those numbers
             const totalDoors = addonDoors > 0 ? addonDoors : garageDoors;
-            const totalWindows = Math.max(addonWindows, 2); // At least 2 small windows for ventilation
+            const totalWindows = Math.max(addonWindows, 2);
 
             logger.info(`[PromptBuilder] Door/Window config:`, {
                 garageDoors: totalDoors,
@@ -255,7 +323,6 @@ FINAL CONFIRMATION: This is a ${width}×${length}×${height}ft METAL GARAGE with
     public buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string {
         const sections: string[] = [
             this.buildSystemPrompt(),
-            // ... rest of unified prompt
         ];
 
         return sections.filter(Boolean).join("\n");
