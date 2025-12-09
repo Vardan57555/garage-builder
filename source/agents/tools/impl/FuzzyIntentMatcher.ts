@@ -119,7 +119,6 @@ export class FuzzyIntentMatcher {
         try {
             logger.info(`[FuzzyIntentMatcher] Extracting dimension from: "${userInput}" (expected: ${expectedField})`);
 
-            // ✅ STEP 1: Try simple numeric extraction FIRST (fastest path)
             const simpleMatch = userInput.match(/(\d+(?:\.\d+)?)/);
             if (simpleMatch && expectedField) {
                 const value = parseFloat(simpleMatch[1]);
@@ -134,7 +133,6 @@ export class FuzzyIntentMatcher {
                 }
             }
 
-            // ✅ STEP 2: Use AI for complex/typo cases with EXTREME tolerance
             const prompt = `Extract a building dimension from user input with EXTREME typo tolerance.
 
 CRITICAL RULES:
@@ -187,7 +185,6 @@ ONLY JSON:`;
             const parsed = this.parseJSONResponse(response);
 
             if (parsed && typeof parsed.value === 'number' && parsed.value > 0 && parsed.value <= 500) {
-                // ✅ Override field if we have expectedField and AI didn't detect one
                 if (expectedField && !parsed.field) {
                     parsed.field = expectedField;
                 }

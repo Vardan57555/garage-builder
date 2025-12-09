@@ -64,13 +64,12 @@ export const detectGarageIntentNode = async (state: LeadAgentStateType) => {
 
         logger.info(`[IntentNode] User input: "${userInput}"`);
 
-        // ✅ IMPROVED: Better pattern matching
         const commonPatterns = [
             /\b(garage|shed|barn|carport|metal building|quote|price|cost)\b/i,
-            /\b(\d+)\s*(car|cars)\b/i,                    // "2 cars", "3 car"
-            /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i,            // "20x30x10"
-            /^(\d+)$/i,                                    // Just a number like "10" (assume dimension)
-            /^\d+x\d+$/i,                                  // "20x30" (assume dimensions)
+            /\b(\d+)\s*(car|cars)\b/i,
+            /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i,
+            /^(\d+)$/i,
+            /^\d+x\d+$/i,
         ];
 
         const hasCommonPattern = commonPatterns.some(pattern => pattern.test(userInput));

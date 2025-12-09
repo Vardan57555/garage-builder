@@ -74,7 +74,6 @@ export function buildLeadAgentGraph() {
             (state) => {
                 logger.debug(`[extract_parameters] nextStep=${state.nextStep}, building_type=${state.userFriendlyParams.building_type}`);
 
-                // ✅ Ensure building_type is always set
                 if (!state.userFriendlyParams.building_type) {
                     logger.warn(`[extract_parameters] ⚠️ Building type not set after extraction!`);
                 }
@@ -118,8 +117,6 @@ export function buildLeadAgentGraph() {
             (state) => {
                 logger.debug(`[ask_for_color] nextStep=${state.nextStep}, color=${state.color}`);
 
-                // ✅ CRITICAL FIX: If nextStep is set, use it explicitly
-                // This prevents the graph from running other nodes that might corrupt dimensions
                 if (state.nextStep) {
                     logger.info(`[ask_for_color] ✅ Using explicit nextStep: ${state.nextStep}`);
                     return state.nextStep;

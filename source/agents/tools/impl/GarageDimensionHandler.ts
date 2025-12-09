@@ -124,7 +124,6 @@ ONLY JSON:`;
         try {
             logger.info(`[GarageDimensionHandler] Calculating dimensions for garage_type: ${garageType}`);
 
-            // Extract car count from garageType (e.g., "2-car" → 2)
             const carMatch = String(garageType).match(/(\d+)/);
             const numCars = carMatch ? parseInt(carMatch[1], 10) : null;
 
@@ -135,7 +134,6 @@ ONLY JSON:`;
 
             logger.info(`[GarageDimensionHandler] Extracted car count: ${numCars}`);
 
-            // ✅ Use DimensionManager to calculate
             const dimensionManager = DimensionManager.getInstance();
             const calculation = dimensionManager.calculateDimensions(userInput);
 
@@ -151,14 +149,11 @@ ONLY JSON:`;
                 };
             }
 
-            // ✅ Fallback formula: standard garage dimensions
-            const width = (numCars * 6) + 8;  // 6ft per car + 8ft for aisles/support
-            const length = 20;  // Standard garage depth
-            const height = 10;  // Standard garage height
+            const width = (numCars * 6) + 8;
+            const length = 20;
+            const height = 10;
 
-            logger.info(
-                `[GarageDimensionHandler] ✅ Using formula: ${width}×${length}×${height} for ${numCars}-car`
-            );
+            logger.info(`[GarageDimensionHandler] ✅ Using formula: ${width}×${length}×${height} for ${numCars}-car`);
 
             return {
                 width,
@@ -190,7 +185,6 @@ ONLY JSON:`;
         logger.info(`[GarageDimensionHandler] Safe processing: "${userInput}"`);
 
         try {
-            // ✅ STEP 1: Detect garage intent
             const garageDetection = await this.detectGarageIntent(userInput);
 
             if (!garageDetection.isGarageIntent || garageDetection.confidence === 'low') {
@@ -204,7 +198,6 @@ ONLY JSON:`;
 
             logger.info(`[GarageDimensionHandler] ✅ Garage intent detected: ${garageDetection.garageType}`);
 
-            // ✅ STEP 2: Calculate dimensions from garage type
             const dimensions = await this.calculateDimensionsFromGarageType(
                 garageDetection.garageType!,
                 userInput
@@ -219,24 +212,20 @@ ONLY JSON:`;
                 };
             }
 
-            logger.info(
-                `[GarageDimensionHandler] ✅ Calculated dimensions: ${dimensions.width}×${dimensions.length}×${dimensions.height}`
-            );
+            logger.info(`[GarageDimensionHandler] ✅ Calculated dimensions: ${dimensions.width}×${dimensions.length}×${dimensions.height}`);
 
-            // ✅ STEP 3: Build response (NO dimension corruption)
             const response = `✓ Got it! ${garageDetection.carCount}-car garage\n\nBuilding dimensions: ${dimensions.width}ft wide × ${dimensions.length}ft long × ${dimensions.height}ft tall`;
 
-            // ✅ STEP 4: Return updated params (clean, no overwrites)
             const updatedParams: Partial<UserFriendlyParams> = {
                 width: dimensions.width,
                 length: dimensions.length,
-                height: dimensions.height
+                height: dimensions.height,
+                building_type: "Garage"
             };
 
-            logger.info(
-                `[GarageDimensionHandler] ✅ Safe params update:`,
-                updatedParams
-            );
+            logger.info(`[GarageDimensionHandler] ✅ Safe params update:`, updatedParams);
+
+            logger.info(`[GarageDimensionHandler] ✅ Auto-detected building_type: Garage`);
 
             return {
                 handled: true,
@@ -271,13 +260,11 @@ ONLY JSON:`;
 
             const parsed = JSON.parse(jsonMatch[0]);
 
-            // Validate structure
             if (typeof parsed.isGarageIntent !== 'boolean') {
                 logger.warn(`[GarageDimensionHandler] Invalid structure:`, parsed);
                 return null;
             }
 
-            // Normalize confidence
             const validConfidences = ['high', 'medium', 'low'];
             if (!validConfidences.includes(parsed.confidence)) {
                 parsed.confidence = 'low';

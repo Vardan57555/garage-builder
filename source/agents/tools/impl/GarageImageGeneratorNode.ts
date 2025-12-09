@@ -84,7 +84,6 @@ export class GarageImageGenerator implements IGarageImageGenerator
             try {
                 logger.info(`[GarageImageGenerator] Attempt ${attempt}/${retries}...`);
 
-                // ✅ CRITICAL: Pass selectedAddons to prompt builder
                 const prompt: string = this.promptBuilder.buildGaragePrompt(params, selectedAddons);
 
                 logger.debug(`[GarageImageGenerator] Generated prompt length: ${prompt.length} chars`);
