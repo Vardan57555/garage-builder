@@ -52,7 +52,6 @@ export class FullyAIDrivenExtractor {
             return null;
         }
 
-        // ✅ CRITICAL: If in dimension field mode, return null
         if (currentField && ['width', 'length', 'height', 'utility_length'].includes(currentField)) {
             logger.info(`[AIExtractor] ⚠️ In dimension field mode (${currentField}) - SKIP AI extraction here`);
             return null;
@@ -71,7 +70,6 @@ export class FullyAIDrivenExtractor {
             if (result) {
                 logger.info(`[AIExtractor] ✅ Extracted: ${result.field} = ${result.value}`);
 
-                // ✅ NEW: If garage_type was detected, calculate dimensions
                 if (result.field === 'garage_type') {
                     logger.info(`[AIExtractor] 🚗 Garage type detected: ${result.value} - calculating dimensions...`);
 
@@ -108,7 +106,6 @@ export class FullyAIDrivenExtractor {
         try {
             logger.info(`[AIExtractor] Calculating dimensions for garage_type: ${garageType}`);
 
-            // Extract car count from garage_type (e.g., "2-car" → 2)
             const carMatch = String(garageType).match(/(\d+)/);
             const numCars = carMatch ? parseInt(carMatch[1], 10) : null;
 
@@ -119,7 +116,6 @@ export class FullyAIDrivenExtractor {
 
             logger.info(`[AIExtractor] Extracted car count: ${numCars}`);
 
-            // ✅ Use DimensionManager to calculate dimensions
             const dimensionManager = DimensionManager.getInstance();
             const calculation = dimensionManager.calculateDimensions(userInput);
 
@@ -132,9 +128,8 @@ export class FullyAIDrivenExtractor {
                 };
             }
 
-            // ✅ Fallback: Use standard garage dimension formula
             logger.info(`[AIExtractor] DimensionManager failed, using fallback formula`);
-            const width = (numCars * 6) + 8;  // e.g., 2 cars = (2 * 6) + 8 = 20
+            const width = (numCars * 6) + 8;
             const length = 20;
             const height = 10;
 
@@ -366,7 +361,6 @@ Return ONLY JSON:`;
 
         logger.debug(`[AIGarageExtractor] LLM response: "${response}"`);
 
-        // Parse JSON response
         const parsed = parseAIResponse(response);
 
         if (!parsed) {
@@ -379,7 +373,6 @@ Return ONLY JSON:`;
             carCount: parsed.carCount
         });
 
-        // ✅ Validate result
         if (parsed.found && typeof parsed.carCount === 'number' && parsed.carCount > 0 && parsed.carCount <= 20) {
             const garageType = `${parsed.carCount}-car`;
             logger.info(`[AIGarageExtractor] ✅ SUCCESS: garageType = "${garageType}", carCount = ${parsed.carCount}`);
@@ -404,7 +397,6 @@ Return ONLY JSON:`;
  */
 function parseAIResponse(response: string): any {
     try {
-        // Remove markdown formatting
         let cleaned = response
             .replace(/```json\s*/g, '')
             .replace(/```\s*/g, '')
@@ -412,7 +404,6 @@ function parseAIResponse(response: string): any {
 
         logger.debug(`[AIGarageExtractor] Cleaned response: "${cleaned}"`);
 
-        // Extract JSON object
         const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
             logger.warn(`[AIGarageExtractor] No JSON found in response`);
@@ -473,7 +464,6 @@ Return ONLY JSON array:`;
 
         logger.debug(`[AIMultiParamExtractor] LLM response: "${response}"`);
 
-        // Parse JSON response
         const parsed = parseMultiParamResponse(response);
 
         if (!parsed || !Array.isArray(parsed)) {
@@ -483,13 +473,11 @@ Return ONLY JSON array:`;
 
         logger.info(`[AIMultiParamExtractor] Parsed ${parsed.length} parameters:`, parsed);
 
-        // ✅ Filter and type-cast valid parameters
         const validParams: Array<{ field: keyof UserFriendlyParams; value: any }> = [];
 
         for (const param of parsed) {
             if (!param.found) continue;
 
-            // Validate based on field type
             if (param.field === 'garage_type') {
                 if (typeof param.value === 'string' && /^\d+-car$/.test(param.value)) {
                     validParams.push({
@@ -529,7 +517,6 @@ Return ONLY JSON array:`;
  */
 function parseMultiParamResponse(response: string): any {
     try {
-        // Remove markdown formatting
         let cleaned = response
             .replace(/```json\s*/g, '')
             .replace(/```\s*/g, '')
@@ -537,7 +524,6 @@ function parseMultiParamResponse(response: string): any {
 
         logger.debug(`[AIMultiParamExtractor] Cleaned response: "${cleaned}"`);
 
-        // Extract JSON array
         const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
             logger.warn(`[AIMultiParamExtractor] No JSON array found in response`);
@@ -563,7 +549,7 @@ export function calculateDimensionsFromCarCount(carCount: number): { width: numb
         return null;
     }
 
-    const width = (carCount * 6) + 8;   // 6ft per car + 8ft buffer
+    const width = (carCount * 6) + 8;
     const length = 20;
     const height = 10;
 
@@ -583,17 +569,14 @@ export async function detectParameterUpdateFromInput(
     logger.info(`[AIExtractor] Analyzing: "${input}" (context: ${currentField})`);
 
     try {
-        // ✅ PRIORITY 1: Check for MULTIPLE dimension updates FIRST
         const multiDimensionResult = await detectMultipleDimensionUpdates(input);
 
         if (multiDimensionResult && multiDimensionResult.length > 0) {
             logger.info(`[AIExtractor] ✅ Multiple dimensions detected (${multiDimensionResult.length}):`, multiDimensionResult);
 
-            // Return the first one
             const first = multiDimensionResult[0];
             logger.info(`[AIExtractor] Returning first: ${first.field} = ${first.value}`);
 
-            // Store the rest in global for later processing
             if (multiDimensionResult.length > 1) {
                 (global as any).__pendingMultiDimensions = multiDimensionResult.slice(1);
                 logger.info(`[AIExtractor] Stored ${multiDimensionResult.length - 1} pending updates:`,
@@ -603,7 +586,6 @@ export async function detectParameterUpdateFromInput(
             return first;
         }
 
-        // ✅ PRIORITY 2: Check for garage/car count update (using AI)
         logger.info(`[AIExtractor] Checking for garage type with AI...`);
         const garageResult = await extractGarageTypeWithAI(input);
 
@@ -617,14 +599,12 @@ export async function detectParameterUpdateFromInput(
 
         logger.info(`[AIExtractor] Checking for dimension updates (with typo tolerance)...`);
 
-// Try the new typo-tolerant extractor
         const typoResult = await extractDimensionWithTypoTolerance(input);
         if (typoResult) {
             logger.info(`[AIExtractor] ✅ Typo-tolerant detection: ${typoResult.field} = ${typoResult.value}`);
             return typoResult;
         }
 
-// Fallback to original patterns
         const dimensionPatterns: Array<{ regex: RegExp; field: keyof UserFriendlyParams }> = [
             { regex: /width\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'width' as keyof UserFriendlyParams },
             { regex: /length\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'length' as keyof UserFriendlyParams },
@@ -666,7 +646,6 @@ export async function extractDimensionWithTypoTolerance(
     try {
         logger.info(`[extractDimensionWithTypoTolerance] Analyzing: "${userInput}"`);
 
-        // ✅ Try pattern matching FIRST (fast path)
         const patterns = [
             { regex: /\b(?:widt?h?|w)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'width' as keyof UserFriendlyParams },
             { regex: /\b(?:lengt?h?|l)\s*[:=]?\s*(\d+(?:\.\d+)?)/i, field: 'length' as keyof UserFriendlyParams },
@@ -684,7 +663,6 @@ export async function extractDimensionWithTypoTolerance(
             }
         }
 
-        // ✅ AI fallback for EXTREME typos
         const prompt = `Extract a building dimension from user input with EXTREME typo tolerance.
 
 CRITICAL: User may have severe typos:
@@ -750,7 +728,6 @@ async function detectMultipleDimensionUpdates(
     try {
         logger.info(`[detectMultipleDimensionUpdates] Analyzing: "${input}"`);
 
-        // ✅ Pattern to match multiple dimension keywords
         const hasDimensionKeywords = /(?:width|length|height|w\s+|l\s+|h\s+).*(?:width|length|height|w\s+|l\s+|h\s+)/i.test(input);
 
         if (!hasDimensionKeywords) {
@@ -760,7 +737,6 @@ async function detectMultipleDimensionUpdates(
 
         const results: Array<{ field: keyof UserFriendlyParams; value: number }> = [];
 
-        // ✅ Extract ALL dimensions from input
         const patterns = [
             { regex: /width\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'width' as keyof UserFriendlyParams },
             { regex: /length\s*[:=]?\s*(\d+(?:\.\d+)?)/gi, field: 'length' as keyof UserFriendlyParams },
@@ -773,7 +749,6 @@ async function detectMultipleDimensionUpdates(
         const foundFields = new Set<string>();
 
         for (const pattern of patterns) {
-            // Reset regex lastIndex
             pattern.regex.lastIndex = 0;
 
             const match = pattern.regex.exec(input);

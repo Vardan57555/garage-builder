@@ -46,7 +46,6 @@ export class FuzzyChoiceMatcher {
         }
 
         try {
-            // Normalize choices to array of strings
             const choiceList = choices.map(c =>
                 typeof c === 'string' ? c : c.name || c.label || ''
             ).filter(c => c.length > 0);
@@ -291,20 +290,17 @@ ONLY JSON:`;
 
             const parsed = JSON.parse(jsonMatch[0]);
 
-            // Validate structure
             if (typeof parsed.matched !== 'boolean') {
                 logger.warn(`[FuzzyChoiceMatcher] Invalid matched:`, parsed);
                 return null;
             }
 
-            // Validate choice is in list or null
             if (parsed.choice && !choiceList.includes(parsed.choice)) {
                 logger.warn(`[FuzzyChoiceMatcher] Choice not in list:`, parsed.choice);
                 parsed.choice = null;
                 parsed.matched = false;
             }
 
-            // Validate confidence
             const validConfidences = ['high', 'medium', 'low'];
             if (!validConfidences.includes(parsed.confidence)) {
                 parsed.confidence = 'low';

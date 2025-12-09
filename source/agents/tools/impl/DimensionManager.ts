@@ -29,8 +29,6 @@ export class DimensionManager implements IDimensionManager {
 
         logger.info(`[DimensionManager] Parsing single labeled dimension: "${input}"`);
 
-        // ✅ CRITICAL: Check for EACH dimension label separately
-        // "make width 10" → width = 10
         const widthMatch = lowerInput.match(/\b(?:width|w)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         if (widthMatch) {
             const value = parseFloat(widthMatch[1]);
@@ -40,7 +38,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // "make length 10" → length = 10
         const lengthMatch = lowerInput.match(/\b(?:length|l|len)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         if (lengthMatch) {
             const value = parseFloat(lengthMatch[1]);
@@ -50,7 +47,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // "make height 10" → height = 10
         const heightMatch = lowerInput.match(/\b(?:height|h|tall|depth)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         if (heightMatch) {
             const value = parseFloat(heightMatch[1]);
@@ -71,8 +67,6 @@ export class DimensionManager implements IDimensionManager {
 
         const result: Partial<{ width: number; length: number; height: number }> = {};
 
-        // ✅ Extract WIDTH if present
-        // Patterns: "width 10", "w 10", "width: 10", "width=10"
         const widthMatch = lowerInput.match(/\b(?:width|w)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         if (widthMatch) {
             const value = parseFloat(widthMatch[1]);
@@ -82,8 +76,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // ✅ Extract LENGTH if present
-        // Patterns: "length 10", "l 10", "length: 10", "length=10"
         const lengthMatch = lowerInput.match(/\b(?:length|l|len)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         if (lengthMatch) {
             const value = parseFloat(lengthMatch[1]);
@@ -93,8 +85,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // ✅ Extract HEIGHT if present
-        // Patterns: "height 10", "h 10", "height: 10", "height=10", "tall 10", "depth 10"
         const heightMatch = lowerInput.match(/\b(?:height|h|tall|depth)\s*[:=]?\s*(\d+(?:\.\d+)?)\b/);
         if (heightMatch) {
             const value = parseFloat(heightMatch[1]);
@@ -104,7 +94,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // ✅ If we found at least ONE dimension, return it
         if (Object.keys(result).length > 0) {
             logger.info(`[DimensionManager] ✅ Multiple dimension extraction result:`, result);
             return result;
@@ -118,7 +107,6 @@ export class DimensionManager implements IDimensionManager {
         const lowerInput = input.toLowerCase();
         logger.info(`[DimensionManager] Input: "${input}"`);
 
-        // ✅ PRIORITY 0: Abbreviated format - "w 20 l 20 h 10"
         const abbreviatedPattern = /w\s*:?\s*(\d+)\s*l\s*:?\s*(\d+)\s*h\s*:?\s*(\d+)/i;
         const abbreviatedMatch = input.match(abbreviatedPattern);
 
@@ -137,7 +125,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // ✅ PRIORITY 1: Labeled format - "width 10 length 10 height 10"
         const labeledResult = this.tryLabeledDimensions(input);
         if (labeledResult) {
             logger.info(`[DimensionManager] ✅ Labeled format: ${JSON.stringify(labeledResult)}`);
@@ -153,28 +140,24 @@ export class DimensionManager implements IDimensionManager {
             };
         }
 
-        // ✅ PRIORITY 2: X format "20x30x10"
         const xFormatResult = this.tryExplicitDimensions(input);
         if (xFormatResult) {
             logger.info(`[DimensionManager] ✅ X format: ${JSON.stringify(xFormatResult)}`);
             return xFormatResult;
         }
 
-        // ✅ PRIORITY 3: Comma-separated "10, 10, 10"
         const commaResult = this.tryCommaSeparatedDimensions(input);
         if (commaResult) {
             logger.info(`[DimensionManager] ✅ Comma format: ${JSON.stringify(commaResult)}`);
             return commaResult;
         }
 
-        // ✅ PRIORITY 4: Space-separated "10 10 10"
         const spaceResult = this.trySpaceSeparatedDimensions(input);
         if (spaceResult) {
             logger.info(`[DimensionManager] ✅ Space format: ${JSON.stringify(spaceResult)}`);
             return spaceResult;
         }
 
-        // ✅ PRIORITY 5: Car count pattern - CALCULATE dimensions
         const carCountPattern = /\b(one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(car|cars?)\b/i;
         const carMatch = lowerInput.match(carCountPattern);
 
@@ -188,7 +171,6 @@ export class DimensionManager implements IDimensionManager {
             }
         }
 
-        // Fallback: Use existing calculator
         logger.info(`[DimensionManager] Using fallback calculator`);
         return DynamicGarageDimensionCalculator.calculateDimensionsFromInput(input);
     }
