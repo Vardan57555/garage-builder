@@ -31,7 +31,7 @@ export class WorkflowBuilder implements IWorkflowBuilder
             scheduler: "normal",
             width: 1024,
             height: 768,
-            negativePrompt: "blurry, low quality, distorted, deformed, ugly, bad anatomy, watermark, text, signature, cartoon, sketch, wrong dimensions, incorrect scale, oversized building, undersized building",
+            negativePrompt: "open doors, interior visible, glass panels, modern residential design, people, vehicles, wrong aspect ratio, distorted proportions, undersized, oversized, blurry, low quality",
             ...config,
         };
     }

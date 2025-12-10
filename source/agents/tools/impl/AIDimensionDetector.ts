@@ -319,7 +319,8 @@ ONLY JSON:`;
     }
 
     /**
-     * ✅ Batch detection: Extract multiple dimensions from single input
+     * ✅ CRITICAL FIX: Batch detection for "XxYxZ" format
+     * Properly extracts width, length, height from formats like "20x20x10" or "garage 20x20x10"
      */
     public async detectMultipleDimensions(userInput: string): Promise<Array<{ field: 'width' | 'length' | 'height'; value: number; confidence: 'high' | 'medium' | 'low'; }> | null>
     {
@@ -330,46 +331,80 @@ ONLY JSON:`;
         logger.info(`[AIDimensionDetector] Batch extraction from: "${userInput}"`);
 
         try {
-            const prompt = `Extract ALL building dimensions with context awareness.
+            const prompt = `Extract ALL building dimensions from user input. 
 
-⚠️ ABSOLUTE KEYWORD RULES:
-WIDTH: w, width, widt, widht, wid, wdth, wide
-LENGTH: l, length, lengt, leng, lenth, long
-HEIGHT: h, height, heigt, heipt, hight, hieght, tall, deep
+⚠️ CRITICAL PARSING RULES:
+1. Look for keywords: width, length, height (and typos like: widt, lengt, heigt)
+2. Extract the NUMBER that comes after each keyword
+3. Return ONLY dimensions that have BOTH keyword AND number
 
-CRITICAL DISTINCTIONS:
-  "heipt" and "heigt" patterns are HEIGHT (NOT width)
-  "lengt" and "leng" patterns are LENGTH (NOT width)
-  "widt" and "wid" patterns are WIDTH
-  "vert", "gren", "reg" are NOT dimensions (they are choice fields)
+⚠️ FORMAT EXAMPLES:
+✅ "width 10 length 10 height 10" → extract all 3
+✅ "w 10 l 10 h 10" → extract all 3
+✅ "widt 10 lengt 10 heigt 10" → extract all 3 (typos are OK)
+✅ "garage width 10 length 10 height 10" → extract all 3 (ignore "garage")
+✅ "20x20x10" → width:20, length:20, height:10 (X format)
+
+❌ DO NOT extract:
+- "10" alone (no dimension keyword)
+- "texas" (state name, not dimension)
+- Choice keywords like: "vert", "gren", "14", "reg"
+
+⚠️ CRITICAL RULE FOR XxYxZ FORMAT:
+If you see "20x20x10":
+- ALWAYS: width=20, length=20, height=10
+- NEVER: assign them all to one field!
 
 Return ONLY JSON array (no markdown):
 [
-  {"field": "width" | "length" | "height", "value": <number>, "confidence": "high" | "medium" | "low"}
+  {"field": "width", "value": 10, "confidence": "high"},
+  {"field": "length", "value": 10, "confidence": "high"},
+  {"field": "height", "value": 10, "confidence": "high"}
 ]
-
-Examples:
-- "heipt 12 widt 20" → [{"field": "height", "value": 12}, {"field": "width", "value": 20}]
-- "widt 20 lengt 30 heipt 15" → [{"field": "width", "value": 20}, {"field": "length", "value": 30}, {"field": "height", "value": 15}]
-- "20x30x15" → [{"field": "width", "value": 20}, {"field": "length", "value": 30}, {"field": "height", "value": 15}]
-- "just 20" → []
-- "vert" → [] (not dimension, it's roof_type choice)
-- "gren" → [] (not dimension, it's color choice)
 
 User input: "${userInput}"
 
-ONLY JSON:`;
+ONLY JSON ARRAY, nothing else:`;
 
             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const parsed = this.parseArrayResponse(response);
 
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                logger.info(`[AIDimensionDetector] ✅ Batch detected ${parsed.length} dimensions:`, parsed);
-                return parsed;
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+                logger.info(`[AIDimensionDetector] No dimensions detected`);
+                return null;
             }
 
-            logger.info(`[AIDimensionDetector] No batch dimensions detected`);
-            return null;
+            logger.info(`[AIDimensionDetector] ✅ Batch detected ${parsed.length} dimensions:`);
+            parsed.forEach((dim, index) => {
+                logger.info(`  [${index}] ${dim.field}: ${dim.value}ft (confidence: ${dim.confidence})`);
+            });
+
+            // ✅ VALIDATION: Ensure we have proper structure
+            const isValid = parsed.every(dim =>
+                ['width', 'length', 'height'].includes(dim.field) &&
+                typeof dim.value === 'number' &&
+                dim.value > 0 &&
+                dim.value <= 500
+            );
+
+            if (!isValid) {
+                logger.error(`[AIDimensionDetector] ❌ Invalid dimension data`);
+                return null;
+            }
+
+            // ✅ Check for duplicates
+            const fieldCounts: Record<string, number> = {};
+            parsed.forEach(dim => {
+                fieldCounts[dim.field] = (fieldCounts[dim.field] || 0) + 1;
+            });
+
+            const hasDuplicates = Object.values(fieldCounts).some(count => count > 1);
+            if (hasDuplicates) {
+                logger.error(`[AIDimensionDetector] ❌ Duplicate fields detected:`, fieldCounts);
+                return null;
+            }
+
+            return parsed;
         } catch (error) {
             logger.error(`[AIDimensionDetector] Batch detection error:`, error);
             return null;
@@ -421,15 +456,25 @@ ONLY JSON:`;
                 .replace(/```\s*/g, '')
                 .trim();
 
+            // ✅ Find JSON array
             const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
             if (!jsonMatch) {
-                logger.warn(`[AIDimensionDetector] No JSON array found`);
+                logger.warn(`[AIDimensionDetector] No JSON array found in response`);
+                logger.warn(`Response was: "${cleaned.substring(0, 200)}"`);
                 return [];
             }
 
-            return JSON.parse(jsonMatch[0]);
+            const parsed = JSON.parse(jsonMatch[0]);
+
+            if (!Array.isArray(parsed)) {
+                logger.error(`[AIDimensionDetector] Parsed result is not an array`);
+                return [];
+            }
+
+            logger.info(`[AIDimensionDetector] Successfully parsed ${parsed.length} dimensions from AI`);
+            return parsed;
         } catch (error) {
-            logger.error(`[AIDimensionDetector] Array parse error:`, error);
+            logger.error(`[AIDimensionDetector] Parse error:`, error);
             return [];
         }
     }
