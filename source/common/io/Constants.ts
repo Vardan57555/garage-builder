@@ -657,4 +657,12 @@ export class Constants
         PRICE_CALCULATION_FAILED: "❌ Failed to calculate price.",
         UNKNOWN_ERROR: (message: string) => `❌ Failed to calculate price: ${message}`,
     } as const;
+
+    static readonly NUMERIC_PATTERN = /^\d+$/;
+    static readonly MAX_STATE_LENGTH = 3;
+    static readonly DIMENSION_FIELDS = new Set(["width", "length", "height", "utility_length"]);
+    static readonly AI_RESPONSE_KEYWORDS = {
+        dimension: "dimension",
+        current: "current",
+    } as const;
 }

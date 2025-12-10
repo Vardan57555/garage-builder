@@ -79,8 +79,21 @@ export class LeadAgent
             const session = this.getOrCreateSession(sessionId);
             await session.memory.chatHistory.addUserMessage(input);
 
-            const garageResponse = await this.handleGarageIntent(session, sessionId, input);
-            if (garageResponse) return garageResponse;
+            const inputContext = this.analyzeInputContext(input, session.state.currentField);
+            logger.info(`[LeadAgent] Input context:`, {
+                isSimpleNumber: inputContext.isSimpleNumber,
+                currentField: session.state.currentField,
+                isChoiceField: inputContext.isChoiceField,
+                shouldSkipGarageDetection: inputContext.shouldSkipGarageDetection,
+            });
+
+            // ✅ NEW: Skip garage detection if in choice field mode
+            if (!inputContext.shouldSkipGarageDetection) {
+                const garageResponse = await this.handleGarageIntent(session, sessionId, input);
+                if (garageResponse) return garageResponse;
+            } else {
+                logger.info(`[LeadAgent] ⏭️ SKIPPING garage detection (in choice field mode with numeric input)`);
+            }
 
             const aiDimensionResponse = await this.handleAIDimensionDetection(session, sessionId, input);
             if (aiDimensionResponse) return aiDimensionResponse;
@@ -488,6 +501,34 @@ export class LeadAgent
         logger.info(`[LeadAgent] 🎯 In CHOICE field mode (${session.state.currentField})`);
 
         try {
+            const trimmedInput = input.trim().toLowerCase();
+            const isSimpleNumber = /^\d+$/.test(trimmedInput);
+
+            // ✅ CRITICAL FIX: Check for parameter updates BEFORE fuzzy matching
+            logger.info(`[LeadAgent] 🔍 Checking for parameter updates during choice field mode...`);
+
+            // Only skip parameter detection for simple numbers (choice selection)
+            if (!isSimpleNumber) {
+                logger.info(`[LeadAgent] Input is NOT a simple number, checking for parameter updates...`);
+
+                try {
+                    const paramDetector = ParameterUpdateDetector.getInstance();
+                    const paramUpdate = await paramDetector.detectParameterUpdate(input);
+
+                    if (paramUpdate.isUpdate && paramUpdate.field && paramUpdate.confidence !== "low") {
+                        logger.info(`[LeadAgent] ✅ PARAMETER UPDATE DETECTED DURING CHOICE MODE: ${paramUpdate.field} = ${paramUpdate.value} (confidence: ${paramUpdate.confidence})`);
+                        return await this.handleParameterUpdate(session, sessionId, paramUpdate, input);
+                    } else {
+                        logger.info(`[LeadAgent] ❌ No parameter update detected (confidence: ${paramUpdate.confidence})`);
+                    }
+                } catch (error) {
+                    logger.error(`[LeadAgent] Error detecting parameter update during choice field:`, error);
+                }
+            } else {
+                logger.info(`[LeadAgent] ⚠️ Input "${trimmedInput}" is a simple number, treating as choice selection`);
+            }
+
+            // ✅ Check for dimension updates during choice field mode
             logger.info(`[LeadAgent] 🔍 Checking for dimension updates during choice field mode...`);
 
             const dimensionDetection = await aiDimensionDetector.detectDimensionAwareOfContext(
@@ -496,6 +537,7 @@ export class LeadAgent
             );
 
             if (dimensionDetection.isDimension && dimensionDetection.confidence !== 'low') {
+                logger.info(`[LeadAgent] ✅ DIMENSION UPDATE DETECTED: ${dimensionDetection.field} = ${dimensionDetection.value}ft`);
                 const fieldKey = dimensionDetection.field as keyof UserFriendlyParams;
                 session.state.userFriendlyParams[fieldKey] = dimensionDetection.value;
 
@@ -507,6 +549,7 @@ export class LeadAgent
                 return fullResponse;
             }
 
+            // ✅ Check for color change after price calculated
             if (session.state.priceCalculated && session.state.currentField !== "color") {
                 logger.info(`[LeadAgent] 🎨 Price already calculated, checking for color change request...`);
                 try {
@@ -519,27 +562,9 @@ export class LeadAgent
                 }
             }
 
-            const trimmedInput = input.trim();
-            const isSimpleNumber = /^\d+$/.test(trimmedInput);
-            const isLikelyChoiceSelection = isSimpleNumber && parseInt(trimmedInput) >= 1 && parseInt(trimmedInput) <= 10;
-
-            if (isLikelyChoiceSelection) {
-                logger.info(`[LeadAgent] ⚠️ Input "${trimmedInput}" is a choice number, skipping parameter detection`);
-            } else {
-                logger.info(`[LeadAgent] 🔄 Checking for parameter updates during choice field mode...`);
-                try {
-                    const paramDetector = ParameterUpdateDetector.getInstance();
-                    const paramUpdate = await paramDetector.detectParameterUpdate(input);
-
-                    if (paramUpdate.isUpdate && paramUpdate.field && paramUpdate.confidence !== "low") {
-                        return await this.handleParameterUpdate(session, sessionId, paramUpdate, input);
-                    }
-                } catch (error) {
-                    logger.error(`[LeadAgent] Error detecting parameter update during choice field:`, error);
-                }
-            }
-
+            // ✅ Now do fuzzy matching for choice fields
             return await this.runFuzzyChoiceMatch(session, sessionId, input);
+
         } catch (error) {
             logger.error(`[LeadAgent] ERROR in choice field mode:`, error);
             session.state.currentField = null;
@@ -553,47 +578,57 @@ export class LeadAgent
     private async runFuzzyChoiceMatch(session: any, sessionId: string, input: string): Promise<string>
     {
         logger.info(`[LeadAgent] 🎯 NOW USING FUZZY MATCHER for field: ${session.state.currentField}`);
+        logger.info(`[LeadAgent] Input: "${input}"`);
 
         const currentField = session.state.currentField as keyof UserFriendlyParams;
         let choiceResult: any = null;
         let matchedValue: string | null = null;
 
         const choiceSuggestions: { [key: string]: string } = {
-            roof_type: "Choose: Vertical, Regular, or Box",
-            gauge: "Choose: 14 Gauge or 16 Gauge",
-            building_type: "Choose: Garage, Shed, Barn, or Workshop",
+            roof_type: "Try: Vertical, Regular, or Box",
+            gauge: "Try: 14 Gauge or 16 Gauge",
+            building_type: "Try: Garage, Shed, Barn, or Workshop",
         };
 
         switch (currentField) {
             case 'roof_type':
-                logger.info(`[LeadAgent] 🏠 Using fuzzyChoiceMatcher.matchRoofType("${input}")`);
+                logger.info(`[LeadAgent] 🏠 Matching roof type for input: "${input}"`);
                 choiceResult = await fuzzyChoiceMatcher.matchRoofType(input);
                 if (choiceResult.matched) {
                     matchedValue = choiceResult.roofType;
+                    logger.info(`[LeadAgent] ✅ Roof type matched: ${matchedValue} (confidence: ${choiceResult.confidence})`);
                     session.state.userFriendlyParams.roof_type = choiceResult.roofType;
+                } else {
+                    logger.warn(`[LeadAgent] ❌ Could not match roof type (confidence: ${choiceResult.confidence})`);
                 }
                 break;
 
             case 'gauge':
-                logger.info(`[LeadAgent] 📏 Using fuzzyChoiceMatcher.matchGauge("${input}")`);
+                logger.info(`[LeadAgent] 📏 Matching gauge for input: "${input}"`);
                 choiceResult = await fuzzyChoiceMatcher.matchGauge(input);
                 if (choiceResult.matched) {
                     matchedValue = choiceResult.gauge;
+                    logger.info(`[LeadAgent] ✅ Gauge matched: ${matchedValue} (confidence: ${choiceResult.confidence})`);
                     session.state.userFriendlyParams.gauge = choiceResult.gauge;
+                } else {
+                    logger.warn(`[LeadAgent] ❌ Could not match gauge (confidence: ${choiceResult.confidence})`);
                 }
                 break;
 
             case 'building_type':
-                logger.info(`[LeadAgent] 🏢 Using fuzzyChoiceMatcher.matchBuildingType("${input}")`);
+                logger.info(`[LeadAgent] 🏢 Matching building type for input: "${input}"`);
                 choiceResult = await fuzzyChoiceMatcher.matchBuildingType(input);
                 if (choiceResult.matched) {
                     matchedValue = choiceResult.buildingType;
+                    logger.info(`[LeadAgent] ✅ Building type matched: ${matchedValue} (confidence: ${choiceResult.confidence})`);
                     session.state.userFriendlyParams.building_type = choiceResult.buildingType;
+                } else {
+                    logger.warn(`[LeadAgent] ❌ Could not match building type (confidence: ${choiceResult.confidence})`);
                 }
                 break;
 
             case 'color':
-                logger.info(`[LeadAgent] 🎨 Using fuzzyChoiceMatcher.matchColor("${input}")`);
+                logger.info(`[LeadAgent] 🎨 Matching color for input: "${input}"`);
                 const allColors: ColorOption[] = await this.colorService.get();
 
                 if (!allColors || allColors.length === 0) {
@@ -799,6 +834,83 @@ export class LeadAgent
         }
 
         return null;
+    }
+
+    private analyzeInputContext(
+        input: string,
+        currentField: string | null | undefined
+    ): {
+        isSimpleNumber: boolean;
+        isChoiceField: boolean;
+        shouldSkipGarageDetection: boolean;
+        inputType: 'choice_selection' | 'garage_intent' | 'dimension' | 'unknown';
+    } {
+        const trimmedInput = input.trim();
+        const isSimpleNumber = /^\d+$/.test(trimmedInput);
+        const numValue = isSimpleNumber ? parseInt(trimmedInput, 10) : null;
+
+        // Choice fields that expect numbered selections
+        const choiceFields = new Set(['roof_type', 'gauge', 'building_type', 'color']);
+        const isChoiceField = currentField ? choiceFields.has(currentField) : false;
+
+        // Dimension fields
+        const dimensionFields = new Set(['width', 'length', 'height', 'utility_length']);
+        const isDimensionField = currentField ? dimensionFields.has(currentField) : false;
+
+        logger.info(`[LeadAgent] analyzeInputContext: "${trimmedInput}"`, {
+            isSimpleNumber,
+            currentField,
+            isChoiceField,
+            isDimensionField,
+            numValue,
+        });
+
+        // ✅ LOGIC 1: If currently asking for a CHOICE field with a simple number
+        // → Treat as choice selection (position in list)
+        if (isChoiceField && isSimpleNumber) {
+            logger.info(`[LeadAgent] Context: CHOICE FIELD - treating "${trimmedInput}" as position selection`);
+            return {
+                isSimpleNumber,
+                isChoiceField: true,
+                shouldSkipGarageDetection: true,
+                inputType: 'choice_selection',
+            };
+        }
+
+        // ✅ LOGIC 2: If currently asking for a DIMENSION field with a simple number
+        // → Treat as dimension value
+        if (isDimensionField && isSimpleNumber) {
+            logger.info(`[LeadAgent] Context: DIMENSION FIELD - treating "${trimmedInput}" as dimension value`);
+            return {
+                isSimpleNumber,
+                isChoiceField: false,
+                shouldSkipGarageDetection: true,
+                inputType: 'dimension',
+            };
+        }
+
+        // ✅ LOGIC 3: Initial flow (no current field) with a simple number
+        // → Could be garage intent (2-car, 3-car) OR a dimension
+        // → Let garage handler decide, but it needs EXPLICIT garage keywords
+        if (!currentField && isSimpleNumber) {
+            logger.info(`[LeadAgent] Context: INITIAL FLOW - "${trimmedInput}" could be garage (2-car, 3-car) or dimension`);
+            logger.info(`[LeadAgent] Will let garage handler process with strict validation`);
+            return {
+                isSimpleNumber,
+                isChoiceField: false,
+                shouldSkipGarageDetection: false, // Let garage handler validate
+                inputType: 'garage_intent',
+            };
+        }
+
+        // ✅ LOGIC 4: Non-numeric input
+        // → Can be text-based choice, garage mention, etc.
+        return {
+            isSimpleNumber: false,
+            isChoiceField: false,
+            shouldSkipGarageDetection: false,
+            inputType: 'unknown',
+        };
     }
 
     private async handleBatchDimensions(session: any, sessionId: string, input: string, context: string): Promise<string | null>

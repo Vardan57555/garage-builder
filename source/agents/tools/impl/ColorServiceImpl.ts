@@ -25,6 +25,7 @@ export class ColorServiceImpl implements ColorService
     private lowerInput: string;
     private static readonly DEFAULT_COLOR:string = "White";
     private static readonly COLORS_PER_CATEGORY = 5;
+    private categoryKeywordMap: Map<string, string> | null = null;
 
     constructor(enforce: () => void)
     {
@@ -116,7 +117,6 @@ export class ColorServiceImpl implements ColorService
             if (categoryList.length < limitPerCategory)
             {
                 categoryList.push(color);
-                logger.debug(`[ColorGrouper] Added "${color.name}" to ${category}`);
             }
         });
 
@@ -154,12 +154,7 @@ export class ColorServiceImpl implements ColorService
 
     public detect(userInput: string, colorOptions: ColorOption[]): ColorOption | null
     {
-        if (!ColorValidator.validateInput(userInput))
-        {
-            return null;
-        }
-
-        if (!ColorValidator.validateOptions(colorOptions))
+        if (!ColorValidator.validateInput(userInput) || !ColorValidator.validateOptions(colorOptions))
         {
             return null;
         }
@@ -225,12 +220,10 @@ export class ColorServiceImpl implements ColorService
      */
     public createErrorResponse(userFriendlyParams: Record<string, any>): ColorNodeResponse
     {
+        const params = { ...userFriendlyParams, color: ColorServiceImpl.DEFAULT_COLOR };
         return {
-            response: `Proceeding with default color (${ColorServiceImpl['DEFAULT_COLOR']}).`,
-            userFriendlyParams: {
-                ...userFriendlyParams,
-                color: ColorServiceImpl['DEFAULT_COLOR'],
-            },
+            response: `Proceeding with default color (${ColorServiceImpl.DEFAULT_COLOR}).`,
+            userFriendlyParams: params,
             nextStep: "calculate_price",
         };
     }
@@ -305,7 +298,6 @@ export class ColorServiceImpl implements ColorService
     {
         return (`${currentParams}\n\n` + colorMenu + instructions + `\nWhich color do you prefer?`);
     }
-
 
     /**
      * Transforms a single database row to ColorOption
@@ -519,6 +511,19 @@ export class ColorServiceImpl implements ColorService
         }
     }
 
+    private buildCategoryKeywordMap(): Map<string, string> {
+        if (this.categoryKeywordMap)
+        {
+            return this.categoryKeywordMap;
+        }
+
+        const map = new Map<string, string>();
+        Object.entries(Constants.COLOR_CATEGORIES).forEach(([category, keywords]) => {
+            keywords.forEach(kw => map.set(kw.toLowerCase(), category));
+        });
+        return (this.categoryKeywordMap = map);
+    }
+
     /**
      * Logs sample colors for debugging
      */
@@ -562,7 +567,7 @@ export class ColorServiceImpl implements ColorService
      */
     private prepareDisplayColors(allColors: ColorOption[]): Map<string, ColorOption[]>
     {
-        return this.group(allColors, ColorServiceImpl['COLORS_PER_CATEGORY']);
+        return this.group(allColors, ColorServiceImpl.COLORS_PER_CATEGORY);
     }
 
     /**
@@ -581,24 +586,22 @@ export class ColorServiceImpl implements ColorService
     /**
      * Attempts to find a matching category for color
      */
-    private  findMatchingCategory(color: ColorOption, grouped: Map<string, ColorOption[]>, limitPerCategory: number): string | null
+    private findMatchingCategory(color: ColorOption, grouped: Map<string, ColorOption[]>, limitPerCategory: number): string | null
     {
-        for (const [category, keywords] of Object.entries(Constants.COLOR_CATEGORIES))
+        const keywordMap = this.buildCategoryKeywordMap();
+        const colorNameLower = color.name.toLowerCase();
+
+        for (const [keyword, category] of keywordMap)
         {
-            const categoryList: ColorOption[] = grouped.get(category)!;
-
-            if (categoryList.length >= limitPerCategory) {
-                continue;
-            }
-
-            const matches: boolean = keywords.some(kw => color.name.toLowerCase().includes(kw.toLowerCase()));
-
-            if (matches)
+            if (colorNameLower.includes(keyword))
             {
-                return category;
+                const list = grouped.get(category)!;
+                if (list.length < limitPerCategory)
+                {
+                    return category;
+                }
             }
         }
-
         return null;
     }
 

@@ -26,16 +26,8 @@ export class AIDimensionDetector {
      * ✅ Context-aware detection using AI reasoning
      * Understands what field is expected and avoids false positives
      */
-    public async detectDimensionAwareOfContext(
-        userInput: string,
-        expectedField: keyof UserFriendlyParams | null
-    ): Promise<{
-        isDimension: boolean;
-        field?: keyof UserFriendlyParams;
-        value?: number;
-        confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
+    public async detectDimensionAwareOfContext(userInput: string, expectedField: keyof UserFriendlyParams | null): Promise<{ isDimension: boolean; field?: keyof UserFriendlyParams; value?: number; confidence: 'high' | 'medium' | 'low'; reasoning: string; }>
+    {
         logger.info(`[AIDimensionDetector] Context-aware check - Expected field: ${expectedField}`);
         logger.info(`[AIDimensionDetector] User input: "${userInput}"`);
 
@@ -269,11 +261,8 @@ ONLY JSON:`;
     /**
      * Get context information about a field
      */
-    private getFieldContext(fieldName: keyof UserFriendlyParams | null): {
-        type: string;
-        description: string;
-        expectedValues: string[];
-    } {
+    private getFieldContext(fieldName: keyof UserFriendlyParams | null): { type: string; description: string; expectedValues: string[]; }
+    {
         const contexts: Record<string, any> = {
             roof_type: {
                 type: 'CHOICE FIELD',
@@ -332,11 +321,8 @@ ONLY JSON:`;
     /**
      * ✅ Batch detection: Extract multiple dimensions from single input
      */
-    public async detectMultipleDimensions(userInput: string): Promise<Array<{
-        field: 'width' | 'length' | 'height';
-        value: number;
-        confidence: 'high' | 'medium' | 'low';
-    }> | null> {
+    public async detectMultipleDimensions(userInput: string): Promise<Array<{ field: 'width' | 'length' | 'height'; value: number; confidence: 'high' | 'medium' | 'low'; }> | null>
+    {
         if (!userInput?.trim()) {
             return null;
         }
