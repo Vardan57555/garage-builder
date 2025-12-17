@@ -1,6 +1,38 @@
+# ---------- ABSOLUTE RULE: IGNORE EVERYTHING ----------
+**
+
+# ---------- ALLOW ONLY BACKEND FILES ----------
+!Dockerfile
+!docker-compose.yml
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.json
+!eslint.config.mjs
+!biome.json
+
+!source/**
+!scripts/**
+!sequelize/**
+
+# ---------- ALLOW CONFIG ----------
+!.env
+!.env.example
+
+# ---------- NEVER SEND THESE ----------
+node_modules
+build
+dist
+client
+Comfy
+ComfyUI
+garage-image-service
+documentation
+tests
+
+*.sql
+*.zip
+*.log
 .DS_Store
-build/**/.DS_Store
-client/.DS_Store
-source/**/.DS_Store
-scripts/.DS_Store
-sequelize/.DS_Store
+.git
+.idea
