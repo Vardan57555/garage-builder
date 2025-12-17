@@ -8,7 +8,7 @@ const logger: pino.Logger = createLogger(module);
 
 /**
  * Builds and manages ComfyUI workflows
- * ✅ FIXED: Calculates proper pixel dimensions from building dimensions
+ * ✅ FIXED: Enhanced negative prompts for closed door exteriors
  */
 export class WorkflowBuilder implements IWorkflowBuilder
 {
@@ -25,13 +25,14 @@ export class WorkflowBuilder implements IWorkflowBuilder
 
         this.config = {
             model: "sd_xl_base_1.0.safetensors",
-            steps: 20,
-            cfg: 7.5,
-            sampler: "euler",
-            scheduler: "normal",
+            steps: 25,  // ✅ Increased for better detail
+            cfg: 8.0,   // ✅ Higher guidance for better prompt adherence
+            sampler: "dpmpp_2m",  // ✅ Better sampler for architectural detail
+            scheduler: "karras",   // ✅ Better scheduler for quality
             width: 1024,
             height: 768,
-            negativePrompt: "open doors, interior visible, glass panels, modern residential design, people, vehicles, wrong aspect ratio, distorted proportions, undersized, oversized, blurry, low quality",
+            // ✅ ENHANCED: Much stronger negative prompt for flat views
+            negativePrompt: "flat front-only view, straight-on frontal shot, no side wall visible, single-plane composition, flat elevation view, no depth, no three-dimensional form, open doors, ajar doors, partially open doors, door ajar, open garage door, lifted garage door, interior visible, interior view, dark interior, inside view, looking through doorway, people inside, vehicles inside, transparent doors, glass doors, windows in doors, bright interior lighting, interior space visible, gaping entrance, open access point, looking into building, wrong aspect ratio, distorted proportions, stretched dimensions, undersized, oversized, blurry, low quality, poorly rendered, asymmetrical doors, crooked structure, modern residential design, people in scene, vehicles visible, cars visible, trucks visible",
             ...config,
         };
     }
@@ -47,7 +48,7 @@ export class WorkflowBuilder implements IWorkflowBuilder
     }
 
     /**
-     * ✅ CRITICAL: Calculate pixel dimensions that match building aspect ratio
+     * ✅ Calculate pixel dimensions that match building aspect ratio
      */
     private calculateOptimalDimensions(
         buildingWidth: number,
@@ -67,20 +68,28 @@ export class WorkflowBuilder implements IWorkflowBuilder
         let pixelWidth: number;
         let pixelHeight: number;
 
+        // ✅ FIX: Use LANDSCAPE orientation for garages (front view wider than deep)
+        // Building width = front facade = image width
+        // Building length = depth = image height
         if (aspectRatio > 1.1) {
+            // Wide building (e.g., 30x20) -> landscape image
             pixelWidth = basePixelSize;
             pixelHeight = Math.round(basePixelSize / aspectRatio);
         } else if (aspectRatio < 0.9) {
+            // Tall building (e.g., 20x30) -> portrait image
             pixelHeight = basePixelSize;
             pixelWidth = Math.round(basePixelSize * aspectRatio);
         } else {
+            // Square building -> square image
             pixelWidth = basePixelSize;
             pixelHeight = basePixelSize;
         }
 
+        // Round to nearest 64 (SDXL requirement)
         pixelWidth = Math.round(pixelWidth / 64) * 64;
         pixelHeight = Math.round(pixelHeight / 64) * 64;
 
+        // Clamp to safe ranges
         pixelWidth = Math.max(512, Math.min(1536, pixelWidth));
         pixelHeight = Math.max(512, Math.min(1536, pixelHeight));
 
@@ -93,13 +102,14 @@ export class WorkflowBuilder implements IWorkflowBuilder
             resultAspectRatio,
             buildingAspectRatio,
             aspectRatioMatch: Math.abs(aspectRatio - (pixelWidth / pixelHeight)) < 0.1,
+            orientation: pixelWidth > pixelHeight ? 'landscape' : pixelWidth < pixelHeight ? 'portrait' : 'square'
         });
 
         return { width: pixelWidth, height: pixelHeight };
     }
 
     /**
-     * ✅ OVERLOADED: New signature with building dimensions
+     * ✅ Build workflow with proper dimensions and negative prompts
      */
     public buildGarageWorkflow(
         prompt: string,
@@ -113,6 +123,7 @@ export class WorkflowBuilder implements IWorkflowBuilder
         let pixelHeight: number;
         let seed: number = -1;
 
+        // Determine if we're using building dimensions or pixel dimensions
         if (widthOrBuildingWidth < 512 && heightOrBuildingLength < 512) {
             logger.info(`[WorkflowBuilder] Using NEW signature with building dimensions`);
 
