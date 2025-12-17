@@ -1,4 +1,4 @@
-"""Streamlit chat UI - Enhanced with proper tab isolation."""
+"""Streamlit chat UI - Enhanced with proper tab isolation and email sharing."""
 
 import os
 import json
@@ -7,6 +7,9 @@ import random
 from typing import Any, Optional, Tuple
 import re
 import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 import httpx
 import streamlit as st
@@ -14,6 +17,12 @@ import streamlit as st
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "600.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))
+
+# Email configuration
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+EMAIL_SENDER = os.getenv("EMAIL_SENDER", "")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
 
 INITIAL_GREETINGS = [
     "Hi! Ask me about garage builds or pricing.",
@@ -156,6 +165,75 @@ def test_backend_health() -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Backend check failed: {str(e)}"
 
+def send_email(recipient_email: str, phone: str, full_name: str, conversation_history: str) -> Tuple[bool, str]:
+    """Send email with conversation history."""
+    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+        return False, "Email configuration not set. Please contact administrator."
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = recipient_email
+        msg['Subject'] = f"Garage Builder Chat - Conversation History"
+
+        # Create email body
+        email_body = f"""
+Hello {full_name},
+
+Thank you for using Garage Builder Assistant!
+
+Contact Information:
+- Name: {full_name}
+- Email: {recipient_email}
+- Phone: {phone}
+
+Below is your conversation history:
+
+{conversation_history}
+
+---
+Best regards,
+Garage Builder Team
+"""
+
+        msg.attach(MIMEText(email_body, 'plain'))
+
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        text = msg.as_string()
+        server.sendmail(EMAIL_SENDER, recipient_email, text)
+        server.quit()
+
+        return True, "Email sent successfully!"
+    except Exception as e:
+        return False, f"Failed to send email: {str(e)}"
+
+def get_conversation_history() -> str:
+    """Format conversation history for email/export."""
+    history_lines = []
+    history_lines.append("=" * 60)
+    history_lines.append("CONVERSATION HISTORY")
+    history_lines.append("=" * 60)
+    history_lines.append(f"Session ID: {st.session_state[SESSION_STATE_KEY] or 'Not started'}")
+    history_lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    history_lines.append("=" * 60)
+    history_lines.append("")
+
+    for i, msg in enumerate(st.session_state[MESSAGES_STATE_KEY], 1):
+        role = msg["role"].upper()
+        content = msg["content"]
+        # Remove SVG tags for email
+        content = re.sub(r'<svg[^>]*>.*?</svg>', '[Image/Diagram]', content, flags=re.DOTALL)
+
+        history_lines.append(f"[{role}]")
+        history_lines.append(content)
+        history_lines.append("")
+        history_lines.append("-" * 60)
+        history_lines.append("")
+
+    return "\n".join(history_lines)
+
 # Initialize session state - NOW PER TAB
 if SESSION_STATE_KEY not in st.session_state:
     st.session_state[SESSION_STATE_KEY] = None
@@ -168,7 +246,24 @@ if MESSAGES_STATE_KEY not in st.session_state:
 if "last_error" not in st.session_state:
     st.session_state.last_error = None
 
-st.title("🏗️ Garage Builder Chat")
+if "show_share_popup" not in st.session_state:
+    st.session_state.show_share_popup = False
+
+if "popup_triggered" not in st.session_state:
+    st.session_state.popup_triggered = False
+
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
+
+# Title with email button in top right
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("🏗️ Garage Builder Chat")
+with col2:
+    st.write("")  # Spacer for alignment
+    if st.button("📧 Share Chat", key="share_conversation_top", use_container_width=True, type="primary"):
+        st.session_state.show_share_popup = True
+        st.session_state.popup_triggered = True  # Add flag to track button click
 
 # Sidebar with diagnostics
 with st.sidebar:
@@ -226,6 +321,61 @@ with st.sidebar:
         with st.expander("View Details"):
             st.code(st.session_state.last_error)
 
+# Email Share Popup (Dialog) - Only show if explicitly triggered
+if st.session_state.show_share_popup and st.session_state.get("popup_triggered", False):
+    @st.dialog("📧 Share Conversation History")
+    def share_popup():
+        st.write("Enter your contact information to receive the conversation history via email.")
+
+        with st.form("share_form"):
+            full_name = st.text_input("Full Name *", placeholder="John Doe")
+            email = st.text_input("Email Address *", placeholder="john@example.com")
+            phone = st.text_input("Phone Number *", placeholder="+1 234 567 8900")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                submit = st.form_submit_button("📨 Send Email", use_container_width=True)
+            with col2:
+                cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
+
+            if cancel:
+                st.session_state.show_share_popup = False
+                st.session_state.popup_triggered = False
+                st.rerun()
+
+            if submit:
+                # Validation
+                if not full_name or not email or not phone:
+                    st.error("⚠️ Please fill in all required fields.")
+                    return
+
+                # Basic email validation
+                if "@" not in email or "." not in email:
+                    st.error("⚠️ Please enter a valid email address.")
+                    return
+
+                # Get conversation history
+                conversation_history = get_conversation_history()
+
+                # Send email
+                with st.spinner("Sending email..."):
+                    success, message = send_email(email, phone, full_name, conversation_history)
+
+                if success:
+                    st.success(f"✅ {message}")
+                    st.balloons()
+                    time.sleep(2)
+                    st.session_state.show_share_popup = False
+                    st.session_state.popup_triggered = False
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
+
+    share_popup()
+    # Reset the trigger flag after showing popup
+    st.session_state.popup_triggered = False
+
 # Display conversation
 for msg in st.session_state[MESSAGES_STATE_KEY]:
     with st.chat_message(msg["role"]):
@@ -238,8 +388,16 @@ for msg in st.session_state[MESSAGES_STATE_KEY]:
         if svg:
             st.write(svg, unsafe_allow_html=True)
 
+# Show processing indicator if AI is thinking
+if st.session_state.is_processing:
+    with st.chat_message("assistant"):
+        st.markdown("🤖 *Please wait, processing your request...*")
+
 # Get user input
-if prompt := st.chat_input("Type your question…"):
+if prompt := st.chat_input("Type your question…", disabled=st.session_state.is_processing):
+    # Set processing flag to true
+    st.session_state.is_processing = True
+
     st.session_state[MESSAGES_STATE_KEY].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -315,3 +473,7 @@ if prompt := st.chat_input("Type your question…"):
                     st.write(svg, unsafe_allow_html=True)
 
             st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
+
+        # Reset processing flag after response is complete
+        st.session_state.is_processing = False
+        st.rerun()

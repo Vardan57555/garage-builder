@@ -81,6 +81,11 @@ export class LeadAgent
             const session = this.getOrCreateSession(sessionId);
             await session.memory.chatHistory.addUserMessage(input);
 
+            if (session.state._pendingCustomizationDecision) {
+                logger.info(`[LeadAgent] ⏳ Waiting for customization decision`);
+                return await this.handleCustomizationDecision(session, sessionId, input);
+            }
+
             const inputContext = this.analyzeInputContext(input, session.state.currentField);
             logger.info(`[LeadAgent] Input context:`, {
                 isSimpleNumber: inputContext.isSimpleNumber,
@@ -89,15 +94,38 @@ export class LeadAgent
                 shouldSkipGarageDetection: inputContext.shouldSkipGarageDetection,
             });
 
-            // ✅ NEW: Skip garage detection if in choice field mode
             if (!inputContext.shouldSkipGarageDetection) {
                 const garageResponse = await this.handleGarageIntent(session, sessionId, input);
-                if (garageResponse) return garageResponse;
-            } else {
-                logger.info(`[LeadAgent] ⏭️ SKIPPING garage detection (in choice field mode with numeric input)`);
+                if (garageResponse) {
+                    // ✅ NEW: After successful garage intent, check if we have all dimensions
+                    const hasAllDimensions = session.state.userFriendlyParams.width &&
+                        session.state.userFriendlyParams.length &&
+                        session.state.userFriendlyParams.height;
+
+                    if (hasAllDimensions && !session.state._pendingCustomizationDecision) {
+                        logger.info(`[LeadAgent] ✅ All dimensions obtained, asking about customization`);
+                        return await this.handlePostGarageIntent(session, sessionId, input);
+                    }
+
+                    return garageResponse;
+                }
             }
 
             const aiDimensionResponse = await this.handleAIDimensionDetection(session, sessionId, input);
+
+            if (aiDimensionResponse) {
+                const hasAllDimensions = session.state.userFriendlyParams.width &&
+                    session.state.userFriendlyParams.length &&
+                    session.state.userFriendlyParams.height;
+
+                if (hasAllDimensions && !session.state._pendingCustomizationDecision) {
+                    logger.info(`[LeadAgent] ✅ All dimensions obtained via AI, asking about customization`);
+                    return await this.handlePostGarageIntent(session, sessionId, input);
+                }
+
+                return aiDimensionResponse;
+            }
+
             if (aiDimensionResponse) return aiDimensionResponse;
 
             const dimensionState = this.checkDimensionState(session);
@@ -885,6 +913,187 @@ If you cannot confidently detect a building type, return null for detectedType.`
         } catch (error) {
             logger.error(`[LeadAgent] Parse error in detection response:`, error);
             return null;
+        }
+    }
+
+    private async handlePostGarageIntent(session: any, sessionId: string, input: string): Promise<string> {
+        logger.info(`[LeadAgent] 🎯 POST-GARAGE INTENT: Asking about parameter customization`);
+
+        try {
+            const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+
+            logger.info(`[LeadAgent] Current params:`, {
+                width: session.state.userFriendlyParams.width,
+                length: session.state.userFriendlyParams.length,
+                height: session.state.userFriendlyParams.height,
+                state_name: session.state.userFriendlyParams.state_name,
+                roof_type: session.state.userFriendlyParams.roof_type,
+                gauge: session.state.userFriendlyParams.gauge,
+                building_type: session.state.userFriendlyParams.building_type,
+            });
+
+            logger.info(`[LeadAgent] Missing fields:`, missingFields);
+
+            // ✅ Check if user wants to customize
+            const customizationPrompt = `
+🏗️ Great! I have your garage dimensions: ${session.state.userFriendlyParams.width}ft × ${session.state.userFriendlyParams.length}ft × ${session.state.userFriendlyParams.height}ft tall
+
+Would you like to customize other specifications, or should I generate a quote with defaults?
+
+📋 **Optional customizations:**
+• 📍 **State** (for local pricing)
+• 🏠 **Roof type** (Vertical, Regular, or Box)
+• 📏 **Gauge** (14 or 16)
+• 🏢 **Building type** (Garage, Shed, Barn, or Workshop)
+
+Just say:
+• **"customize"** or **"yes"** → I'll ask about each option
+• **"skip"** or **"no"** → I'll generate your quote now with defaults
+        `;
+
+            const response = customizationPrompt.trim();
+            await session.memory.chatHistory.addAIChatMessage(response);
+
+            // ✅ Store state indicating we're waiting for customization decision
+            session.state._pendingCustomizationDecision = true;
+            session.state.currentField = null;
+
+            return response;
+
+        } catch (error) {
+            logger.error(`[LeadAgent] Error in post-garage intent:`, error);
+            return `❌ Error processing request. Please try again.`;
+        }
+    }
+
+    private async handleCustomizationDecision(session: any, sessionId: string, input: string): Promise<string> {
+        logger.info(`[LeadAgent] 🤔 Handling customization decision: "${input}"`);
+
+        try {
+            const userInputLower = input.toLowerCase().trim();
+
+            // Check if user wants to customize
+            const skipResult = await fuzzyMatcher.isSkipIntent(userInputLower);
+            const wantsToCustomize = !skipResult.isSkip || skipResult.confidence === 'low';
+
+            logger.info(`[LeadAgent] Skip intent detected: ${skipResult.isSkip} (confidence: ${skipResult.confidence})`);
+            logger.info(`[LeadAgent] User wants to customize: ${wantsToCustomize}`);
+
+            session.state._pendingCustomizationDecision = false;
+
+            if (!wantsToCustomize) {
+                // ✅ USER DECLINED: Generate image with default parameters
+                logger.info(`[LeadAgent] ✅ User declined customization - generating with DEFAULTS`);
+                return await this.generateQuoteWithDefaults(session, sessionId);
+            }
+
+            // ✅ USER ACCEPTED: Ask for first missing parameter
+            logger.info(`[LeadAgent] ✅ User wants to customize - collecting parameters`);
+
+            const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+
+            if (missingFields.length === 0) {
+                logger.info(`[LeadAgent] All fields complete, calculating price`);
+                return await this.calculatePriceAfterUpdate(session, sessionId);
+            }
+
+            const nextField = missingFields[0];
+            session.state.currentField = nextField as keyof UserFriendlyParams;
+
+            logger.info(`[LeadAgent] Asking for field: ${nextField}`);
+
+            const fieldResult = await this.createFieldResult(
+                session,
+                sessionId,
+                nextField as keyof UserFriendlyParams
+            );
+
+            const response = `Got it! Let me collect some details to optimize your quote.\n\n${fieldResult.response}`;
+            await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+
+            return response;
+
+        } catch (error) {
+            logger.error(`[LeadAgent] Error handling customization decision:`, error);
+            return `❌ Error processing your response. Please say "customize" or "skip"`;
+        }
+    }
+
+    private async generateQuoteWithDefaults(session: any, sessionId: string): Promise<string> {
+        logger.info(`[LeadAgent] 🎨 Generating quote with DEFAULT parameters - NO ADDONS MENU`);
+
+        try {
+            // ✅ Set defaults for missing parameters
+            const defaults = {
+                state_name: "Default", // Or any default state
+                roof_type: "Regular",  // Default roof type
+                gauge: "16 Gauge",     // Default gauge
+                building_type: session.state.userFriendlyParams.building_type || "Garage", // Keep detected building type
+                color: "White",        // Default color
+            };
+
+            // ✅ Apply defaults to params
+            session.state.userFriendlyParams = {
+                ...session.state.userFriendlyParams,
+                ...defaults,
+            };
+
+            logger.info(`[LeadAgent] Applied defaults:`, defaults);
+            logger.info(`[LeadAgent] Final params:`, session.state.userFriendlyParams);
+
+            // ✅ Calculate price directly
+            const priceResult = await calculatePriceNode({
+                sessionId,
+                messages: await session.memory.chatHistory.getMessages(),
+                userFriendlyParams: session.state.userFriendlyParams as Partial<UserFriendlyParams>,
+                hasGarageIntent: true,
+                priceCalculated: false,
+                currentField: null,
+                validationError: null,
+                response: "",
+                nextStep: null,
+                stateMapCache: session.stateMapCache || new Map(),
+                roofMapCache: session.roofMapCache || new Map(),
+                pendingUpdates: [],
+                pricingData: null,
+                basePrice: 0,
+                selectedAddons: [],
+                finalPrice: 0,
+                color: "White",
+                colorCost: 0,
+                generatedImageUrl: "",
+                _pendingConfirmation: null,
+            });
+
+            this.updateSessionWithPrice(session, priceResult, "White");
+
+            // ✅ NO ADDONS MENU - Go directly to visualization with empty addons
+            const finalTotal = this.calculateAndLogFinalPrice(session, []);
+            const visualizationState = await this.createVisualizationState(
+                session,
+                sessionId,
+                [], // No addons selected
+                finalTotal
+            );
+
+            logger.info(`[LeadAgent] 🎨 GENERATING IMAGE with defaults: Final=${finalTotal}`);
+
+            const visualizationResult = await generateGarageVisualizationNode(visualizationState);
+
+            const response = `✅ Using default settings:\n- Roof: Regular\n- Gauge: 16\n- Color: White\n\n${priceResult.response}\n\n${visualizationResult.response}`;
+
+            await session.memory.chatHistory.addAIChatMessage(response);
+
+            session.state.priceCalculated = true;
+            session.state.finalPrice = finalTotal;
+            session.state.selectedAddons = [];
+            session.state.generatedImageUrl = visualizationResult.generatedImageUrl || "";
+
+            return response;
+
+        } catch (error) {
+            logger.error(`[LeadAgent] Error generating quote with defaults:`, error);
+            return `❌ Error calculating price. Please try again or specify parameters.`;
         }
     }
 
