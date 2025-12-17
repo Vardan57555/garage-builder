@@ -63,5 +63,6 @@ npm-debug.log*
 node_modules/
 build/
 apidocs/
+coverage/
 public
 .vscode
