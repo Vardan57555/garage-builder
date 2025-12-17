@@ -81,6 +81,7 @@ export class LeadAgent
             const session = this.getOrCreateSession(sessionId);
             await session.memory.chatHistory.addUserMessage(input);
 
+            // ✅ PRIORITY 1: Check for pending customization decision FIRST
             if (session.state._pendingCustomizationDecision) {
                 logger.info(`[LeadAgent] ⏳ Waiting for customization decision`);
                 return await this.handleCustomizationDecision(session, sessionId, input);
@@ -94,23 +95,57 @@ export class LeadAgent
                 shouldSkipGarageDetection: inputContext.shouldSkipGarageDetection,
             });
 
+            // ✅ STEP 1: FAST REGEX BATCH DETECTION (instant, <1ms, no AI)
+            if (!inputContext.shouldSkipGarageDetection && !session.state.currentField) {
+                logger.info(`[LeadAgent] 🔍 STEP 1: Attempting FAST regex batch dimension detection...`);
+                const batchDimensions = await this.detectBatchDimensionsRegexOnly(input);
+
+                if (batchDimensions && batchDimensions.width && batchDimensions.length && batchDimensions.height) {
+                    logger.info(`[LeadAgent] ✅ REGEX BATCH DIMENSIONS DETECTED: ${batchDimensions.width}×${batchDimensions.length}×${batchDimensions.height}`);
+
+                    session.state.userFriendlyParams.width = batchDimensions.width;
+                    session.state.userFriendlyParams.length = batchDimensions.length;
+                    session.state.userFriendlyParams.height = batchDimensions.height;
+                    session.state.hasGarageIntent = true;
+
+                    const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
+                    await session.memory.chatHistory.addAIChatMessage(response);
+
+                    // ✅ Auto-detect building_type
+                    const detectedBuildingType = await this.detectBuildingTypeFromInput(input);
+                    if (detectedBuildingType) {
+                        logger.info(`[LeadAgent] ✅ Auto-detected building_type: ${detectedBuildingType}`);
+                        session.state.userFriendlyParams.building_type = detectedBuildingType;
+                    }
+
+                    // ✅ Ask about customization
+                    return await this.handlePostGarageIntent(session, sessionId, input);
+                }
+                logger.info(`[LeadAgent] ❌ Regex batch detection failed, continuing to STEP 2...`);
+            }
+
+            // ✅ STEP 2: GARAGE HANDLER (for "2-car", "3-car", "for two cars", etc.)
             if (!inputContext.shouldSkipGarageDetection) {
+                logger.info(`[LeadAgent] 🔍 STEP 2: Checking garage intent (2-car, 3-car, etc.)...`);
                 const garageResponse = await this.handleGarageIntent(session, sessionId, input);
                 if (garageResponse) {
-                    // ✅ NEW: After successful garage intent, check if we have all dimensions
+                    // ✅ Check if we have all dimensions after garage intent
                     const hasAllDimensions = session.state.userFriendlyParams.width &&
                         session.state.userFriendlyParams.length &&
                         session.state.userFriendlyParams.height;
 
                     if (hasAllDimensions && !session.state._pendingCustomizationDecision) {
-                        logger.info(`[LeadAgent] ✅ All dimensions obtained, asking about customization`);
+                        logger.info(`[LeadAgent] ✅ All dimensions obtained from garage intent, asking about customization`);
                         return await this.handlePostGarageIntent(session, sessionId, input);
                     }
 
                     return garageResponse;
                 }
+                logger.info(`[LeadAgent] ❌ Garage intent not detected, continuing to STEP 3...`);
             }
 
+            // ✅ STEP 3: AI DIMENSION DETECTION (SLOW, 30s timeout, last resort)
+            logger.info(`[LeadAgent] 🔍 STEP 3: AI dimension detection (fallback with 30s timeout)...`);
             const aiDimensionResponse = await this.handleAIDimensionDetection(session, sessionId, input);
 
             if (aiDimensionResponse) {
@@ -126,23 +161,26 @@ export class LeadAgent
                 return aiDimensionResponse;
             }
 
-            if (aiDimensionResponse) return aiDimensionResponse;
-
+            // ✅ Check dimension state for field-specific handling
             const dimensionState = this.checkDimensionState(session);
 
+            // ✅ Handle dimension field mode (asking for specific dimension)
             if (dimensionState.isInDimensionFieldMode) {
                 return await this.runDimensionFieldMode(session, sessionId, input);
             }
 
+            // ✅ Handle choice field mode (roof_type, gauge, building_type, color)
             if (dimensionState.isInChoiceFieldMode) {
                 return await this.runChoiceFieldMode(session, sessionId, input);
             }
 
+            // ✅ Try batch dimensions while in dimension field mode
             if (dimensionState.isInDimensionFieldMode) {
                 const batchResponse = await this.handleBatchDimensions(session, sessionId, input, "in-field");
                 if (batchResponse) return batchResponse;
             }
 
+            // ✅ Try batch dimensions if no dimensions yet and not in field mode
             if (!dimensionState.hasDimensions && !session.state.currentField) {
                 const batchResponse = await this.handleBatchDimensions(session, sessionId, input, "explicit");
                 if (batchResponse) return batchResponse;
@@ -150,23 +188,28 @@ export class LeadAgent
                 logger.info(`[LeadAgent] ✅ Dimensions already complete, SKIPPING batch detection`);
             }
 
+            // ✅ Handle reset intent
             if (IntentDetector.detectReset(input)) {
                 return await this.handleReset(session, sessionId, input);
             }
 
+            // ✅ Final batch dimension check
             const batchResponse = await this.handleBatchDimensions(session, sessionId, input, "main");
             if (batchResponse) return batchResponse;
 
+            // ✅ Handle color selection phase
             if (session.state.currentField === "color" && !session.state.color && !session.state.priceCalculated) {
                 return await this.runColorPhase(session, sessionId, input);
             }
 
+            // ✅ Handle post-price phase (addon selection, parameter updates)
             if (session.state.priceCalculated) {
                 return await this.runPostPricePhase(session, sessionId, input);
             }
 
             logger.info(`[LeadAgent] INITIAL QUOTE FLOW - priceCalculated: false`);
 
+            // ✅ Check for parameter updates
             const shouldSkipGarageDetection = await this.shouldSkipGarageDetectionForState(input, session.state.currentField);
             const update = (!dimensionState.isInChoiceFieldMode && !shouldSkipGarageDetection)
                 ? await detectParameterUpdateFromInput(input, session.state.currentField || undefined)
@@ -176,7 +219,9 @@ export class LeadAgent
                 return await this.handleParameterUpdate(session, sessionId, update, input);
             }
 
+            // ✅ Fallback to main agent graph
             return await this.invokeLeadAgentGraph(session, sessionId, input, update);
+
         } catch (error) {
             logger.error(`[LeadAgent] Error:`, error);
             return "❌ An error occurred. Please try again.";
@@ -936,19 +981,17 @@ If you cannot confidently detect a building type, return null for detectedType.`
 
             // ✅ Check if user wants to customize
             const customizationPrompt = `
-🏗️ Great! I have your garage dimensions: ${session.state.userFriendlyParams.width}ft × ${session.state.userFriendlyParams.length}ft × ${session.state.userFriendlyParams.height}ft tall
+🏗️ Your garage size is set: 
+${session.state.userFriendlyParams.width}ft × ${session.state.userFriendlyParams.length}ft × ${session.state.userFriendlyParams.height}ft tall
 
-Would you like to customize other specifications, or should I generate a quote with defaults?
+Would you like to customize anything, or should I generate your quote with defaults?
 
+You can customize:
 📋 **Optional customizations:**
-• 📍 **State** (for local pricing)
-• 🏠 **Roof type** (Vertical, Regular, or Box)
-• 📏 **Gauge** (14 or 16)
-• 🏢 **Building type** (Garage, Shed, Barn, or Workshop)
-
-Just say:
-• **"customize"** or **"yes"** → I'll ask about each option
-• **"skip"** or **"no"** → I'll generate your quote now with defaults
+• 📍 **State**
+• 🏠 **Roof type**
+• 📏 **Gauge**
+• 🏢 **Building type**
         `;
 
             const response = customizationPrompt.trim();
@@ -972,35 +1015,52 @@ Just say:
         try {
             const userInputLower = input.toLowerCase().trim();
 
-            // Check if user wants to customize
-            const skipResult = await fuzzyMatcher.isSkipIntent(userInputLower);
-            const wantsToCustomize = !skipResult.isSkip || skipResult.confidence === 'low';
+            // ✅ CRITICAL FIX: Check if user wants to CUSTOMIZE (not skip)
+            // Use direct keyword matching instead of fuzzy matcher
+            const wantCustomizeKeywords = /^(yes|customize|custom|ok|sure|absolutely|definitely|let's|let me|please)$/i;
+            const skipKeywords = /^(no|skip|nope|nah|don't|dont|pass|later)$/i;
 
-            logger.info(`[LeadAgent] Skip intent detected: ${skipResult.isSkip} (confidence: ${skipResult.confidence})`);
-            logger.info(`[LeadAgent] User wants to customize: ${wantsToCustomize}`);
+            let wantsToCustomize = false;
 
+            if (wantCustomizeKeywords.test(userInputLower)) {
+                wantsToCustomize = true;
+                logger.info(`[LeadAgent] ✅ Direct keyword match: User wants to CUSTOMIZE`);
+            } else if (skipKeywords.test(userInputLower)) {
+                wantsToCustomize = false;
+                logger.info(`[LeadAgent] ✅ Direct keyword match: User wants to SKIP`);
+            } else {
+                // ✅ Fallback: Use fuzzy matcher but invert the logic
+                const skipResult = await fuzzyMatcher.isSkipIntent(userInputLower);
+                wantsToCustomize = !skipResult.isSkip || skipResult.confidence === 'low';
+                logger.info(`[LeadAgent] Fuzzy matcher: Skip intent = ${skipResult.isSkip}, confidence = ${skipResult.confidence}`);
+                logger.info(`[LeadAgent] User wants to customize: ${wantsToCustomize}`);
+            }
+
+            // ✅ CRITICAL: Clear the pending decision flag immediately
             session.state._pendingCustomizationDecision = false;
 
             if (!wantsToCustomize) {
-                // ✅ USER DECLINED: Generate image with default parameters
-                logger.info(`[LeadAgent] ✅ User declined customization - generating with DEFAULTS`);
+                // ✅ USER SAID "NO/SKIP": Generate quote with defaults
+                logger.info(`[LeadAgent] ✅ User declined customization - generating quote with DEFAULTS`);
                 return await this.generateQuoteWithDefaults(session, sessionId);
             }
 
-            // ✅ USER ACCEPTED: Ask for first missing parameter
+            // ✅ USER SAID "YES/CUSTOMIZE": Ask for first missing parameter
             logger.info(`[LeadAgent] ✅ User wants to customize - collecting parameters`);
 
             const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+            logger.info(`[LeadAgent] Missing fields for customization:`, missingFields);
 
             if (missingFields.length === 0) {
-                logger.info(`[LeadAgent] All fields complete, calculating price`);
+                logger.info(`[LeadAgent] ⚠️ All fields already complete! Calculating price`);
                 return await this.calculatePriceAfterUpdate(session, sessionId);
             }
 
+            // ✅ Ask for the FIRST missing field
             const nextField = missingFields[0];
             session.state.currentField = nextField as keyof UserFriendlyParams;
 
-            logger.info(`[LeadAgent] Asking for field: ${nextField}`);
+            logger.info(`[LeadAgent] 🎯 Asking for first customization field: ${nextField}`);
 
             const fieldResult = await this.createFieldResult(
                 session,
@@ -1008,14 +1068,18 @@ Just say:
                 nextField as keyof UserFriendlyParams
             );
 
-            const response = `Got it! Let me collect some details to optimize your quote.\n\n${fieldResult.response}`;
-            await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+            const response = `✅ Great! Let me collect some details to customize your quote.\n\n${fieldResult.response}`;
+            await session.memory.chatHistory.addAIChatMessage(response);
+
+            logger.info(`[LeadAgent] ✅ Customization field request sent: ${nextField}`);
 
             return response;
 
         } catch (error) {
             logger.error(`[LeadAgent] Error handling customization decision:`, error);
-            return `❌ Error processing your response. Please say "customize" or "skip"`;
+            // ✅ Always clear the flag on error
+            session.state._pendingCustomizationDecision = false;
+            return `❌ Error processing your response. Please say "customize"/"yes" or "skip"/"no"`;
         }
     }
 
@@ -1099,26 +1163,74 @@ Just say:
 
     private async handleAIDimensionDetection(session: any, sessionId: string, input: string): Promise<string | null>
     {
-        logger.info(`[LeadAgent] 🤖 Running AI dimension detection...`);
+        logger.info(`[LeadAgent] 🤖 Running AI dimension detection with 30s timeout...`);
 
-        // ✅ CRITICAL: Skip AI dimension detection if we're in a choice field
-        // This prevents "3" from being detected as a dimension when selecting color #3
+        // ✅ Skip AI dimension detection if we're in a choice field
         if (session.state.currentField && ['roof_type', 'gauge', 'building_type', 'color', 'state_name'].includes(session.state.currentField)) {
             logger.info(`[LeadAgent] ⏭️ In choice field mode (${session.state.currentField}), SKIPPING AI dimension detection`);
             return null;
         }
 
-        // ✅ CRITICAL FIX: First try batch detection (multiple dimensions at once)
-        const batchDimensions = await aiDimensionDetector.detectMultipleDimensions(input);
+        try {
+            // ✅ Add 30-second timeout for AI detection
+            const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => {
+                    logger.warn(`[LeadAgent] ⚠️ AI dimension detection timed out after 30s`);
+                    resolve(null);
+                }, 30000); // 30 seconds
+            });
 
-        if (batchDimensions && batchDimensions.length === 3) {
+            // ✅ Race between AI detection and timeout
+            const batchDimensionsPromise = aiDimensionDetector.detectMultipleDimensions(input);
+            const batchDimensions = await Promise.race([batchDimensionsPromise, timeoutPromise]);
+
+            if (!batchDimensions || batchDimensions.length !== 3) {
+                logger.warn(`[LeadAgent] ⚠️ AI batch detection failed or returned incomplete data`);
+
+                // ✅ Fallback: Try single dimension detection
+                const dimensionDetection = await Promise.race([
+                    aiDimensionDetector.detectDimensionAwareOfContext(
+                        input,
+                        session.state.currentField as keyof UserFriendlyParams | null
+                    ),
+                    timeoutPromise
+                ]);
+
+                if (dimensionDetection && dimensionDetection.isDimension && dimensionDetection.confidence !== 'low') {
+                    const fieldKey = dimensionDetection.field as keyof UserFriendlyParams;
+                    session.state.userFriendlyParams[fieldKey] = dimensionDetection.value;
+
+                    let response = `✓ Got it! Updated ${fieldKey} to ${dimensionDetection.value}ft`;
+                    if (dimensionDetection.reasoning.toLowerCase().includes('typo')) {
+                        response = `✓ I understood "${input}" as ${fieldKey}: ${dimensionDetection.value}ft`;
+                    }
+
+                    await session.memory.chatHistory.addAIChatMessage(response);
+
+                    const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+                    if (missingFields.length === 0) {
+                        return response + "\n\nAll set! Let me calculate your quote...";
+                    }
+
+                    const nextField = missingFields[0];
+                    session.state.currentField = nextField as keyof UserFriendlyParams;
+                    const fieldResult = await this.createFieldResult(session, sessionId, nextField as keyof UserFriendlyParams);
+                    const fullResponse = `${response}\n\n${fieldResult.response}`;
+                    await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
+
+                    return fullResponse;
+                }
+
+                return null;
+            }
+
             // ✅ We have all three dimensions (width, length, height)
             const widthDim = batchDimensions.find(d => d.field === 'width');
             const lengthDim = batchDimensions.find(d => d.field === 'length');
             const heightDim = batchDimensions.find(d => d.field === 'height');
 
             if (widthDim && lengthDim && heightDim) {
-                logger.info(`[LeadAgent] ✅ ALL 3 DIMENSIONS DETECTED from batch:`);
+                logger.info(`[LeadAgent] ✅ ALL 3 DIMENSIONS DETECTED from AI:`);
                 logger.info(`  Width: ${widthDim.value}ft, Length: ${lengthDim.value}ft, Height: ${heightDim.value}ft`);
 
                 // ✅ Update all three dimensions at once
@@ -1131,7 +1243,7 @@ Just say:
                 await session.memory.chatHistory.addAIChatMessage(response);
 
                 const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
-                logger.info(`[LeadAgent] Missing fields after batch dimensions:`, missingFields);
+                logger.info(`[LeadAgent] Missing fields after AI batch dimensions:`, missingFields);
 
                 if (missingFields.length === 0) {
                     return response + "\n\nMoving to price calculation...";
@@ -1145,40 +1257,13 @@ Just say:
 
                 return fullResponse;
             }
+
+            return null;
+
+        } catch (error) {
+            logger.error(`[LeadAgent] ❌ ERROR in AI dimension detection:`, error);
+            return null;
         }
-
-        // ✅ Fallback: Try single dimension detection
-        const dimensionDetection = await aiDimensionDetector.detectDimensionAwareOfContext(
-            input,
-            session.state.currentField as keyof UserFriendlyParams | null
-        );
-
-        if (dimensionDetection.isDimension && dimensionDetection.confidence !== 'low') {
-            const fieldKey = dimensionDetection.field as keyof UserFriendlyParams;
-            session.state.userFriendlyParams[fieldKey] = dimensionDetection.value;
-
-            let response = `✓ Got it! Updated ${fieldKey} to ${dimensionDetection.value}ft`;
-            if (dimensionDetection.reasoning.toLowerCase().includes('typo')) {
-                response = `✓ I understood "${input}" as ${fieldKey}: ${dimensionDetection.value}ft`;
-            }
-
-            await session.memory.chatHistory.addAIChatMessage(response);
-
-            const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
-            if (missingFields.length === 0) {
-                return response + "\n\nAll set! Let me calculate your quote...";
-            }
-
-            const nextField = missingFields[0];
-            session.state.currentField = nextField as keyof UserFriendlyParams;
-            const fieldResult = await this.createFieldResult(session, sessionId, nextField as keyof UserFriendlyParams);
-            const fullResponse = `${response}\n\n${fieldResult.response}`;
-            await session.memory.chatHistory.addAIChatMessage(fieldResult.response);
-
-            return fullResponse;
-        }
-
-        return null;
     }
 
     private analyzeInputContext(
@@ -1926,10 +2011,22 @@ Just say:
         try {
             logger.info(`[LeadAgent] detectBatchDimensions: "${userInput}"`);
 
-            // ✅ REMOVED: Don't use AI detector here, it's already called in handleAIDimensionDetection
-            // The batch detection should happen through handleAIDimensionDetection in the main flow
+            // ✅ Pattern 1: Standard XxYxZ format (20x20x10) - CASE INSENSITIVE
+            const xPattern = /(\d+)\s*[xX×]\s*(\d+)\s*[xX×]\s*(\d+)/;
+            const xMatch = userInput.match(xPattern);
 
-            // Pattern 1: Abbreviated format (w 10 l 10 h 10)
+            if (xMatch) {
+                const width = parseInt(xMatch[1], 10);   // First = WIDTH
+                const length = parseInt(xMatch[2], 10);  // Second = LENGTH
+                const height = parseInt(xMatch[3], 10);  // Third = HEIGHT
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ X format match: W=${width} × L=${length} × H=${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // ✅ Pattern 2: Abbreviated format (w 10 l 10 h 10)
             const abbreviatedPattern = /w\s*:?\s*(\d+)\s*l\s*:?\s*(\d+)\s*h\s*:?\s*(\d+)/i;
             const abbreviatedMatch = userInput.match(abbreviatedPattern);
 
@@ -1945,23 +2042,7 @@ Just say:
                 }
             }
 
-            // Pattern 2: Standard XxYxZ format (20x20x10)
-            // ✅ CRITICAL: First number = WIDTH, Second = LENGTH, Third = HEIGHT
-            const xPattern = /(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i;
-            const xMatch = userInput.match(xPattern);
-
-            if (xMatch) {
-                const width = parseInt(xMatch[1], 10);   // First = WIDTH
-                const length = parseInt(xMatch[2], 10);  // Second = LENGTH
-                const height = parseInt(xMatch[3], 10);  // Third = HEIGHT
-
-                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
-                    logger.info(`[LeadAgent] ✅ X format match: W=${width} × L=${length} × H=${height}`);
-                    return { width, length, height };
-                }
-            }
-
-            // Pattern 3: Comma-separated (20, 20, 10)
+            // ✅ Pattern 3: Comma-separated (20, 20, 10)
             const commaPattern = /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/;
             const commaMatch = userInput.match(commaPattern);
 
@@ -1976,8 +2057,8 @@ Just say:
                 }
             }
 
-            // Pattern 4: Labeled format (width 20 length 20 height 10)
-            const labeledPattern = /width.*?(\d+).*?length.*?(\d+).*?height.*?(\d+)/i;
+            // ✅ Pattern 4: Labeled format (width 20 length 20 height 10)
+            const labeledPattern = /width\s*:?\s*(\d+).*?length\s*:?\s*(\d+).*?height\s*:?\s*(\d+)/i;
             const labeledMatch = userInput.match(labeledPattern);
 
             if (labeledMatch) {
@@ -1991,7 +2072,7 @@ Just say:
                 }
             }
 
-            // Pattern 5: Try DimensionManager as fallback
+            // ✅ Pattern 5: Try DimensionManager as fallback (keeps existing logic)
             logger.info(`[LeadAgent] Trying DimensionManager...`);
             const dimensionManager = DimensionManager.getInstance();
             const calculation = dimensionManager.calculateDimensions(userInput);
@@ -2010,6 +2091,85 @@ Just say:
 
         } catch (error) {
             logger.error(`[LeadAgent] detectBatchDimensions error:`, error);
+            return null;
+        }
+    }
+
+    private async detectBatchDimensionsRegexOnly(userInput: string): Promise<{ width: number; length: number; height: number } | null>
+    {
+        if (!userInput) {
+            logger.info(`[LeadAgent] detectBatchDimensionsRegexOnly: empty input`);
+            return null;
+        }
+
+        try {
+            logger.info(`[LeadAgent] 🚀 FAST regex detection: "${userInput}"`);
+
+            // ✅ Pattern 1: Standard XxYxZ format (20x20x10) - CASE INSENSITIVE with special chars
+            const xPattern = /(\d+)\s*[xX×]\s*(\d+)\s*[xX×]\s*(\d+)/;
+            const xMatch = userInput.match(xPattern);
+
+            if (xMatch) {
+                const width = parseInt(xMatch[1], 10);   // First = WIDTH
+                const length = parseInt(xMatch[2], 10);  // Second = LENGTH
+                const height = parseInt(xMatch[3], 10);  // Third = HEIGHT
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ FAST MATCH (XxYxZ): W=${width} × L=${length} × H=${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // ✅ Pattern 2: Abbreviated format (w 20 l 20 h 10)
+            const abbreviatedPattern = /w\s*:?\s*(\d+)\s*l\s*:?\s*(\d+)\s*h\s*:?\s*(\d+)/i;
+            const abbreviatedMatch = userInput.match(abbreviatedPattern);
+
+            if (abbreviatedMatch) {
+                const width = parseInt(abbreviatedMatch[1], 10);
+                const length = parseInt(abbreviatedMatch[2], 10);
+                const height = parseInt(abbreviatedMatch[3], 10);
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ FAST MATCH (w/l/h): ${width}×${length}×${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // ✅ Pattern 3: Comma-separated (20, 20, 10)
+            const commaPattern = /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/;
+            const commaMatch = userInput.match(commaPattern);
+
+            if (commaMatch) {
+                const width = parseInt(commaMatch[1], 10);
+                const length = parseInt(commaMatch[2], 10);
+                const height = parseInt(commaMatch[3], 10);
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ FAST MATCH (comma): ${width}×${length}×${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            // ✅ Pattern 4: Labeled format (width 20 length 20 height 10)
+            const labeledPattern = /width\s*:?\s*(\d+).*?length\s*:?\s*(\d+).*?height\s*:?\s*(\d+)/i;
+            const labeledMatch = userInput.match(labeledPattern);
+
+            if (labeledMatch) {
+                const width = parseInt(labeledMatch[1], 10);
+                const length = parseInt(labeledMatch[2], 10);
+                const height = parseInt(labeledMatch[3], 10);
+
+                if (width > 0 && width <= 500 && length > 0 && length <= 500 && height > 0 && height <= 500) {
+                    logger.info(`[LeadAgent] ✅ FAST MATCH (labeled): ${width}×${length}×${height}`);
+                    return { width, length, height };
+                }
+            }
+
+            logger.info(`[LeadAgent] ❌ No regex pattern matched`);
+            return null;
+
+        } catch (error) {
+            logger.error(`[LeadAgent] detectBatchDimensionsRegexOnly error:`, error);
             return null;
         }
     }
