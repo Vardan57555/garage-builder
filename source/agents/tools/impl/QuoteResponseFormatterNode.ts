@@ -13,7 +13,7 @@ export class QuoteResponseFormatter
     public static formatFinalQuote(params: UserFriendlyParams, breakdown: QuoteBreakdown, selectedAddons: any[] = [], imageBase64: string | null = null): string {
 
         let response = `
-        TOTAL ESTIMATED PRICE for : Width: ${params.width}' | Length: ${params.length}' | Height: ${params.height}
+        TOTAL ESTIMATED PRICE $${breakdown.finalTotal.toFixed(2)} for : Width: ${params.width}' | Length: ${params.length}' | Height: ${params.height}
 🎨 BUILDING VISUALIZATION:
 `;
 

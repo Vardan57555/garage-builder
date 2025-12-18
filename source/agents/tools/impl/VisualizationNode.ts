@@ -10,6 +10,7 @@ import {PriceCalculatorService} from "@agents/tools/impl/PriceCalculationNode";
 import {GenerationResult, HealthCheckResult, QuoteBreakdown, VisualizationResponse } from "../io/IVisualization";
 import {IGarageImageGenerator} from "@agents/tools/impl/io/IVisualizationNode";
 import {IPriceCalculatorService} from "@agents/tools/impl/io/PriceCalculatorService";
+import process from "node:process";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -20,7 +21,7 @@ class VisualizationOrchestrator
     private readonly generator: IGarageImageGenerator;
     private readonly calculator: IPriceCalculatorService;
 
-    constructor(comfyuiUrl: string = "http://localhost:8188")
+    constructor(comfyuiUrl: string = process.env.COMFYUI_URL || "http://localhost:8188")
     {
         this.generator = GarageImageGenerator.getInstance(comfyuiUrl);
         this.calculator = PriceCalculatorService.getInstance();

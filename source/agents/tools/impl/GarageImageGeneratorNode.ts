@@ -7,6 +7,7 @@ import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 import {IComfyUIClient, IGarageImageGenerator, IPromptBuilder, IWorkflowBuilder} from "./io/IVisualizationNode";
 import {ComfyUIWorkflow, GenerationResult, HealthCheckResult} from "@agents/tools/io/IVisualization";
+import process from "node:process";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -20,7 +21,7 @@ export class GarageImageGenerator implements IGarageImageGenerator
     private readonly maxRetries: number = 3;
     private static instance: IGarageImageGenerator;
 
-    constructor(enforce: () => void, comfyuiUrl: string = "http://localhost:8188")
+    constructor(enforce: () => void, comfyuiUrl: string = process.env.COMFYUI_URL || "http://localhost:8188")
     {
         if(enforce !== Enforce)
         {
@@ -31,7 +32,7 @@ export class GarageImageGenerator implements IGarageImageGenerator
         this.promptBuilder = PromptBuilder.getInstance();
     }
 
-    public static getInstance(comfyuiUrl: string = "http://localhost:8188"): IGarageImageGenerator
+    public static getInstance(comfyuiUrl: string = process.env.COMFYUI_URL ||  "http://localhost:8188"): IGarageImageGenerator
     {
         if(!GarageImageGenerator.instance)
         {

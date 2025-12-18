@@ -272,13 +272,38 @@ export class PriceCalculatorService implements IPriceCalculatorService
         };
     }
 
+    private formatColorLine(colorName: string | null, colorCost: number): string
+    {
+        if (!colorName)
+        {
+            return "";
+        }
+
+        return colorCost > 0
+            ? `\n• Color Upgrade (${colorName}): $${colorCost.toFixed(2)}`
+            : `\n• Color (${colorName}): Included`;
+    }
+
     private formatCompletePrice(breakdown: PriceBreakdown, params: Partial<UserFriendlyParams>, colorName: string | null = null): string
     {
+        const sqft: number = (params.width ?? 0) * (params.length ?? 0);
         const currentParams: string = LeadAgentHelpers.formatCurrentParams(params);
 
+        const colorLine: string = this.formatColorLine(colorName, breakdown.colorCost);
 
-        return `
- **TOTAL ESTIMATED PRICE: $${breakdown.finalTotal.toFixed(2)} for ${currentParams}**
+        return `${currentParams}
+
+📊 **PRICE BREAKDOWN:**
+
+• Base Building Kit: $${breakdown.kitPrice.toFixed(2)}${colorLine}
+• Installation Labor (50% of kit): $${breakdown.laborCost.toFixed(2)}
+• Concrete Foundation (${sqft} sq ft @ $${Constants.PRICING_CONSTANTS.FOUNDATION_COST_PER_SQFT.toFixed(2)}/sq ft): $${breakdown.foundationCost.toFixed(2)}
+• Delivery & Site Preparation: $${breakdown.deliveryCost.toFixed(2)}
+• Contingency & Misc (${(Constants.PRICING_CONSTANTS.CONTINGENCY_RATE * 100).toFixed(0)}%): $${breakdown.contingency.toFixed(2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 **TOTAL ESTIMATED PRICE: $${breakdown.finalTotal.toFixed(2)}**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
     }
 

@@ -35,8 +35,21 @@ INITIAL_GREETINGS = [
 st.set_page_config(
     page_title="Garage Builder Assistant",
     page_icon="🤖",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
+
+# Hide sidebar completely
+hide_sidebar = """
+<style>
+    [data-testid="collapsedControl"] {
+        display: none;
+    }
+    section[data-testid="stSidebar"] {
+        display: none;
+    }
+</style>
+"""
+st.markdown(hide_sidebar, unsafe_allow_html=True)
 
 def get_tab_specific_id():
     """
@@ -293,62 +306,6 @@ with col2:
     if st.button("📧 Contact Us", key="share_conversation_top", use_container_width=True, type="primary"):
         st.session_state.show_share_popup = True
         st.session_state.popup_triggered = True  # Add flag to track button click
-
-# Sidebar with diagnostics
-with st.sidebar:
-    st.header("🔹 Connection Info")
-    st.info(f"**Tab ID:** `{TAB_ID[:16]}...`")
-    st.caption(f"**Backend:** {BACKEND_URL}")
-    st.caption(f"**Timeout:** {REQUEST_TIMEOUT}s")
-
-    if st.button("🔍 Test Backend Connection"):
-        with st.spinner("Testing..."):
-            healthy, message = test_backend_health()
-            if healthy:
-                st.success(message)
-            else:
-                st.error(message)
-
-    st.divider()
-
-    st.header("Session Info")
-    if st.session_state[SESSION_STATE_KEY]:
-        st.info(f"**Session ID:** `{st.session_state[SESSION_STATE_KEY][:16]}...`")
-        st.success("✅ Session is active")
-
-        if st.button("🔴 End Session", key="end_session"):
-            try:
-                with httpx.Client(timeout=10.0) as client:
-                    response = client.post(
-                        f"{BACKEND_URL.replace('/chat', '')}/end",
-                        json={"sessionId": st.session_state[SESSION_STATE_KEY]},
-                    )
-                    response.raise_for_status()
-
-                st.session_state[SESSION_STATE_KEY] = None
-                st.session_state[MESSAGES_STATE_KEY] = [
-                    {"role": "assistant", "content": get_random_greeting()}
-                ]
-                st.success("Session cleared!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to end session: {e}")
-    else:
-        st.warning("⏳ Waiting for first response...")
-
-    if st.button("↻ New Conversation", key="new_conversation"):
-        st.session_state[SESSION_STATE_KEY] = None
-        st.session_state[MESSAGES_STATE_KEY] = [
-            {"role": "assistant", "content": get_random_greeting()}
-        ]
-        st.session_state.last_error = None
-        st.rerun()
-
-    if st.session_state.last_error:
-        st.divider()
-        st.header("⚠️ Last Error")
-        with st.expander("View Details"):
-            st.code(st.session_state.last_error)
 
 # Email Share Popup (Dialog) - Only show if explicitly triggered
 if st.session_state.show_share_popup and st.session_state.get("popup_triggered", False):

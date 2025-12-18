@@ -4,6 +4,7 @@ import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 import {IComfyUIClient} from "@agents/tools/impl/io/IVisualizationNode";
 import {ComfyUIResponse, ComfyUIWorkflow, HealthCheckResult} from "@agents/tools/io/IVisualization";
+import process from "node:process";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -35,7 +36,7 @@ export class ComfyUIClient implements IComfyUIClient
         logger.info(`[ComfyUIClient] Initialized with URL: ${comfyuiUrl}`);
     }
 
-    public static getInstance(comfyuiUrl: string = "http://localhost:8188"): IComfyUIClient
+    public static getInstance(comfyuiUrl: string = process.env.COMFYUI_URL || "http://localhost:8188"): IComfyUIClient
     {
         if(!ComfyUIClient.instance)
         {
