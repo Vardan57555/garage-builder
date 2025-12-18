@@ -298,7 +298,7 @@ export class AddonServiceImpl implements AddonService
         catch (error)
         {
             logger.error(`[AddonsProcessor] Unexpected error:`, error);
-            return this.createResponse("❌ Error processing addons.", "__end__", [], state.basePrice);
+            return this.createResponse("Error processing addons.", "__end__", [], state.basePrice);
         }
     }
 

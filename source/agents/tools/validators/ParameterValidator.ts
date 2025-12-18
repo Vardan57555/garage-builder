@@ -29,7 +29,7 @@ export class ParameterValidator
     private async validateRoofType(value: any): Promise<string | null> {
         const validationResult = await RoofDataValidator.validateRoofType(value);
         if (!validationResult.isValid) {
-            return `❌ "${value}" is not a valid roof type (vertical, regular, box, a-frame)`;
+            return `"${value}" is not a valid roof type (vertical, regular, box, a-frame)`;
         }
         return null;
     }
@@ -43,7 +43,7 @@ export class ParameterValidator
         );
         if (!validationResult.isValid)
         {
-            return `❌ "${value}" is not a valid state`;
+            return `"${value}" is not a valid state`;
         }
         return null;
     }
@@ -54,12 +54,12 @@ export class ParameterValidator
 
         if (!InputValidator.isValidNumericField(numValue))
         {
-            return `❌ Invalid ${field}: must be a positive number`;
+            return `Invalid ${field}: must be a positive number`;
         }
 
         if (field === "gauge" && !InputValidator.isValidGauge(numValue))
         {
-            return `❌ Invalid gauge. Must be 14, 16, 18, or 20`;
+            return `Invalid gauge. Must be 14, 16, 18, or 20`;
         }
 
         return null;

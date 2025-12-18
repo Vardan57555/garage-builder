@@ -14,11 +14,11 @@
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+
-- Python 3.9+
-- Docker & Docker Compose
-- MySQL 8.0+
-- Git
+- **Node.js** 18+ with **pnpm** package manager
+- **Python** 3.9+
+- **Docker** & **Docker Compose** v2.0+
+- **Git**
+- **NVIDIA GPU** (optional, for image generation)
 
 ### Environment Setup
 
@@ -31,24 +31,29 @@
 2. **Set up environment variables**
    ```bash
    cp .env.example .env
-   # Edit .env with your configuration
+   # Edit .env with your configuration (defaults work for development)
    ```
 
 3. **Install dependencies**
    ```bash
-   # Backend dependencies
-   cd source
-   npm install
+   # Install pnpm if not installed
+   npm install -g pnpm
+   
+   # Backend dependencies (from project root)
+   pnpm install
    
    # Frontend dependencies
-   cd ../client
+   cd client
    pip install -r requirements.txt
    ```
 
 4. **Start development services**
    ```bash
-   # From project root
-   docker-compose -f docker-compose.dev.yml up -d
+   # From project root - starts everything
+   make start
+   
+   # Or start just databases
+   docker compose -f db-compose.yml up -d
    ```
 
 ## Development Workflow
@@ -111,19 +116,22 @@
 
 ### Running Tests
 ```bash
-# Backend tests
-cd source
-npm test
+# Backend tests (from project root)
+pnpm test
 
-# Frontend tests
-cd ../client
-pytest
+# Custom test runner
+pnpm run test:custom
+
+# Image generation tests
+make image-gen-test
+# or directly:
+python tests/image-generation/test_service.py
 ```
 
 ### Test Coverage
 ```bash
 # Generate coverage report
-npm run test:coverage
+pnpm run test:coverage
 
 # View coverage in browser
 open coverage/lcov-report/index.html
@@ -139,48 +147,86 @@ open coverage/lcov-report/index.html
 
 ### Backend Debugging
 ```bash
-# Start with debugger
-npm run debug
+# Start with hot reload (development mode)
+pnpm run dev
 
-# Attach VS Code debugger
-# Use launch.json configuration
+# View container logs
+docker logs garage-backend -f
+
+# Access container shell
+docker exec -it garage-backend sh
+```
+
+### AI Agent Debugging
+```bash
+# Enable LangSmith tracing (set in .env)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your-langsmith-key
+
+# View agent logs
+docker logs garage-backend 2>&1 | grep "\[LeadAgent\]"
 ```
 
 ### Frontend Debugging
 ```bash
-# Enable debug logging
-DEBUG=app:* streamlit run app.py
+# View Streamlit logs
+docker logs streamlit-client -f
+
+# Run locally with debug
+cd client
+streamlit run app.py --logger.level=debug
 ```
 
 ### Database Debugging
 ```bash
-# Connect to MySQL
-mysql -u root -p -h 127.0.0.1 -P 3306
+# Connect to MySQL via Docker
+docker exec -it mysql mysql -u pricing_engine -psecret garage
+
+# Or use phpMyAdmin
+open http://localhost:8080
 
 # Show slow queries
 SHOW PROCESSLIST;
 SHOW STATUS LIKE 'Slow_queries';
 ```
 
+### Image Generation Debugging
+```bash
+# View image service logs
+make image-gen-logs
+
+# Check ComfyUI status
+curl http://localhost:8188/system_stats
+
+# Check GPU status
+make image-gen-gpu
+```
+
 ## Performance Optimization
 
-### Frontend
-- Lazy load components
-- Optimize images
-- Minimize bundle size
-- Use React.memo/PureComponent
+### AI Agent Performance
+- Use fuzzy matching before LLM calls (faster)
+- Batch dimension detection with regex
+- Cache frequently used database queries
+- Session timeout management (30 min default)
 
 ### Backend
-- Implement caching
-- Optimize database queries
-- Use connection pooling
-- Implement rate limiting
+- Redis caching for session state
+- Connection pooling via Sequelize
+- Optimize database queries with indexes
+- Use `EXPLAIN` for slow query analysis
+
+### Image Generation
+- Use preview mode (512x512) for faster iteration
+- Cache generated images by parameter hash
+- Consider queue system for production (Celery/RQ)
+- GPU memory management
 
 ### Database
-- Add appropriate indexes
-- Normalize/denormalize as needed
-- Use EXPLAIN for query optimization
-- Consider read replicas for heavy read loads
+- 134 models with proper indexing
+- Use migrations for schema changes
+- Avoid N+1 queries in Sequelize
+- Consider read replicas for heavy loads
 
 ## Security Considerations
 
@@ -204,30 +250,44 @@ SHOW STATUS LIKE 'Slow_queries';
 
 ## Deployment
 
-### Staging
+### Development
 ```bash
-# Deploy to staging
-git checkout develop
-git pull
-docker-compose -f docker-compose.staging.yml up -d --build
+# Start all services
+make start
+
+# Start with fresh database
+make clean
+make start
 ```
 
 ### Production
 ```bash
-# Deploy to production
-git checkout main
-git pull
-docker-compose -f docker-compose.prod.yml up -d --build
+# Build production images
+docker compose build --no-cache
+
+# Start services
+docker compose -f db-compose.yml up -d
+docker compose up -d
+
+# For image generation (requires GPU)
+make image-gen-build
+make image-gen-start
 ```
 
 ### Database Migrations
 ```bash
-# Run migrations
-cd sequelize
-npx sequelize-cli db:migrate
+# Run all migrations
+make run-migrations
 
-# Rollback last migration
-npx sequelize-cli db:migrate:undo
+# Run all seeders
+make run-seeders
+
+# Undo migrations
+make undo-migrations
+
+# Using Sequelize CLI directly
+pnpm sequelize-cli db:migrate
+pnpm sequelize-cli db:migrate:undo
 ```
 
 ## Troubleshooting
@@ -264,17 +324,24 @@ docker-compose up --build
 
 ### Application Logs
 ```bash
-# View logs
-docker-compose logs -f
+# View all logs
+docker compose logs -f
 
 # View specific service logs
-docker-compose logs -f backend
+docker compose logs -f garage-backend
+docker compose logs -f streamlit-client
+docker compose logs -f comfyui
+docker compose logs -f ollama
+
+# View image generation logs
+make image-gen-logs
 ```
 
-### Performance Monitoring
-- New Relic for APM
-- Prometheus + Grafana for metrics
-- ELK Stack for log analysis
+### Logging Configuration
+- Backend uses **Pino** logger
+- Logs include module name and timestamp
+- LangSmith for AI agent tracing
+- Container logs via Docker
 
 ## Contributing
 

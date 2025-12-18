@@ -34,19 +34,19 @@ export class AskForFieldNode implements IAskForFieldNode
     {
         this.fieldPromptMap = {
             width: {
-                template: `{params}\n\n📏 What **width** (feet)?\n\nExamples:\n• 20\n• 20 ft\n• width: 20`,
+                template: `{params}\n\nWhat **width** (feet)?\n\nExamples:\n• 20\n• 20 ft\n• width: 20`,
             },
             length: {
-                template: `{params}\n\n📏 What **length** (feet)?\n\nExamples:\n• 30\n• 30 ft\n• length: 30`,
+                template: `{params}\n\nWhat **length** (feet)?\n\nExamples:\n• 30\n• 30 ft\n• length: 30`,
             },
             height: {
-                template: `{params}\n\n📏 What **height** (feet)?\n\nExamples:\n• 10\n• 10 ft\n• height: 10`,
+                template: `{params}\n\nWhat **height** (feet)?\n\nExamples:\n• 10\n• 10 ft\n• height: 10`,
             },
             state_name: {
-                template: `{params}\n\n🗺️ Which **state**?\n(e.g., Texas, California)`,
+                template: `{params}\n\nWhich **state**?\n(e.g., Texas, California)`,
             },
             roof_type: {
-                template: `{params}\n\n🏠 Which **Roof Type** would you prefer?
+                template: `{params}\n\nWhich **Roof Type** would you prefer?
 
 1. Vertical - Best weather protection
 2. Regular - Standard horizontal panels
@@ -55,7 +55,7 @@ export class AskForFieldNode implements IAskForFieldNode
 Examples: "1", "vertical", "box"`,
             },
             gauge: {
-                template: `{params}\n\n📊 What **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`,
+                template: `{params}\n\nWhat **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`,
             },
             building_type: {
                 template: this.choiceService.getPrompt("building_type"),
@@ -94,7 +94,7 @@ Examples: "1", "vertical", "box"`,
     private buildColorMenu(colors: Awaited<ReturnType<typeof this.colorService.get>>): string
     {
         const groupedColors: Map<string, ColorOption[]> = this.colorService.group(colors, 5);
-        let colorMenu: string = "🎨 **CHOOSE YOUR BUILDING COLOR:**\n\n";
+        let colorMenu: string = "**CHOOSE YOUR BUILDING COLOR:**\n\n";
         let colorIndex: number = 1;
 
         for (const [category, categoryColors] of groupedColors.entries())
@@ -149,7 +149,7 @@ Examples: "1", "vertical", "box"`,
             if (allColors.length === 0)
             {
                 logger.error(`[ColorPrompt] No colors available in database`);
-                return `${currentParams}\n\n❌ ERROR: No colors available in database`;
+                return `${currentParams}\n\nERROR: No colors available in database`;
             }
 
             logger.info(`[ColorPrompt] Loaded ${allColors.length} colors from database`);
@@ -160,7 +160,7 @@ Examples: "1", "vertical", "box"`,
         catch (error)
         {
             logger.error(`[ColorPrompt] Error loading colors`, { error });
-            return `${currentParams}\n\n🎨 What color would you like?\n(e.g., "red", "white", "blue")`;
+            return `${currentParams}\n\nWhat color would you like?\n(e.g., "red", "white", "blue")`;
         }
     }
 

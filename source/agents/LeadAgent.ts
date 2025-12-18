@@ -121,7 +121,7 @@ export class LeadAgent
                     // ✅ Ask about customization
                     return await this.handlePostGarageIntent(session, sessionId, input);
                 }
-                logger.info(`[LeadAgent] ❌ Regex batch detection failed, continuing to STEP 2...`);
+                logger.info(`[LeadAgent] Regex batch detection failed, continuing to STEP 2...`);
             }
 
             // ✅ STEP 2: GARAGE HANDLER (for "2-car", "3-car", "for two cars", etc.)
@@ -141,7 +141,7 @@ export class LeadAgent
 
                     return garageResponse;
                 }
-                logger.info(`[LeadAgent] ❌ Garage intent not detected, continuing to STEP 3...`);
+                logger.info(`[LeadAgent] Garage intent not detected, continuing to STEP 3...`);
             }
 
             // ✅ STEP 3: AI DIMENSION DETECTION (SLOW, 30s timeout, last resort)
@@ -224,7 +224,7 @@ export class LeadAgent
 
         } catch (error) {
             logger.error(`[LeadAgent] Error:`, error);
-            return "❌ An error occurred. Please try again.";
+            return "An error occurred. Please try again.";
         }
     }
 
@@ -420,7 +420,7 @@ export class LeadAgent
             if (["width", "length", "height", "utility_length"].includes(paramUpdate.field)) {
                 parsedValue = parseInt(paramUpdate.value, 10);
                 if (isNaN(parsedValue) || parsedValue <= 0 || parsedValue > 500) {
-                    return `❌ Invalid value for ${paramUpdate.field}. Please provide a number between 1 and 500.`;
+                    return `Invalid value for ${paramUpdate.field}. Please provide a number between 1 and 500.`;
                 }
             }
 
@@ -436,7 +436,7 @@ export class LeadAgent
             return fullResponse;
         } catch (error) {
             logger.error(`[LeadAgent] Error updating parameter during color phase:`, error);
-            return `❌ Error updating ${paramUpdate.field}. Please try again.`;
+            return `Error updating ${paramUpdate.field}. Please try again.`;
         }
     }
 
@@ -492,7 +492,7 @@ export class LeadAgent
             return response;
         } catch (error) {
             logger.error(`[LeadAgent] Error handling addon request during color phase:`, error);
-            return `❌ Error processing your request. Please try again.`;
+            return `Error processing your request. Please try again.`;
         }
     }
 
@@ -510,9 +510,9 @@ export class LeadAgent
             logger.info(`[LeadAgent] Fuzzy matcher returned:`, JSON.stringify(dimensionResult));
 
             if (!dimensionResult.value || dimensionResult.confidence === 'low') {
-                logger.warn(`[LeadAgent] ❌ Fuzzy matcher failed or low confidence`);
+                logger.warn(`[LeadAgent] Fuzzy matcher failed or low confidence`);
 
-                let errorMsg = `❌ I couldn't understand "${input}" as a dimension.\n\n`;
+                let errorMsg = `I couldn't understand "${input}" as a dimension.\n\n`;
                 if (dimensionResult.reasoning) {
                     errorMsg += `Reason: ${dimensionResult.reasoning}\n\n`;
                 }
@@ -529,7 +529,7 @@ export class LeadAgent
 
             const newValue = dimensionResult.value;
             if (newValue <= 0 || newValue > 500) {
-                const rangeError = `❌ ${newValue}ft is outside the valid range.\n\nPlease enter a dimension between 1 and 500 feet.`;
+                const rangeError = `${newValue}ft is outside the valid range.\n\nPlease enter a dimension between 1 and 500 feet.`;
                 await session.memory.chatHistory.addAIChatMessage(rangeError);
                 return rangeError;
             }
@@ -561,8 +561,8 @@ export class LeadAgent
             logger.info(`[LeadAgent] ✅ All dimensions complete!`);
             return response + "\n\nGreat! Let me calculate your quote...";
         } catch (error) {
-            logger.error(`[LeadAgent] ❌ ERROR in dimension field mode:`, error);
-            const errorMsg = `❌ Sorry, something went wrong processing that dimension.\n\nPlease try again with a simple number like "20"`;
+            logger.error(`[LeadAgent] ERROR in dimension field mode:`, error);
+            const errorMsg = `Sorry, something went wrong processing that dimension.\n\nPlease try again with a simple number like "20"`;
             await session.memory.chatHistory.addAIChatMessage(errorMsg);
             return errorMsg;
         }
@@ -595,7 +595,7 @@ export class LeadAgent
                         logger.info(`[LeadAgent] ✅ PARAMETER UPDATE DETECTED DURING CHOICE MODE: ${paramUpdate.field} = ${paramUpdate.value} (confidence: ${paramUpdate.confidence})`);
                         return await this.handleParameterUpdate(session, sessionId, paramUpdate, input);
                     } else {
-                        logger.info(`[LeadAgent] ❌ No parameter update detected (confidence: ${paramUpdate.confidence})`);
+                        logger.info(`[LeadAgent] No parameter update detected (confidence: ${paramUpdate.confidence})`);
                     }
                 } catch (error) {
                     logger.error(`[LeadAgent] Error detecting parameter update during choice field:`, error);
@@ -642,7 +642,7 @@ export class LeadAgent
         } catch (error) {
             logger.error(`[LeadAgent] ERROR in choice field mode:`, error);
             session.state.currentField = null;
-            return `❌ Error processing your input. Let's try again.`;
+            return `Error processing your input. Let's try again.`;
         }
     }
 
@@ -673,7 +673,7 @@ export class LeadAgent
                     logger.info(`[LeadAgent] ✅ Roof type matched: ${matchedValue} (confidence: ${choiceResult.confidence})`);
                     session.state.userFriendlyParams.roof_type = choiceResult.roofType;
                 } else {
-                    logger.warn(`[LeadAgent] ❌ Could not match roof type (confidence: ${choiceResult.confidence})`);
+                    logger.warn(`[LeadAgent] Could not match roof type (confidence: ${choiceResult.confidence})`);
                 }
                 break;
 
@@ -685,7 +685,7 @@ export class LeadAgent
                     logger.info(`[LeadAgent] ✅ Gauge matched: ${matchedValue} (confidence: ${choiceResult.confidence})`);
                     session.state.userFriendlyParams.gauge = choiceResult.gauge;
                 } else {
-                    logger.warn(`[LeadAgent] ❌ Could not match gauge (confidence: ${choiceResult.confidence})`);
+                    logger.warn(`[LeadAgent] Could not match gauge (confidence: ${choiceResult.confidence})`);
                 }
                 break;
 
@@ -697,7 +697,7 @@ export class LeadAgent
                     logger.info(`[LeadAgent] ✅ Building type matched: ${matchedValue} (confidence: ${choiceResult.confidence})`);
                     session.state.userFriendlyParams.building_type = choiceResult.buildingType;
                 } else {
-                    logger.warn(`[LeadAgent] ❌ Could not match building type (confidence: ${choiceResult.confidence})`);
+                    logger.warn(`[LeadAgent] Could not match building type (confidence: ${choiceResult.confidence})`);
                 }
                 break;
 
@@ -706,8 +706,8 @@ export class LeadAgent
                 const allColors: ColorOption[] = await this.colorService.get();
 
                 if (!allColors || allColors.length === 0) {
-                    logger.error(`[LeadAgent] ❌ NO COLORS IN DATABASE!`);
-                    return `❌ Error: No colors available. Please try again.`;
+                    logger.error(`[LeadAgent] NO COLORS IN DATABASE!`);
+                    return `Error: No colors available. Please try again.`;
                 }
 
                 const colorMatch = await fuzzyChoiceMatcher.matchColor(input, allColors);
@@ -716,8 +716,8 @@ export class LeadAgent
                     if (fullColorOption) {
                         return await this.applyColorAndCalculatePrice(session, sessionId, fullColorOption);
                     } else {
-                        logger.error(`[LeadAgent] ❌ Could not find full color object for: ${colorMatch.color.name}`);
-                        return `❌ Error: Color not found in database.`;
+                        logger.error(`[LeadAgent] Could not find full color object for: ${colorMatch.color.name}`);
+                        return `Error: Color not found in database.`;
                     }
                 } else {
                     const suggestions = allColors.slice(0, 3).map(c => c.name).join(", ");
@@ -730,8 +730,8 @@ export class LeadAgent
         }
 
         if (!choiceResult) {
-            logger.error(`[LeadAgent] ❌ choiceResult is null for ${currentField}`);
-            return `❌ Error processing choice. Please try again.`;
+            logger.error(`[LeadAgent] choiceResult is null for ${currentField}`);
+            return `Error processing choice. Please try again.`;
         }
 
         if (choiceResult.matched) {
@@ -776,7 +776,7 @@ export class LeadAgent
             return confirmMsg;
         }
 
-        logger.info(`[LeadAgent] ❌ LOW CONFIDENCE: Could not match ${currentField}`);
+        logger.info(`[LeadAgent] LOW CONFIDENCE: Could not match ${currentField}`);
         const suggestions = choiceSuggestions[currentField as string] || "Please try again.";
         const retryMsg = `I didn't understand that. ${suggestions}`;
         await session.memory.chatHistory.addAIChatMessage(retryMsg);
@@ -852,7 +852,7 @@ export class LeadAgent
             logger.info(`[LeadAgent] ✅ Auto-detected building_type: ${detectedBuildingType}`);
             session.state.userFriendlyParams.building_type = detectedBuildingType;
         } else {
-            logger.info(`[LeadAgent] ❌ Could not auto-detect building_type, will ask later`);
+            logger.info(`[LeadAgent] Could not auto-detect building_type, will ask later`);
         }
 
         const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
@@ -930,7 +930,7 @@ If you cannot confidently detect a building type, return null for detectedType.`
                 return result.detectedType;
             }
 
-            logger.info(`[LeadAgent] ❌ AI could not detect building type`);
+            logger.info(`[LeadAgent] AI could not detect building type`);
             return null;
 
         } catch (error) {
@@ -981,17 +981,16 @@ If you cannot confidently detect a building type, return null for detectedType.`
 
             // ✅ Check if user wants to customize
             const customizationPrompt = `
-🏗️ Your garage size is set: 
-${session.state.userFriendlyParams.width}ft × ${session.state.userFriendlyParams.length}ft × ${session.state.userFriendlyParams.height}ft tall
+Your garage size is set: ${session.state.userFriendlyParams.width}ft × ${session.state.userFriendlyParams.length}ft × ${session.state.userFriendlyParams.height}ft tall
 
 Would you like to customize anything, or should I generate your quote with defaults?
 
 You can customize:
-📋 **Optional customizations:**
-• 📍 **State**
-• 🏠 **Roof type**
-• 📏 **Gauge**
-• 🏢 **Building type**
+**Optional customizations:**
+• **State**
+• **Roof type**
+• **Gauge**
+• **Building type**
         `;
 
             const response = customizationPrompt.trim();
@@ -1005,7 +1004,7 @@ You can customize:
 
         } catch (error) {
             logger.error(`[LeadAgent] Error in post-garage intent:`, error);
-            return `❌ Error processing request. Please try again.`;
+            return `Error processing request. Please try again.`;
         }
     }
 
@@ -1079,7 +1078,7 @@ You can customize:
             logger.error(`[LeadAgent] Error handling customization decision:`, error);
             // ✅ Always clear the flag on error
             session.state._pendingCustomizationDecision = false;
-            return `❌ Error processing your response. Please say "customize"/"yes" or "skip"/"no"`;
+            return `Error processing your response. Please say "customize"/"yes" or "skip"/"no"`;
         }
     }
 
@@ -1157,7 +1156,7 @@ You can customize:
 
         } catch (error) {
             logger.error(`[LeadAgent] Error generating quote with defaults:`, error);
-            return `❌ Error calculating price. Please try again or specify parameters.`;
+            return `Error calculating price. Please try again or specify parameters.`;
         }
     }
 
@@ -1261,7 +1260,7 @@ You can customize:
             return null;
 
         } catch (error) {
-            logger.error(`[LeadAgent] ❌ ERROR in AI dimension detection:`, error);
+            logger.error(`[LeadAgent] ERROR in AI dimension detection:`, error);
             return null;
         }
     }
@@ -1392,7 +1391,7 @@ You can customize:
                 parsedValue = parseInt(update.value, 10);
                 if (isNaN(parsedValue) || parsedValue <= 0 || parsedValue > 500)
                 {
-                    return `❌ Invalid value for ${update.field}. Please provide a number between 1 and 500.`;
+                    return `Invalid value for ${update.field}. Please provide a number between 1 and 500.`;
                 }
             }
             else if (["roof_type", "building_type"].includes(update.field))
@@ -1475,7 +1474,7 @@ You can customize:
         catch (error)
         {
             logger.error(`[LeadAgent] Error updating parameter after price:`, error);
-            return `❌ Error updating ${update.field}. Please try again.`;
+            return `Error updating ${update.field}. Please try again.`;
         }
     }
 
@@ -1707,8 +1706,8 @@ You can customize:
             const allColors: ColorOption[] = await this.colorService.get();
 
             if (!allColors || allColors.length === 0) {
-                logger.error(`[LeadAgent] ❌ NO COLORS IN DATABASE!`);
-                return `❌ Error: No colors available in database.`;
+                logger.error(`[LeadAgent] NO COLORS IN DATABASE!`);
+                return `Error: No colors available in database.`;
             }
 
             logger.info(`[LeadAgent] ✅ Got ${allColors.length} colors from database`);
@@ -1747,15 +1746,15 @@ You can customize:
                         .map((c, i) => `${i + 1}. ${c.name}`)
                         .join("\n");
 
-                    return `❌ ${result.message}\n\n📋 Available colors:\n${altList}`;
+                    return `${result.message}\n\nAvailable colors:\n${altList}`;
                 }
 
-                return `❌ ${result.message}`;
+                return `${result.message}`;
             }
 
             if (!result.color) {
                 logger.warn(`[LeadAgent] No color matched`);
-                return `❌ Could not determine color preference.`;
+                return `Could not determine color preference.`;
             }
 
             // ✅ FIX: Find from displayColors
@@ -1764,8 +1763,8 @@ You can customize:
             );
 
             if (!fullColorOption) {
-                logger.error(`[LeadAgent] ❌ Could not find full color object for: ${result.color.name}`);
-                return `❌ Error: Color not found in database.`;
+                logger.error(`[LeadAgent] Could not find full color object for: ${result.color.name}`);
+                return `Error: Color not found in database.`;
             }
 
             logger.info(`[LeadAgent] ✅ Color selected: ${fullColorOption.name}`);
@@ -1789,8 +1788,8 @@ You can customize:
             return colorChangeMessage;
 
         } catch (error) {
-            logger.error(`[LeadAgent] ❌ ERROR in color change request:`, error);
-            return `❌ Error processing color change. Please try again.`;
+            logger.error(`[LeadAgent] ERROR in color change request:`, error);
+            return `Error processing color change. Please try again.`;
         }
     }
 
@@ -1815,8 +1814,8 @@ You can customize:
             const allColors: ColorOption[] = await this.colorService.get();
 
             if (!allColors || allColors.length === 0) {
-                logger.error(`[LeadAgent] ❌ NO COLORS IN DATABASE!`);
-                return `❌ Error: No colors available in database. Skipping color selection.`;
+                logger.error(`[LeadAgent] NO COLORS IN DATABASE!`);
+                return `Error: No colors available in database. Skipping color selection.`;
             }
 
             logger.info(`[LeadAgent] ✅ Got ${allColors.length} colors from database`);
@@ -1844,14 +1843,14 @@ You can customize:
             });
 
             if (displayColors.length === 0) {
-                logger.error(`[LeadAgent] ❌ displayColors is empty after grouping!`);
-                return `❌ Error: No colors available for selection.`;
+                logger.error(`[LeadAgent] displayColors is empty after grouping!`);
+                return `Error: No colors available for selection.`;
             }
 
             const firstColor = displayColors[0];
             if (!firstColor || !firstColor.name) {
-                logger.error(`[LeadAgent] ❌ displayColors contains invalid objects!`);
-                return `❌ Error: Color data is corrupted. Please contact support.`;
+                logger.error(`[LeadAgent] displayColors contains invalid objects!`);
+                return `Error: Color data is corrupted. Please contact support.`;
             }
 
             logger.info(`[LeadAgent] Attempting to match user input: "${input}"`);
@@ -1893,8 +1892,8 @@ You can customize:
                         fullColorOption
                     );
                 } else {
-                    logger.error(`[LeadAgent] ❌ Could not find full color object for: ${colorMatch.color.name}`);
-                    return `❌ Error: Color not found in database.`;
+                    logger.error(`[LeadAgent] Could not find full color object for: ${colorMatch.color.name}`);
+                    return `Error: Color not found in database.`;
                 }
             } else {
                 // ✅ Show suggestions from displayColors in display order
@@ -1902,8 +1901,8 @@ You can customize:
                 return `I didn't find that color. Try: ${suggestions} or "any" for White`;
             }
         } catch (error) {
-            logger.error(`[LeadAgent] ❌ ERROR in color phase:`, error);
-            return `❌ Error processing color. Please try again or say "any" for default (White)`;
+            logger.error(`[LeadAgent] ERROR in color phase:`, error);
+            return `Error processing color. Please try again or say "any" for default (White)`;
         }
     }
 
@@ -2086,7 +2085,7 @@ You can customize:
                 };
             }
 
-            logger.info(`[LeadAgent] ❌ No pattern matched`);
+            logger.info(`[LeadAgent] No pattern matched`);
             return null;
 
         } catch (error) {
@@ -2165,7 +2164,7 @@ You can customize:
                 }
             }
 
-            logger.info(`[LeadAgent] ❌ No regex pattern matched`);
+            logger.info(`[LeadAgent] No regex pattern matched`);
             return null;
 
         } catch (error) {
@@ -2270,7 +2269,7 @@ You can customize:
                     await session.memory.chatHistory.addAIChatMessage(confirmMsg);
                     return confirmMsg;
                 } else {
-                    logger.warn(`[LeadAgent] ❌ Could not match ${update.field} with fuzzy matcher`);
+                    logger.warn(`[LeadAgent] Could not match ${update.field} with fuzzy matcher`);
                     let suggestions = "";
                     switch (update.field) {
                         case 'roof_type':
@@ -2300,7 +2299,7 @@ You can customize:
 
             if ("error" in processResult) {
                 logger.error(`[LeadAgent] Update processing failed`, processResult.error);
-                const errorResponse = processResult.error.response || `❌ Could not update ${update.field}. Please try again.`;
+                const errorResponse = processResult.error.response || `Could not update ${update.field}. Please try again.`;
                 await session.memory.chatHistory.addAIChatMessage(errorResponse);
                 return errorResponse;
             }
@@ -2366,7 +2365,7 @@ You can customize:
 
         } catch (error) {
             logger.error(`[LeadAgent] Exception handling update:`, error);
-            const errorMsg = `❌ Error updating ${update.field}. Please try again.`;
+            const errorMsg = `Error updating ${update.field}. Please try again.`;
             await session.memory.chatHistory.addAIChatMessage(errorMsg);
             return errorMsg;
         }
@@ -2437,7 +2436,7 @@ You can customize:
 
             if (!addonsMenu || addonsMenu.length === 0) {
                 logger.error(`[LeadAgent] No addons menu available`);
-                return `❌ Error: Addon options not available`;
+                return `Error: Addon options not available`;
             }
 
             const addonService = AddonServiceImpl.getInstance();
@@ -2462,7 +2461,7 @@ You can customize:
             return response;
         } catch (error) {
             logger.error(`[LeadAgent] Error processing addons:`, error);
-            return `❌ Error processing addons. Please try again.`;
+            return `Error processing addons. Please try again.`;
         }
     }
 
@@ -2502,7 +2501,7 @@ You can customize:
             return response;
         } catch (error) {
             logger.error(`[LeadAgent] Error showing addons:`, error);
-            return `❌ Error loading addon options. Please try again.`;
+            return `Error loading addon options. Please try again.`;
         }
     }
 

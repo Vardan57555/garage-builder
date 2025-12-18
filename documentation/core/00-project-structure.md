@@ -9,20 +9,26 @@ garage-builder/
 ├── README.md                           # Project overview
 ├── Makefile                            # Build and deployment commands
 ├── docker-compose.yml                  # Main services orchestration
-├── db-compose.yml                      # Database services
-├── Dockerfile                          # Main application container
-├── package.json                        # Node.js dependencies
+├── db-compose.yml                      # Database services (MySQL, Redis)
+├── Dockerfile                          # Main backend container
+├── package.json                        # Node.js dependencies (pnpm)
+├── pnpm-lock.yaml                      # pnpm lock file
+├── pnpm-workspace.yaml                 # pnpm workspace config
 ├── tsconfig.json                       # TypeScript configuration
+├── biome.json                          # Biome linter/formatter config
 ├── .gitignore                          # Git ignore rules
 ├── .env.example                        # Environment variables template
+├── .sequelizerc                        # Sequelize CLI configuration
+├── pricing_engine_pre.sql              # Database initialization SQL
 │
 ├── documentation/                      # 📚 All project documentation
-├── tests/                             # 🧪 All test files
-├── client/                            # 🎨 Streamlit frontend
-├── garage-image-service/              # 🖼️  Image generation service
-├── src/                               # 💻 Backend source code
-├── scripts/                           # 🔧 Utility scripts
-└── database/                          # 🗄️  Database files
+├── tests/                              # 🧪 All test files
+├── client/                             # 🎨 Streamlit frontend
+├── garage-image-service/               # 🖼️  Image generation service
+├── source/                             # 💻 Backend source code (TypeScript)
+├── scripts/                            # 🔧 Utility scripts
+├── sequelize/                          # 🗄️  Database migrations & seeders
+└── Comfy/                              # 🎨 ComfyUI Dockerfile
 ```
 
 ## Documentation (`documentation/`)
@@ -33,23 +39,23 @@ All project documentation in one centralized location.
 documentation/
 ├── README.md                          # Documentation index
 │
-├── Core Documentation
-├── 00-project-structure.md            # This file
-├── 01-overview.md                     # Project overview
-├── 02-architecture.md                 # System architecture
-├── 03-setup.md                        # Setup instructions
-├── 04-api.md                          # API documentation
-├── 04-database-schema.md              # Database schema
-├── 05-development-guide.md            # Development guide
-├── 06-product-requirements.md         # Product requirements
+├── core/                              # Core documentation
+│   ├── 00-project-structure.md        # This file
+│   ├── 01-overview.md                 # Project overview
+│   ├── 02-architecture.md             # System architecture
+│   ├── 03-setup.md                    # Setup instructions
+│   ├── 04-api.md                      # API documentation
+│   ├── 04-database-schema.md          # Database schema
+│   ├── 05-development-guide.md        # Development guide
+│   └── 06-product-requirements.md     # Product requirements
 │
-├── Image Generation Service
-├── 07-image-generation-service.md     # Service overview
-├── 08-image-generation-docker-setup.md # Docker setup
-├── 09-image-generation-architecture.md # Architecture
-├── 10-image-generation-summary.md     # Implementation summary
+├── image-generation/                  # Image Generation Service
+│   ├── 07-image-generation-service.md     # Service overview
+│   ├── 08-image-generation-docker-setup.md # Docker setup
+│   ├── 09-image-generation-architecture.md # Architecture
+│   └── 10-image-generation-summary.md     # Implementation summary
 │
-└── Guides & References
+└── guides/                            # Guides & References
     ├── 11-access-guide.md             # Access all services
     ├── 12-integration-complete.md     # Integration summary
     ├── 13-production-mode.md          # Production deployment
@@ -121,26 +127,71 @@ garage-image-service/
     └── (generated files)
 ```
 
-## Backend (`src/`)
+## Backend (`source/`)
 
-Node.js/TypeScript backend API.
+Node.js/TypeScript backend API with AI-powered conversational agents.
 
 ```
-src/
-├── app/
-│   ├── controllers/                  # Request handlers
-│   ├── models/                       # Data models
-│   ├── routes/                       # API routes
-│   ├── services/                     # Business logic
+source/
+├── main.ts                           # Application entry point
+├── app.ts                            # Express application setup
+│
+├── agents/                           # 🤖 AI Agent System (LangGraph)
+│   ├── LeadAgent.ts                  # Main conversational agent
+│   ├── LeadAgentGraph.ts             # LangGraph workflow definition
+│   ├── LeadAgentState.ts             # Agent state management
+│   ├── LeadAgentHelpers.ts           # Helper functions
+│   ├── IntentDetectionNode.ts        # Intent detection node
+│   ├── LangSmithConfig.ts            # LangSmith tracing config
+│   ├── tools/                        # Agent tools
+│   │   ├── impl/                     # Tool implementations
+│   │   │   ├── ParameterExtractionNode.ts
+│   │   │   ├── PriceCalculationNode.ts
+│   │   │   ├── ColorServiceImpl.ts
+│   │   │   ├── AddonServiceImpl.ts
+│   │   │   ├── GarageImageGeneratorNode.ts
+│   │   │   ├── ComfyUIClientNode.ts
+│   │   │   ├── FuzzyIntentMatcher.ts
+│   │   │   ├── AIDimensionDetector.ts
+│   │   │   └── ... (30+ tool implementations)
+│   │   ├── io/                       # Tool I/O interfaces
+│   │   └── validators/               # Input validators
+│   └── validators/                   # Agent validators
+│
+├── modules/                          # 📦 Business Modules
+│   ├── building-service/             # Building configuration
+│   │   ├── controllers/
+│   │   ├── routes/
+│   │   └── services/
+│   ├── chat-service/                 # Chat API endpoints
+│   ├── manufacturer-service/         # Manufacturer data
+│   ├── price-service/                # Pricing calculations
+│   └── states-service/               # State/region data
+│
+├── common/                           # 🔧 Shared Components
+│   ├── controller/                   # Base controllers
+│   ├── io/                           # Interfaces & types
 │   ├── middleware/                   # Express middleware
-│   └── utils/                        # Utility functions
+│   └── routes/                       # Route definitions
 │
-├── config/                           # Configuration
-│   ├── database.ts                   # DB configuration
-│   ├── redis.ts                      # Redis configuration
-│   └── ollama.ts                     # Ollama configuration
+├── config/                           # ⚙️ Configuration
+│   ├── db/                           # Database config
+│   │   ├── MySqlManager.ts           # MySQL connection manager
+│   │   └── models/                   # Sequelize models (134 models)
+│   ├── redis/                        # Redis configuration
+│   └── system-config/                # App configuration
 │
-└── server.ts                         # Application entry point
+├── configs/                          # 📄 Config Files
+│   ├── app.json                      # App settings
+│   ├── mysql.json                    # MySQL settings
+│   └── redis-config.json             # Redis settings
+│
+├── errors/                           # ❌ Error handling
+├── llm/                              # 🧠 LLM configuration
+└── utils/                            # 🛠️ Utilities
+    ├── cors/                         # CORS utilities
+    ├── logger/                       # Logging (Pino)
+    └── session/                      # Session management
 ```
 
 ## Scripts (`scripts/`)
@@ -149,31 +200,44 @@ Utility and deployment scripts.
 
 ```
 scripts/
-├── setup.sh                          # Initial setup
-├── migrate.sh                        # Database migrations
-├── seed.sh                           # Database seeding
-└── deploy.sh                         # Deployment script
-```
-
-## Database (`database/`)
-
-Database schemas and migrations.
-
-```
-database/
-├── migrations/                       # Database migrations
-│   ├── 001_initial_schema.sql
-│   ├── 002_add_sheds.sql
-│   └── ...
+├── initialize_services/              # Service initialization
+│   ├── initialize.sh                 # Main initialization script
+│   ├── run-all-migrations.sh         # Run database migrations
+│   ├── run-all-seeders.sh            # Run database seeders
+│   ├── ollama-init.sh                # Initialize Ollama models
+│   ├── ollama-wait.sh                # Wait for Ollama service
+│   ├── ollama-model-wait.sh          # Wait for model download
+│   ├── comfyui-checkpoint.sh         # Download ComfyUI checkpoints
+│   ├── wait-for-comfyui.sh           # Wait for ComfyUI service
+│   ├── wait-for-db.sh                # Wait for database
+│   └── wait-for-db-docker.sh         # Wait for DB in Docker
 │
-├── seeds/                           # Seed data
-│   ├── pricing_data.sql
-│   └── test_data.sql
-│
-└── schemas/                         # Schema definitions
-    ├── garage_schema.sql
-    └── pricing_schema.sql
+└── clean_services/                   # Cleanup scripts
+    ├── clean_project.sh              # Clean project files
+    ├── undo-all-migrations.sh        # Undo migrations
+    └── undo-all-seeders.sh           # Undo seeders
 ```
+
+## Database (`sequelize/`)
+
+Sequelize ORM migrations and seeders.
+
+```
+sequelize/
+├── migrations/                       # Database migrations (134 files)
+│   ├── 20251001151041-create_additional_features.js
+│   ├── 20251001151211-create_addon.js
+│   ├── 20251001151245-create_addons_width.js
+│   └── ... (131 more migration files)
+│
+└── seeders/                          # Seed data (124 files)
+    ├── 20251002062207-seed-additional-features.js
+    ├── 20251002062402-seed-addon.js
+    ├── 20251002062503-seed-addons-width.js
+    └── ... (121 more seeder files)
+```
+
+**Note:** The `pricing_engine_pre.sql` file in root contains the complete database initialization (~961MB).
 
 ## Key Files
 
@@ -201,9 +265,11 @@ database/
 
 | File | Purpose |
 |------|---------|
-| `src/server.ts` | Backend API server |
-| `client/app.py` | Streamlit frontend |
-| `garage-image-service/app.py` | Image generation service |
+| `source/main.ts` | Backend API server entry point |
+| `source/app.ts` | Express application setup |
+| `client/app.py` | Streamlit frontend (chat interface) |
+| `garage-image-service/app.py` | Image generation service (FastAPI) |
+| `garage-image-service/app_demo.py` | Demo mode (no GPU required) |
 
 ## File Naming Conventions
 
@@ -343,16 +409,21 @@ make down                             # Stop everything
 ### Most Important Files
 - `Makefile` - All commands
 - `documentation/README.md` - Documentation index
-- `tests/README.md` - Testing guide
-- `docker-compose.yml` - Service configuration
+- `docker-compose.yml` - Main service configuration
+- `db-compose.yml` - Database services
+- `source/agents/LeadAgent.ts` - Main AI agent logic
+- `source/agents/LeadAgentGraph.ts` - LangGraph workflow
 - `garage-image-service/app.py` - Image generation logic
+- `client/app.py` - Streamlit chat interface
 
 ### Most Important Directories
 - `documentation/` - All docs
-- `tests/` - All tests
+- `source/agents/` - AI agent system
+- `source/modules/` - Business logic modules
+- `source/config/db/models/` - Database models (134 models)
 - `garage-image-service/` - Image generation
-- `client/pages/` - Streamlit pages
-- `src/` - Backend code
+- `client/` - Streamlit frontend
+- `sequelize/` - Database migrations & seeders
 
 ## Navigation Tips
 

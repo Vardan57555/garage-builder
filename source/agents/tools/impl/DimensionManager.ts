@@ -33,7 +33,7 @@ export class DimensionManager implements IDimensionManager {
         if (widthMatch) {
             const value = parseFloat(widthMatch[1]);
             if (this.validateDimension(value)) {
-                logger.info(`[DimensionManager] ✅ Extracted width: ${value}`);
+                logger.info(`[DimensionManager] Extracted width: ${value}`);
                 return { field: 'width', value };
             }
         }
@@ -42,7 +42,7 @@ export class DimensionManager implements IDimensionManager {
         if (lengthMatch) {
             const value = parseFloat(lengthMatch[1]);
             if (this.validateDimension(value)) {
-                logger.info(`[DimensionManager] ✅ Extracted length: ${value}`);
+                logger.info(`[DimensionManager] Extracted length: ${value}`);
                 return { field: 'length', value };
             }
         }
@@ -51,7 +51,7 @@ export class DimensionManager implements IDimensionManager {
         if (heightMatch) {
             const value = parseFloat(heightMatch[1]);
             if (this.validateDimension(value)) {
-                logger.info(`[DimensionManager] ✅ Extracted height: ${value}`);
+                logger.info(`[DimensionManager] Extracted height: ${value}`);
                 return { field: 'height', value };
             }
         }
@@ -72,7 +72,7 @@ export class DimensionManager implements IDimensionManager {
             const value = parseFloat(widthMatch[1]);
             if (this.validateDimension(value)) {
                 result.width = value;
-                logger.info(`[DimensionManager] ✅ Found width: ${value}`);
+                logger.info(`[DimensionManager] Found width: ${value}`);
             }
         }
 
@@ -81,7 +81,7 @@ export class DimensionManager implements IDimensionManager {
             const value = parseFloat(lengthMatch[1]);
             if (this.validateDimension(value)) {
                 result.length = value;
-                logger.info(`[DimensionManager] ✅ Found length: ${value}`);
+                logger.info(`[DimensionManager] Found length: ${value}`);
             }
         }
 
@@ -90,12 +90,12 @@ export class DimensionManager implements IDimensionManager {
             const value = parseFloat(heightMatch[1]);
             if (this.validateDimension(value)) {
                 result.height = value;
-                logger.info(`[DimensionManager] ✅ Found height: ${value}`);
+                logger.info(`[DimensionManager] Found height: ${value}`);
             }
         }
 
         if (Object.keys(result).length > 0) {
-            logger.info(`[DimensionManager] ✅ Multiple dimension extraction result:`, result);
+            logger.info(`[DimensionManager] Multiple dimension extraction result:`, result);
             return result;
         }
 
@@ -118,7 +118,7 @@ export class DimensionManager implements IDimensionManager {
             logger.info(`[DimensionManager] Regex captured: w=${width}, l=${length}, h=${height}`);
 
             if (this.validateDimensions(width, length, height)) {
-                logger.info(`[DimensionManager] ✅ Abbreviated format: ${width}x${length}x${height}`);
+                logger.info(`[DimensionManager] Abbreviated format: ${width}x${length}x${height}`);
                 return { width, length, height, numCars: null };
             } else {
                 logger.warn(`[DimensionManager] Validation failed for abbreviated format: ${width}x${length}x${height}`);
@@ -127,13 +127,13 @@ export class DimensionManager implements IDimensionManager {
 
         const labeledResult = this.tryLabeledDimensions(input);
         if (labeledResult) {
-            logger.info(`[DimensionManager] ✅ Labeled format: ${JSON.stringify(labeledResult)}`);
+            logger.info(`[DimensionManager] Labeled format: ${JSON.stringify(labeledResult)}`);
             return labeledResult;
         }
 
         const singleLabeledResult = this.tryParseSingleLabeledDimension(input);
         if (singleLabeledResult) {
-            logger.info(`[DimensionManager] ✅ Single labeled dimension: ${singleLabeledResult.field} = ${singleLabeledResult.value}`);
+            logger.info(`[DimensionManager] Single labeled dimension: ${singleLabeledResult.field} = ${singleLabeledResult.value}`);
             return {
                 [singleLabeledResult.field]: singleLabeledResult.value,
                 numCars: null
@@ -142,19 +142,19 @@ export class DimensionManager implements IDimensionManager {
 
         const xFormatResult = this.tryExplicitDimensions(input);
         if (xFormatResult) {
-            logger.info(`[DimensionManager] ✅ X format: ${JSON.stringify(xFormatResult)}`);
+            logger.info(`[DimensionManager] X format: ${JSON.stringify(xFormatResult)}`);
             return xFormatResult;
         }
 
         const commaResult = this.tryCommaSeparatedDimensions(input);
         if (commaResult) {
-            logger.info(`[DimensionManager] ✅ Comma format: ${JSON.stringify(commaResult)}`);
+            logger.info(`[DimensionManager] Comma format: ${JSON.stringify(commaResult)}`);
             return commaResult;
         }
 
         const spaceResult = this.trySpaceSeparatedDimensions(input);
         if (spaceResult) {
-            logger.info(`[DimensionManager] ✅ Space format: ${JSON.stringify(spaceResult)}`);
+            logger.info(`[DimensionManager] Space format: ${JSON.stringify(spaceResult)}`);
             return spaceResult;
         }
 
@@ -166,7 +166,7 @@ export class DimensionManager implements IDimensionManager {
             const calculation = DynamicGarageDimensionCalculator.calculateDimensionsFromInput(input);
 
             if (calculation && calculation.width && calculation.length && calculation.height) {
-                logger.info(`[DimensionManager] ✅ Calculated from car count: ${calculation.width}x${calculation.length}x${calculation.height}`);
+                logger.info(`[DimensionManager] Calculated from car count: ${calculation.width}x${calculation.length}x${calculation.height}`);
                 return calculation;
             }
         }
@@ -319,7 +319,7 @@ export class DimensionManager implements IDimensionManager {
         const numCars: number = carCountMatch ? parseInt(carCountMatch[1], 10) : null;
 
         if (!numCars || numCars <= 0) {
-            return {success: false, message: `❌ Could not process ${value}`};
+            return {success: false, message: `Could not process ${value}`};
         }
 
         logger.info(`[DimensionManager] Garage type changing to "${value}" (${numCars} cars)`);
@@ -336,7 +336,7 @@ export class DimensionManager implements IDimensionManager {
             height
         };
 
-        logger.info(`[DimensionManager] ✅ Calculated dimensions: ${width}×${length}×${height}`);
+        logger.info(`[DimensionManager] Calculated dimensions: ${width}×${length}×${height}`);
 
         return {
             success: true,

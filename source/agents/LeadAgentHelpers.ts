@@ -106,7 +106,7 @@ export class LeadAgentHelpers
         if (params.gauge) parts.push(`Gauge: ${params.gauge}`);
         if (params.color) parts.push(`Color: ${params.color}`);
 
-        return parts.length > 0 ? `📋 Current parameters: ${parts.join(" | ")}` : "";
+        return parts.length > 0 ? `Current parameters: ${parts.join(" | ")}` : "";
     }
 
     static getMissingFields(params: Partial<UserFriendlyParams>): string[]
