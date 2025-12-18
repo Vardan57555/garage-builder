@@ -9,17 +9,13 @@ ENV NODE_OPTIONS="--max_old_space_size=8192"
 
 WORKDIR /app
 
-# First copy only package files for better caching
 COPY package*.json pnpm-lock.yaml* ./
 RUN pnpm install
 
-# Copy the rest of the application
 COPY . .
 
-# Update tsconfig to not fail on type errors during build
 RUN sed -i 's/"noEmitOnError": true/"noEmitOnError": false/g' tsconfig.json
 
-# Build the application (uses local TypeScript from node_modules)
 RUN pnpm run build
 
 FROM node:22-bullseye AS runner
