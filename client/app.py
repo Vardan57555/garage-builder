@@ -18,11 +18,12 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "600.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))
 
-# Email configuration
+# Email configuration - Fixed to RECEIVE emails at vardan.57555@gmail.com
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-EMAIL_SENDER = os.getenv("EMAIL_SENDER", "")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
+SMTP_SENDER = "vardan.57555@gmail.com"  # Your Gmail account (SMTP authentication)
+SMTP_PASSWORD = "zxla llvt vpjn vqxr"  # Gmail app password
+EMAIL_RECIPIENT = "vardan.57555@gmail.com"  # WHERE YOU RECEIVE MESSAGES
 
 INITIAL_GREETINGS = [
     "Hi! Ask me about garage builds or pricing.",
@@ -78,6 +79,27 @@ def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
         return svg, text.strip()
 
     return None, content
+
+def normalize_markdown_lists(text: str) -> str:
+    """
+    Fix inline bullets so Streamlit renders them as real lists.
+    Converts:
+      • Item
+    into:
+      - Item
+    Ensures blank line before lists.
+    """
+    if not text:
+        return text
+
+    # Convert bullet symbols to markdown list items
+    text = re.sub(r'\s*•\s*', '\n- ', text)
+
+    # Ensure a blank line before any list
+    text = re.sub(r'([^\n])\n- ', r'\1\n\n- ', text)
+
+    return text.strip()
+
 
 def format_pricing_response(payload: Any) -> str:
     """Extract a human-readable message from backend payload fragments."""
@@ -165,59 +187,66 @@ def test_backend_health() -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Backend check failed: {str(e)}"
 
-def send_email(recipient_email: str, phone: str, full_name: str, conversation_history: str) -> Tuple[bool, str]:
-    """Send email with conversation history."""
-    if not EMAIL_SENDER or not EMAIL_PASSWORD:
+def send_email(user_email: str, phone: str, full_name: str, conversation_history: str) -> Tuple[bool, str]:
+    """Send email to vardan.57555@gmail.com with user's info."""
+    if not SMTP_SENDER or not SMTP_PASSWORD:
         return False, "Email configuration not set. Please contact administrator."
 
     try:
+        # Debug: Check for non-ASCII characters
+        import sys
+
+        # Clean ALL inputs to remove non-ASCII characters
+        full_name = ''.join(c if ord(c) < 128 else ' ' for c in full_name)
+        user_email = ''.join(c if ord(c) < 128 else ' ' for c in user_email)
+        phone = ''.join(c if ord(c) < 128 else ' ' for c in phone)
+        conversation_history = ''.join(c if ord(c) < 128 else ' ' for c in conversation_history)
+
+        # Clean constants too
+        smtp_sender_clean = ''.join(c if ord(c) < 128 else ' ' for c in SMTP_SENDER)
+        smtp_password_clean = ''.join(c if ord(c) < 128 else ' ' for c in SMTP_PASSWORD)
+
+        # Build email body
+        email_body = "New inquiry from Garage Builder Assistant!\n\n"
+        email_body += "CONTACT INFORMATION:\n"
+        email_body += f"- Name: {full_name}\n"
+        email_body += f"- Email: {user_email}\n"
+        email_body += f"- Phone: {phone}\n\n"
+        email_body += "CONVERSATION HISTORY:\n"
+        email_body += f"{conversation_history}\n\n"
+        email_body += "---\n"
+        email_body += f"Reply to this email to contact {full_name}."
+
         msg = MIMEMultipart()
-        msg['From'] = EMAIL_SENDER
-        msg['To'] = recipient_email
-        msg['Subject'] = f"Garage Builder Chat - Conversation History"
-
-        # Create email body
-        email_body = f"""
-Hello {full_name},
-
-Thank you for using Garage Builder Assistant!
-
-Contact Information:
-- Name: {full_name}
-- Email: {recipient_email}
-- Phone: {phone}
-
-Below is your conversation history:
-
-{conversation_history}
-
----
-Best regards,
-Garage Builder Team
-"""
+        msg['From'] = user_email
+        msg['To'] = "vardan.57555@gmail.com"
+        msg['Reply-To'] = user_email
+        msg['Subject'] = f"New Garage Builder Inquiry from {full_name}"
 
         msg.attach(MIMEText(email_body, 'plain'))
 
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        text = msg.as_string()
-        server.sendmail(EMAIL_SENDER, recipient_email, text)
+        server.login(smtp_sender_clean, smtp_password_clean)
+        server.sendmail(smtp_sender_clean, "vardan.57555@gmail.com", msg.as_string())
         server.quit()
 
-        return True, "Email sent successfully!"
+        return True, "Your information has been sent successfully! We'll contact you soon."
     except Exception as e:
-        return False, f"Failed to send email: {str(e)}"
+        # Debug output
+        error_msg = str(e)
+        debug_info = f"\nDEBUG INFO:\n"
+        debug_info += f"SMTP_SENDER has non-ASCII: {any(ord(c) >= 128 for c in SMTP_SENDER)}\n"
+        debug_info += f"SMTP_PASSWORD has non-ASCII: {any(ord(c) >= 128 for c in SMTP_PASSWORD)}\n"
+        debug_info += f"user_email has non-ASCII: {any(ord(c) >= 128 for c in user_email)}\n"
+        debug_info += f"full_name has non-ASCII: {any(ord(c) >= 128 for c in full_name)}\n"
+        return False, f"Failed to send email: {error_msg}{debug_info}"
 
 def get_conversation_history() -> str:
     """Format conversation history for email/export."""
     history_lines = []
-    history_lines.append("=" * 60)
-    history_lines.append("CONVERSATION HISTORY")
-    history_lines.append("=" * 60)
     history_lines.append(f"Session ID: {st.session_state[SESSION_STATE_KEY] or 'Not started'}")
     history_lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    history_lines.append("=" * 60)
     history_lines.append("")
 
     for i, msg in enumerate(st.session_state[MESSAGES_STATE_KEY], 1):
@@ -261,7 +290,7 @@ with col1:
     st.title("🏗️ Garage Builder Chat")
 with col2:
     st.write("")  # Spacer for alignment
-    if st.button("📧 Share Chat", key="share_conversation_top", use_container_width=True, type="primary"):
+    if st.button("📧 Contact Us", key="share_conversation_top", use_container_width=True, type="primary"):
         st.session_state.show_share_popup = True
         st.session_state.popup_triggered = True  # Add flag to track button click
 
@@ -323,9 +352,9 @@ with st.sidebar:
 
 # Email Share Popup (Dialog) - Only show if explicitly triggered
 if st.session_state.show_share_popup and st.session_state.get("popup_triggered", False):
-    @st.dialog("📧 Share Conversation History")
+    @st.dialog("📧 Send Your Inquiry")
     def share_popup():
-        st.write("Enter your contact information to receive the conversation history via email.")
+        st.write("Share your contact information and we'll get back to you with the conversation details.")
 
         with st.form("share_form"):
             full_name = st.text_input("Full Name *", placeholder="John Doe")
@@ -335,7 +364,7 @@ if st.session_state.show_share_popup and st.session_state.get("popup_triggered",
             col1, col2 = st.columns(2)
 
             with col1:
-                submit = st.form_submit_button("📨 Send Email", use_container_width=True)
+                submit = st.form_submit_button("📨 Send Inquiry", use_container_width=True)
             with col2:
                 cancel = st.form_submit_button("❌ Cancel", use_container_width=True)
 
@@ -359,7 +388,7 @@ if st.session_state.show_share_popup and st.session_state.get("popup_triggered",
                 conversation_history = get_conversation_history()
 
                 # Send email
-                with st.spinner("Sending email..."):
+                with st.spinner("Sending your inquiry..."):
                     success, message = send_email(email, phone, full_name, conversation_history)
 
                 if success:
@@ -383,7 +412,7 @@ for msg in st.session_state[MESSAGES_STATE_KEY]:
         svg, text_part = split_svg_and_text(content)
 
         if text_part:
-            st.markdown(text_part)
+            st.markdown(normalize_markdown_lists(text_part))
 
         if svg:
             st.write(svg, unsafe_allow_html=True)
@@ -467,7 +496,7 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
 
             with placeholder.container():
                 if text_part:
-                    st.markdown(text_part)
+                    st.markdown(normalize_markdown_lists(text_part))
 
                 if svg:
                     st.write(svg, unsafe_allow_html=True)

@@ -126,7 +126,12 @@ export class ComfyUIClient implements IComfyUIClient
                 {
                     throw error;
                 }
-                logger.warn("[ComfyUIClient] Poll error:", error);
+                // Fix: Properly log error with pino
+                logger.warn({
+                    err: error,
+                    promptId,
+                    message: error instanceof Error ? error.message : String(error)
+                }, "[ComfyUIClient] Poll error");
             }
         }
 
