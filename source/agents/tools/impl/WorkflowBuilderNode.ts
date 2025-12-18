@@ -25,12 +25,12 @@ export class WorkflowBuilder implements IWorkflowBuilder
 
         this.config = {
             model: "sd_xl_base_1.0.safetensors",
-            steps: 25,  // ✅ Increased for better detail
-            cfg: 8.0,   // ✅ Higher guidance for better prompt adherence
+            steps: 45,  // ✅ Increased for better detail
+            cfg: 13.0,   // ✅ Higher guidance for better prompt adherence
             sampler: "dpmpp_2m",  // ✅ Better sampler for architectural detail
             scheduler: "karras",   // ✅ Better scheduler for quality
-            width: 1024,
-            height: 768,
+            width: 1280,
+            height: 960,
             // ✅ ENHANCED: Much stronger negative prompt for flat views
             negativePrompt: "flat front-only view, straight-on frontal shot, no side wall visible, single-plane composition, flat elevation view, no depth, no three-dimensional form, open doors, ajar doors, partially open doors, door ajar, open garage door, lifted garage door, interior visible, interior view, dark interior, inside view, looking through doorway, people inside, vehicles inside, transparent doors, glass doors, windows in doors, bright interior lighting, interior space visible, gaping entrance, open access point, looking into building, wrong aspect ratio, distorted proportions, stretched dimensions, undersized, oversized, blurry, low quality, poorly rendered, asymmetrical doors, crooked structure, modern residential design, people in scene, vehicles visible, cars visible, trucks visible",
             ...config,

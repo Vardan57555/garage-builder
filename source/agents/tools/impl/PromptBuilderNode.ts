@@ -8,7 +8,7 @@ const logger: pino.Logger = createLogger(module);
 
 /**
  * Builds detailed garage prompts from parameters
- * ✅ ENHANCED: Better 3/4 angle view showing front AND side
+ * ✅ ENHANCED: Industrial corrugated metal garage - NOT residential
  */
 export class PromptBuilder implements IPromptBuilder
 {
@@ -24,15 +24,15 @@ export class PromptBuilder implements IPromptBuilder
         }
 
         this.colorDescriptions = {
-            "Barn Red": "barn red",
-            "Burgundy": "burgundy red",
-            "Royal Blue": "royal blue",
-            "Evergreen": "dark evergreen",
-            "Pewter Gray": "pewter gray metallic",
-            "White": "bright white",
-            "Black": "matte black",
+            "Barn Red": "industrial barn red",
+            "Burgundy": "deep burgundy red",
+            "Royal Blue": "industrial royal blue",
+            "Evergreen": "forest evergreen",
+            "Pewter Gray": "industrial pewter gray metallic",
+            "White": "pure white industrial",
+            "Black": "industrial matte black",
             "Clay": "clay brown",
-            "Pebble Beige": "warm pebble beige",
+            "Pebble Beige": "industrial pebble beige",
             "Earth Brown": "earth brown",
         };
     }
@@ -53,7 +53,7 @@ export class PromptBuilder implements IPromptBuilder
     }
 
     /**
-     * ✅ ENHANCED: Better camera angle and composition
+     * ✅ ENHANCED: Industrial corrugated metal garage specifics
      */
     public buildGaragePrompt(
         params: UserFriendlyParams,
@@ -64,160 +64,210 @@ export class PromptBuilder implements IPromptBuilder
         const height: number = params.height || 10;
         const roofType: string = params.roof_type || "regular";
         const color: string = params.color || "white";
+        const gauge: number = params.gauge || 16;
 
         const colorDesc: string = this.getColorDescription(color);
 
         // Calculate door configuration
         const doorConfig = this.calculateDoorConfiguration(width, selectedAddons);
 
-        // Log the configuration
-        logger.info(`[PromptBuilder] Building configuration:`, {
+        logger.info(`[PromptBuilder] Building INDUSTRIAL GARAGE configuration:`, {
             dimensions: `${width}×${length}×${height}ft`,
             aspectRatio: (width / length).toFixed(2),
             color: colorDesc,
             doors: doorConfig.totalDoors,
-            roofType
+            roofType,
+            gauge
         });
 
-        // Determine roof description with more detail
+        // Determine roof description - industrial focus
         let roofDescription = "";
         let roofVisualDetail = "";
         const roofTypeLower = roofType.toLowerCase();
 
         if (roofTypeLower === 'box') {
-            roofDescription = "flat box eave roof with horizontal ridge line";
-            roofVisualDetail = "flat roofline with minimal pitch, horizontal eave trim";
+            roofDescription = "flat box eave industrial roof with steel frame";
+            roofVisualDetail = "flat roofline with horizontal trim, steel structural supports visible at eaves";
         } else if (roofTypeLower === 'vertical') {
-            roofDescription = "vertical roof with ridge panels running lengthwise";
-            roofVisualDetail = "steep vertical roof panels with prominent ridge cap running front to back";
+            roofDescription = "vertical corrugated roof panels with ridge cap";
+            roofVisualDetail = "steep vertical corrugated panels with prominent industrial ridge running front to back, metal seams visible";
         } else if (roofTypeLower === 'gambrel') {
-            roofDescription = "gambrel barn-style roof with dual slopes";
-            roofVisualDetail = "distinctive barn-style gambrel roof with two slopes on each side";
+            roofDescription = "gambrel industrial roof with dual slopes";
+            roofVisualDetail = "industrial gambrel roof with two distinct slopes on each side, metal cladding throughout";
         } else {
-            roofDescription = "peaked gable roof with triangular end walls";
-            roofVisualDetail = "traditional peaked gable roof with visible triangular end walls";
+            roofDescription = "peaked gable industrial roof with corrugated panels";
+            roofVisualDetail = "traditional peaked gable roof with corrugated metal panels, triangular end wall gable";
         }
 
-        // Build addon specification with more detail
+        // Build addon specification
         let addonFeatures = "";
         if (selectedAddons && selectedAddons.length > 0) {
             const features = selectedAddons
                 .filter(a => a && a.label)
                 .map(a => {
                     const label = a.label.toLowerCase();
-                    // Add visual descriptions for addons
-                    if (label.includes('window')) return 'rectangular windows on side wall';
-                    if (label.includes('walk-in')) return 'personnel entry door on side';
-                    if (label.includes('cupola')) return 'decorative cupola on roof ridge';
+                    if (label.includes('window')) return 'industrial metal-frame windows on side wall';
+                    if (label.includes('walk-in')) return 'industrial steel personnel entry door on side';
+                    if (label.includes('cupola')) return 'metal cupola vent on roof ridge';
                     return label;
                 })
                 .join(", ");
-            addonFeatures = `Visible features: ${features}.`;
+            addonFeatures = `Industrial features: ${features}.`;
         }
 
-        // Determine door description with positioning
+        // Door description - industrial garage doors
         let doorDescription = "";
         let doorPositioning = "";
         if (doorConfig.totalDoors === 1) {
-            doorDescription = "single centered roll-up garage door";
-            doorPositioning = "one large centered door";
+            doorDescription = "single large industrial roll-up garage door, sectional metal construction";
+            doorPositioning = "one centered heavy-duty garage door";
         } else if (doorConfig.totalDoors === 2) {
-            doorDescription = "two side-by-side roll-up garage doors";
-            doorPositioning = "two evenly-spaced doors on front facade";
+            doorDescription = "two side-by-side heavy-duty industrial roll-up garage doors, sectional construction";
+            doorPositioning = "two evenly-spaced industrial garage doors on front";
         } else {
-            doorDescription = `${doorConfig.totalDoors} side-by-side roll-up garage doors`;
-            doorPositioning = `${doorConfig.totalDoors} evenly-spaced doors across front`;
+            doorDescription = `${doorConfig.totalDoors} side-by-side heavy-duty industrial roll-up garage doors`;
+            doorPositioning = `${doorConfig.totalDoors} evenly-spaced industrial doors across front`;
         }
 
-        // Calculate side visibility based on aspect ratio
         const aspectRatio = width / length;
         let sideVisibility = "";
         if (aspectRatio > 1.3) {
-            sideVisibility = "wide building with prominent front facade, side wall partially visible";
+            sideVisibility = "wide commercial building with prominent corrugated front facade, deep side wall receding";
         } else if (aspectRatio < 0.7) {
-            sideVisibility = "deep building with substantial side wall visible, showing full length";
+            sideVisibility = "deep commercial building with substantial corrugated side wall, full length visible";
         } else {
-            sideVisibility = "balanced proportions showing both front and side walls clearly";
+            sideVisibility = "balanced industrial proportions showing both corrugated front and side walls";
         }
 
         /**
-         * ✅ CRITICAL ENHANCEMENT: Better camera positioning and composition
+         * ✅ CRITICAL: Industrial corrugated metal garage - NOT residential
          *
-         * Key improvements:
-         * 1. Specific camera angle (45-degree oblique view)
-         * 2. Clear spatial description (front corner prominent)
-         * 3. Emphasis on showing BOTH front and side
-         * 4. Professional architectural photography style
-         * 5. Better depth and dimension description
+         * Key specifications:
+         * 1. Corrugated metal construction emphasized throughout
+         * 2. Industrial/commercial style - NOT residential house
+         * 3. Heavy-duty garage doors
+         * 4. Metal panels with visible ribbing
+         * 5. 45-degree oblique viewing angle
+         * 6. Concrete pad/foundation
+         * 7. No windows (unless addon)
+         * 8. Stark industrial aesthetic
          */
-        const prompt = `Professional architectural photograph of a ${colorDesc} corrugated metal building garage, shot from a 45-degree oblique angle showing the front corner, clearly displaying both the front facade with ${doorPositioning} AND the full side wall extending back, ${roofVisualDetail}, industrial steel construction with visible corrugated texture.
+        const prompt = `Professional architectural photograph of an industrial corrugated metal storage building and commercial garage structure, ${colorDesc} color, shot from a 45-degree oblique angle.
 
-CAMERA COMPOSITION:
-• Viewing angle: 45-degree oblique perspective from front corner
-• Position: Eye-level exterior shot, standing back to capture full building
-• Framing: Front facade on left side of frame, side wall extending to right, showing building depth and three-dimensional form
-• Depth: Clear view of building's length and proportions, showing ${sideVisibility}
+BUILDING TYPE & STYLE:
+• Type: Commercial warehouse garage, NOT a residential home
+• Construction: Steel frame with corrugated metal panel infill, industrial grade
+• Frame: Visible steel structural braces, columns, and frame members painted dark color (black, dark gray, or dark brown)
+• Infill Material: Gauge ${gauge} corrugated metal panels filling between steel frame braces
+• Style: Industrial utilitarian design with exposed frame structure, functional aesthetic, commercial/agricultural/industrial use
+• Purpose: Heavy equipment storage, vehicle maintenance garage, commercial workshop
 
-BUILDING SPECIFICATIONS:
-• Physical dimensions: ${width} feet wide × ${length} feet deep × ${height} feet tall
-• Building proportions: ${(width / length).toFixed(2)}:1 aspect ratio (${width > length ? 'wider than deep' : width < length ? 'deeper than wide' : 'square footprint'})
-• Wall material: ${colorDesc} corrugated metal panels with vertical ribbing, crisp panel lines visible
-• Roof style: ${roofDescription}, matching ${colorDesc} metal panels
+CORRUGATED METAL & FRAME SPECIFICATIONS:
+• Steel frame: Dark colored structural steel braces, columns, and frame members (black, dark gray, or dark brown paint)
+• Frame visibility: Visible structural frame creating grid pattern on building exterior
+• Metal panels: ${colorDesc} corrugated metal infill panels filling between frame braces
+• Panel material: Gauge ${gauge} corrugated steel with vertical ribbing, professional industrial finish
+• Metal ribs: Clearly visible corrugated texture, 1-1.5 inch depth showing 3D dimension
+• Frame-to-panel: Strong contrast between dark steel frame and ${colorDesc} metal infill
+• Structural appearance: Frame braces visible at corners, across walls, and at roof line
+• Professional installation: Clean panel seams, frame bolts visible, industrial construction quality
+
+ROOF STYLE:
+• Roof type: ${roofDescription}
 • Roof detail: ${roofVisualDetail}
-• Base: Concrete foundation with dark gray concrete stem wall, approximately 2-3 feet high
-• Front doors: ${doorDescription}, all doors fully closed and sealed, white or tan horizontal roll-up sections with no gaps
-${addonFeatures ? `• Additional features: ${addonFeatures}` : ''}
+• Overhang: 12-18 inch industrial eaves overhang with metal fascia trim
+• Ridge: Metal ridge cap running full length, properly sealed
+
+FRONT FACADE:
+• Doors: ${doorDescription}
+• Door placement: ${doorPositioning}
+• Door type: Heavy-duty industrial sectional roll-up garage doors, fully closed
+• Door material: Steel construction with horizontal sections, industrial white/cream sections with dark metal frames
+• Door frame: Heavy steel frame with visible hardware, professional installation, dark frame contrasts with door panels
+• Frame braces: Visible dark steel structural braces framing the door opening
+• Wall composition: Dark steel frame with ${colorDesc} corrugated metal infill panels on either side of door
+• No windows on front facade (industrial/utilitarian)
+• Foundation: Dark concrete stem wall 2-3 feet visible, concrete pad extends forward
+
+SIDE WALL:
+• Material: Corrugated metal matching front, ${colorDesc} color
+• Visibility: Full side wall visible, extending back showing building depth
+• Windows: ${selectedAddons?.some(a => a.label.toLowerCase().includes('window')) ? 'Industrial metal-frame windows visible on side' : 'No windows (industrial warehouse style)'}
+• Composition: ${sideVisibility}
+
+GROUND & FOUNDATION:
+• Base: Concrete pad foundation, light gray concrete color
+• Ground surface: Industrial gravel or dirt lot in foreground
+• Foreground: Gravel/dirt pad area, clear view of building base
+• Ground texture: Industrial warehouse setting, no landscaping
 
 ENVIRONMENTAL SETTING:
-• Ground: Natural dirt/gravel pad in foreground, grass or vegetation in background
-• Sky: Clear blue sky with wispy clouds, natural daylight
-• Surroundings: Rural or industrial setting, trees visible in distant background
-• Lighting: Bright natural outdoor lighting, soft shadows showing building depth, no harsh contrasts
+• Setting: Industrial/agricultural rural area, isolated commercial building
+• Sky: Clear blue sky, natural outdoor lighting
+• Surroundings: Open landscape, minimal vegetation, industrial perimeter
+• Lighting: Bright natural daylight, side lighting showing corrugated texture detail
+• Shadows: Soft shadows emphasizing corrugated metal 3D texture
 
-VISUAL STYLE:
-Professional architectural photography, photorealistic rendering, sharp focus throughout, high detail showing metal texture, accurate building proportions matching ${(width / length).toFixed(2)}:1 ratio, three-dimensional depth clearly visible, realistic materials and weathering, HDRI lighting, 8K resolution quality.
+CAMERA & COMPOSITION:
+• Viewing angle: 45-degree oblique oblique perspective from front corner
+• Position: Eye-level exterior shot, standing at natural distance
+• Framing: Front facade with doors on left-center, side wall extending to right, depth clearly visible
+• Orientation: Front corner prominent, building oriented diagonally showing three-dimensional form
+• Perspective: Professional architectural documentation style
+• Depth: Clear building length and proportions visible, not flat view
 
-CRITICAL COMPOSITION REQUIREMENTS:
-• MUST show BOTH front wall (with doors) AND side wall (extending into depth)
-• Camera positioned at front corner for maximum dimensional visibility
-• Building oriented diagonally in frame to show depth
-• Clear separation between front facade and receding side wall
-• Proper perspective showing building extends backward from front doors
-• Three-dimensional volume evident, not flat front-only view`;
+VISUAL SPECIFICATIONS:
+• Style: Photorealistic architectural rendering of industrial building
+• Quality: Sharp focus, high detail, 8K resolution
+• Texture: Clear corrugated metal ribs, panel lines, seams, weathering, industrial finish
+• Color accuracy: Accurate ${colorDesc} color rendering
+• Proportions: Physical dimensions ${width}ft wide × ${length}ft deep × ${height}ft tall (${(width/length).toFixed(2)}:1 ratio)
+• Lighting: HDRI industrial lighting, harsh shadows showing texture
+• Style: Documentary architectural photography, NO artistic filters
 
-        // ✅ ENHANCED: Stronger negative prompt specifically for flat compositions
-        const negativeAdditions = `flat front-only view, straight-on frontal shot, no side wall visible, single-plane composition, flat elevation view, architectural elevation drawing, 2D front view, head-on perspective, symmetrical centered composition, no depth, no three-dimensional form, floating in space, no ground, open doors, ajar doors, partially open doors, door ajar, open garage door, lifted garage door, interior visible, interior view, dark interior, inside view, looking through doorway, people inside, vehicles inside, transparent doors, glass doors, windows in doors, bright interior lighting, interior space visible, gaping entrance, open access point, looking into building, wrong aspect ratio, distorted proportions, stretched dimensions, compressed dimensions, undersized, oversized, toy-like, miniature scale, blurry, low quality, poorly rendered, asymmetrical doors, crooked structure, warped panels, modern residential design, suburban house, residential garage door, people in scene, vehicles in foreground, cars visible, trucks visible, equipment in shot, signage, text, logos`;
+${addonFeatures ? `ADDITIONAL FEATURES: ${addonFeatures}` : ''}
 
-        logger.info(`[PromptBuilder] Generated ENHANCED prompt with:`);
-        logger.info(`  - Camera: 45-degree oblique angle from front corner`);
-        logger.info(`  - Composition: Both front AND side walls visible`);
-        logger.info(`  - Dimensions: ${width}×${length}×${height} (${(width/length).toFixed(2)}:1 ratio)`);
-        logger.info(`  - Doors: ${doorConfig.totalDoors} (${doorConfig.fromAddons ? 'from addons' : 'calculated'})`);
-        logger.info(`  - Visual emphasis: Three-dimensional depth and perspective`);
-        logger.info(`  - Negative exclusions: ${negativeAdditions.split(',').length} terms`);
+CRITICAL REQUIREMENTS:
+✓ MUST have visible dark steel frame/braces with corrugated metal infill panels
+✓ MUST show structural steel frame creating grid pattern on exterior
+✓ MUST have clear contrast between dark frame and ${colorDesc} panel color
+✓ MUST show corrugated metal texture with visible ribbing in infill panels
+✓ MUST show both front (with garage doors) AND side wall in 3D perspective
+✓ MUST show concrete foundation/stem wall
+✓ MUST show industrial warehouse/commercial aesthetic with frame structure
+✓ MUST have heavy-duty garage doors, fully sealed/closed
+✓ MUST display 45-degree oblique angle with building depth clearly visible
+✓ MUST NOT look like house, residential garage, or dwelling
+✓ Frame style: Visible structural braces, NOT solid wall
+✓ Dimensions: ${width}×${length}×${height} feet (${(width/length).toFixed(2)}:1 aspect ratio)`;
 
-        // Store for later retrieval
-        (this as any)._lastNegativePrompt = negativeAdditions;
+        /**
+         * ✅ CRITICAL NEGATIVE PROMPT: Prevent residential/home-like appearance
+         */
+        const negativePrompt = `residential home, house, dwelling, family home, residential garage, suburban house, residential structure, architectural home design, living space, bedroom, kitchen, windows with curtains, roof peak with eaves overhang, dormer windows, shutters, porch, deck, deck steps, residential entry door, residential siding, wood siding, brick wall, brick facade, vinyl siding, stone facade, landscaping, flower beds, shrubs, hedges, manicured lawn, driveway asphalt, residential appearance, modern house, colonial house, ranch house, beautiful home, cozy home, elegant home, luxury home, mansion, cottage, modern residential, flat front-only view, head-on frontal shot, no side wall, single-plane 2D view, architectural elevation, no depth, floating in space, no ground, open garage door, lifted door, interior visible, inside view, people inside, vehicles inside, occupants, glass door, transparent door, bright interior, interior lighting, open entrance, gaping opening, wrong dimensions, distorted proportions, stretched, compressed, asymmetrical, crooked, warped, blurry, low quality, poorly rendered, toy-like, miniature, cartoon, stylized, artistic, filtered, Instagram filter, painted, drawing, sketch, watercolor, illustration, digital art, CGI obvious, rendering artifacts, modern residential design, people in scene, humans visible, vehicles in shot, cars, trucks, equipment, signage, text, logos, branding`;
+
+        logger.info(`[PromptBuilder] Generated INDUSTRIAL GARAGE prompt with:`);
+        logger.info(`  - Material: ${gauge} gauge corrugated metal (EMPHASIZED)`);
+        logger.info(`  - Style: Industrial warehouse, NOT residential`);
+        logger.info(`  - Doors: ${doorConfig.totalDoors} heavy-duty garage doors`);
+        logger.info(`  - Dimensions: ${width}×${length}×${height} (${(width/length).toFixed(2)}:1)`);
+        logger.info(`  - Angle: 45-degree oblique showing depth`);
+        logger.info(`  - Negative: ${negativePrompt.split(',').length} exclusion terms`);
+
+        (this as any)._lastNegativePrompt = negativePrompt;
 
         return prompt;
     }
 
-    /**
-     * ✅ Get the enhanced negative prompt for the last build
-     */
     public getLastNegativePrompt(): string {
-        return (this as any)._lastNegativePrompt || "flat view, no depth, open doors, interior visible, people, vehicles";
+        return (this as any)._lastNegativePrompt || "residential home, house, dwelling, no depth, open doors";
     }
 
-    /**
-     * ✅ Calculate door configuration once
-     */
     private calculateDoorConfiguration(
         width: number,
         selectedAddons?: any[]
     ): { totalDoors: number; fromAddons: boolean } {
 
-        // Check for addon doors first
         let addonDoorCount = 0;
         if (selectedAddons && Array.isArray(selectedAddons)) {
             selectedAddons.forEach(addon => {
@@ -227,15 +277,13 @@ CRITICAL COMPOSITION REQUIREMENTS:
             });
         }
 
-        // If addons specify doors, use that count
         if (addonDoorCount > 0) {
             return { totalDoors: addonDoorCount, fromAddons: true };
         }
 
-        // Calculate based on width (standard garage door widths)
         let garageDoorCount = 1;
-        if (width >= 30) garageDoorCount = 2; // Two 9-10ft doors
-        if (width >= 45) garageDoorCount = 3; // Three 9-10ft doors
+        if (width >= 30) garageDoorCount = 2;
+        if (width >= 45) garageDoorCount = 3;
 
         return { totalDoors: garageDoorCount, fromAddons: false };
     }
