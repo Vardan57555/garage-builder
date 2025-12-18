@@ -1143,16 +1143,14 @@ You can customize:
 
             const visualizationResult = await generateGarageVisualizationNode(visualizationState);
 
-            const response = `✅ Using default settings:\n- Roof: Regular\n- Gauge: 16\n- Color: White\n\n${priceResult.response}\n\n${visualizationResult.response}`;
-
-            await session.memory.chatHistory.addAIChatMessage(response);
+            await session.memory.chatHistory.addAIChatMessage(visualizationResult.response);
 
             session.state.priceCalculated = true;
             session.state.finalPrice = finalTotal;
             session.state.selectedAddons = [];
             session.state.generatedImageUrl = visualizationResult.generatedImageUrl || "";
 
-            return response;
+            return visualizationResult.response;
 
         } catch (error) {
             logger.error(`[LeadAgent] Error generating quote with defaults:`, error);

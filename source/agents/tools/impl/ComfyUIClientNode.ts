@@ -7,16 +7,17 @@ import {ComfyUIResponse, ComfyUIWorkflow, HealthCheckResult} from "@agents/tools
 const logger: pino.Logger = createLogger(module);
 
 /**
- * Handles ComfyUI API communication
+ * Handles ComfyUI API communication with enhanced resilience
  */
 export class ComfyUIClient implements IComfyUIClient
 {
     private axios: AxiosInstance;
     private readonly pollInterval: number = 3000;
-    private readonly timeout: number = 220000;
+    private readonly timeout: number = 600000; // 10 minutes for image generation
+    private readonly maxRetries: number = 3; // Reduce from 5 to 3
     private static instance: IComfyUIClient;
 
-    constructor(enforce: () => void, comfyuiUrl: string = "http://localhost:8188")
+    constructor(enforce: () => void, comfyuiUrl: string = "http://127.0.0.1:8188")
     {
         if(enforce !== Enforce)
         {
@@ -25,16 +26,14 @@ export class ComfyUIClient implements IComfyUIClient
 
         this.axios = axios.create({
             baseURL: comfyuiUrl,
-            timeout: 120000,
+            timeout: 60000, // Reduce individual request timeout to 60s
+            headers: {
+                'Connection': 'keep-alive',
+                'Keep-Alive': 'timeout=30'
+            }
         });
         logger.info(`[ComfyUIClient] Initialized with URL: ${comfyuiUrl}`);
     }
-
-    /**
-     * Gets the singleton instance of StateReset.
-     *
-     * @returns The singleton instance of StateReset.
-     */
 
     public static getInstance(comfyuiUrl: string = "http://localhost:8188"): IComfyUIClient
     {
@@ -81,17 +80,42 @@ export class ComfyUIClient implements IComfyUIClient
     }
 
     /**
-     * Poll for generation completion
+     * Poll for generation completion with retry logic
      */
     public async pollForCompletion(promptId: string): Promise<string>
     {
         const startTime: number = Date.now();
+        let consecutiveErrors: number = 0;
+        let lastSuccessfulPoll: number = Date.now();
+
+        // Pre-check ComfyUI health before starting polling
+        const healthCheck = await this.checkHealth();
+        if (!healthCheck.healthy) {
+            throw new Error(`ComfyUI server is unhealthy: ${healthCheck.message}`);
+        }
+
+        logger.info(`[ComfyUIClient] Starting to poll for prompt: ${promptId}`);
 
         while (Date.now() - startTime < this.timeout)
         {
             try
             {
-                const response = await this.axios.get(`/history/${promptId}`);
+                // Add connection check before polling
+                const timeSinceLastSuccess = Date.now() - lastSuccessfulPoll;
+                if (timeSinceLastSuccess > 30000) { // If no success for 30s, check health
+                    const quickHealth = await this.checkHealth();
+                    if (!quickHealth.healthy) {
+                        throw new Error('ComfyUI server became unhealthy during polling');
+                    }
+                }
+
+                const response = await this.axios.get(`/history/${promptId}`, {
+                    timeout: 30000 // Shorter timeout for individual polls
+                });
+
+                // Reset error counter on successful request
+                consecutiveErrors = 0;
+                lastSuccessfulPoll = Date.now();
 
                 if (response.status === 200 && response.data[promptId])
                 {
@@ -118,7 +142,7 @@ export class ComfyUIClient implements IComfyUIClient
                     }
                 }
 
-                await new Promise((resolve) => setTimeout(resolve, this.pollInterval));
+                await this.delay(this.pollInterval);
             }
             catch (error)
             {
@@ -126,12 +150,30 @@ export class ComfyUIClient implements IComfyUIClient
                 {
                     throw error;
                 }
-                // Fix: Properly log error with pino
+
+                consecutiveErrors++;
+                const elapsedMs = Date.now() - startTime;
+                const elapsedSec = Math.round(elapsedMs / 1000);
+
                 logger.warn({
                     err: error,
                     promptId,
+                    consecutiveErrors,
+                    elapsedSeconds: elapsedSec,
                     message: error instanceof Error ? error.message : String(error)
-                }, "[ComfyUIClient] Poll error");
+                }, "[ComfyUIClient] Poll error (will retry)");
+
+                // If too many consecutive errors, fail
+                if (consecutiveErrors > this.maxRetries)
+                {
+                    logger.error(`[ComfyUIClient] Max retries exceeded after ${elapsedSec}s`);
+                    throw error;
+                }
+
+                // Faster exponential backoff: 3s, 6s, 12s (reduced from 48s max)
+                const backoffMs = Math.min(this.pollInterval * Math.pow(2, consecutiveErrors - 1), 12000); // Cap at 12s
+                logger.info(`[ComfyUIClient] Retrying in ${backoffMs}ms...`);
+                await this.delay(backoffMs);
             }
         }
 
@@ -168,29 +210,51 @@ export class ComfyUIClient implements IComfyUIClient
     }
 
     /**
-     * Check ComfyUI health
+     * Check ComfyUI health with retries
      */
     public async checkHealth(): Promise<HealthCheckResult>
     {
-        try
-        {
-            logger.info("[ComfyUIClient] Checking health...");
-            const response = await this.axios.get("/system_stats", { timeout: 5000 });
+        let lastError: Error | null = null;
 
-            if (response.status === 200)
+        for (let attempt = 0; attempt <= this.maxRetries; attempt++)
+        {
+            try
             {
-                logger.info("[ComfyUIClient] ✅ Health check passed");
-                return { healthy: true, message: "ComfyUI is running and healthy" };
-            }
+                logger.info(`[ComfyUIClient] Checking health (attempt ${attempt + 1}/${this.maxRetries + 1})...`);
+                const response = await this.axios.get("/system_stats", { timeout: 5000 });
 
-            return { healthy: false, message: `ComfyUI returned status ${response.status}` };
+                if (response.status === 200)
+                {
+                    logger.info("[ComfyUIClient] ✅ Health check passed");
+                    return { healthy: true, message: "ComfyUI is running and healthy" };
+                }
+
+                return { healthy: false, message: `ComfyUI returned status ${response.status}` };
+            }
+            catch (error)
+            {
+                lastError = error instanceof Error ? error : new Error(String(error));
+
+                if (attempt < this.maxRetries)
+                {
+                    const backoffMs = this.pollInterval * Math.pow(2, attempt);
+                    logger.warn(`[ComfyUIClient] Health check failed, retrying in ${backoffMs}ms...`);
+                    await this.delay(backoffMs);
+                }
+            }
         }
-        catch (error)
-        {
-            const message: string = error instanceof Error ? error.message : String(error);
-            logger.error("[ComfyUIClient] Health check failed:", message);
-            return { healthy: false, message: `ComfyUI is unreachable: ${message}` };
-        }
+
+        const message: string = lastError?.message || "Unknown error";
+        logger.error("[ComfyUIClient] Health check failed after all retries:", message);
+        return { healthy: false, message: `ComfyUI is unreachable: ${message}` };
+    }
+
+    /**
+     * Helper to delay execution
+     */
+    private delay(ms: number): Promise<void>
+    {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
 
