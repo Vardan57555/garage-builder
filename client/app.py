@@ -1,16 +1,16 @@
-"""Streamlit chat UI - Enhanced with proper tab isolation and email sharing."""
-
+"""Streamlit chat UI - Fixed contact button implementation with SVG email support."""
 import os
 import json
 import uuid
 import random
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import re
 import time
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
+from email.mime.image import MIMEImage
+import base64
 import httpx
 import streamlit as st
 
@@ -18,12 +18,12 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "1000.0"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "0"))
 
-# Email configuration - Fixed to RECEIVE emails at vardan.57555@gmail.com
+# Email configuration
 SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_SENDER = "vardan.57555@gmail.com"  # Your Gmail account (SMTP authentication)
-SMTP_PASSWORD = "zxla llvt vpjn vqxr"  # Gmail app password
-EMAIL_RECIPIENT = "vardan.57555@gmail.com"  # WHERE YOU RECEIVE MESSAGES
+SMTP_SENDER = "vardan.57555@gmail.com"
+SMTP_PASSWORD = "zxla llvt vpjn vqxr"
+EMAIL_RECIPIENT = "vardan.57555@gmail.com"
 
 INITIAL_GREETINGS = [
     "Hi! Ask me about garage builds or pricing.",
@@ -38,7 +38,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Hide sidebar completely
 hide_sidebar = """
 <style>
     [data-testid="collapsedControl"] {
@@ -52,11 +51,7 @@ hide_sidebar = """
 st.markdown(hide_sidebar, unsafe_allow_html=True)
 
 def get_tab_specific_id():
-    """
-    Generate a unique ID for THIS browser tab using session storage.
-    Each tab gets its own isolated session.
-    """
-    # Use browser's sessionStorage via JavaScript injection
+    """Generate a unique ID for THIS browser tab."""
     tab_id_script = """
     <script>
     if (!window.__STREAMLIT_TAB_ID__) {
@@ -67,7 +62,6 @@ def get_tab_specific_id():
     """
     st.html(tab_id_script)
 
-    # Fallback: use Streamlit's session state for Python-side tracking
     if "tab_id" not in st.session_state:
         st.session_state.tab_id = str(uuid.uuid4())
 
@@ -78,44 +72,37 @@ SESSION_STATE_KEY = f"sessionId_{TAB_ID}"
 MESSAGES_STATE_KEY = f"messages_{TAB_ID}"
 
 def get_random_greeting() -> str:
-    """Get a random initial greeting."""
     return random.choice(INITIAL_GREETINGS)
 
-def split_svg_and_text(content: str) -> Tuple[Optional[str], str]:
-    """Split content into SVG and text parts."""
+def split_svg_and_text(content: str) -> Tuple[Optional[str], str, bool]:
+    """Split content into SVG, text, and whether it has contact button marker."""
     svg_pattern = r'<svg[^>]*>.*?</svg>'
     match = re.search(svg_pattern, content, re.DOTALL)
+
+    # Check for contact button marker
+    has_contact_button = "[📧 Contact Us](#contact-button)" in content
 
     if match:
         svg = match.group(0)
         text = content[:match.start()] + content[match.end():]
-        return svg, text.strip()
+        # Remove contact button placeholder
+        text = text.replace("[📧 Contact Us](#contact-button)", "").strip()
+        return svg, text, has_contact_button
 
-    return None, content
+    # Remove contact button placeholder
+    text = content.replace("[📧 Contact Us](#contact-button)", "").strip()
+    return None, text, has_contact_button
 
 def normalize_markdown_lists(text: str) -> str:
-    """
-    Fix inline bullets so Streamlit renders them as real lists.
-    Converts:
-      • Item
-    into:
-      - Item
-    Ensures blank line before lists.
-    """
+    """Fix inline bullets for proper Streamlit rendering."""
     if not text:
         return text
-
-    # Convert bullet symbols to markdown list items
     text = re.sub(r'\s*•\s*', '\n- ', text)
-
-    # Ensure a blank line before any list
     text = re.sub(r'([^\n])\n- ', r'\1\n\n- ', text)
-
     return text.strip()
 
-
 def format_pricing_response(payload: Any) -> str:
-    """Extract a human-readable message from backend payload fragments."""
+    """Extract human-readable message from backend payload."""
     if payload is None:
         return "⚠️ Empty response received from pricing service."
 
@@ -148,7 +135,7 @@ def format_pricing_response(payload: Any) -> str:
     return str(payload)
 
 def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
-    """Parse full backend response and return session ID with formatted answer."""
+    """Parse backend response and return session ID with formatted answer."""
     if payload is None:
         return None, "⚠️ Empty response received from pricing service."
 
@@ -164,10 +151,7 @@ def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
 
     if payload.get("success") is False:
         error_message = format_pricing_response(
-            payload.get("message")
-            or payload.get("error")
-            or payload.get("errors")
-            or payload
+            payload.get("message") or payload.get("error") or payload.get("errors") or payload
         )
         return None, f"⚠️ Backend error: {error_message}"
 
@@ -186,97 +170,202 @@ def parse_chat_response(payload: Any) -> Tuple[Optional[str], str]:
 
     return session_id, format_pricing_response(answer_source)
 
-def test_backend_health() -> Tuple[bool, str]:
-    """Test if backend is reachable."""
-    try:
-        with httpx.Client(timeout=5.0) as client:
-            base_url = BACKEND_URL.replace('/api/v1/chat', '')
-            response = client.get(f"{base_url}/health", follow_redirects=True)
-            return True, f"Backend reachable (status: {response.status_code})"
-    except httpx.ConnectError:
-        return False, "Cannot connect to backend - is it running?"
-    except httpx.TimeoutException:
-        return False, "Backend health check timed out"
-    except Exception as e:
-        return False, f"Backend check failed: {str(e)}"
+def get_conversation_history_content() -> Tuple[str, str, List[dict]]:
+    """Return plain text history, HTML history, and inline image attachments."""
+    attachments: List[dict] = []
+    image_index: int = 1
+    html_parts = []
+    plain_lines: List[str] = []
 
-def send_email(user_email: str, phone: str, full_name: str, conversation_history: str) -> Tuple[bool, str]:
-    """Send email to vardan.57555@gmail.com with user's info."""
+    # Header
+    html_parts.append("<html><body style='font-family: Arial, sans-serif;'>")
+    html_parts.append(f"<h2>Garage Builder Assistant - Conversation History</h2>")
+    html_parts.append(f"<p><strong>Session ID:</strong> {st.session_state[SESSION_STATE_KEY] or 'Not started'}</p>")
+    html_parts.append(f"<p><strong>Generated:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>")
+    html_parts.append("<hr/>")
+
+    plain_lines.append(f"Session ID: {st.session_state[SESSION_STATE_KEY] or 'Not started'}")
+    plain_lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    plain_lines.append("")
+
+    # Messages
+    for i, msg in enumerate(st.session_state[MESSAGES_STATE_KEY], 1):
+        role = msg["role"].upper()
+        content = msg["content"]
+
+        # Remove contact button placeholder
+        content = re.sub(r'\[📧 Contact Us\]\(#contact-button\)', '', content)
+
+        # Role header
+        bg_color = "#e3f2fd" if role == "USER" else "#f5f5f5"
+        html_parts.append(f"<div style='margin: 20px 0; padding: 15px; background-color: {bg_color}; border-radius: 8px;'>")
+        html_parts.append(f"<h3 style='margin-top: 0; color: #1976d2;'>{role}</h3>")
+        plain_lines.append(f"[{role}]")
+
+        # Extract base64 images (markdown format: ![alt](data:image/png;base64,...))
+        img_pattern = r'!\[([^\]]*)\]\(data:image/([^;]+);base64,([^)]+)\)'
+        img_matches = list(re.finditer(img_pattern, content))
+
+        # Extract SVG if present
+        svg_pattern = r'<svg[^>]*>.*?</svg>'
+        svg_match = re.search(svg_pattern, content, re.DOTALL)
+
+        if img_matches:
+            rendered_text = content
+            for img_match in reversed(img_matches):
+                alt_text = img_match.group(1) or "Garage Rendering"
+                img_format = img_match.group(2)
+                base64_data = img_match.group(3)
+
+                try:
+                    image_bytes = base64.b64decode(base64_data)
+                except Exception:
+                    image_bytes = b""
+
+                cid = f"garage_rendering_{image_index}"
+                image_index += 1
+
+                attachments.append({
+                    "cid": cid,
+                    "mime": img_format,
+                    "data": image_bytes,
+                    "alt": alt_text,
+                })
+
+                rendered_text = (
+                    rendered_text[:img_match.start()]
+                    + f"<div style='margin: 15px 0; text-align: center;'>"
+                    + f"<img src=\"cid:{cid}\" alt=\"{alt_text}\" style=\"max-width: 100%; max-height: 600px; height: auto; border: 2px solid #1976d2; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);\"/>"
+                    + f"<p style='font-size: 14px; color: #666; margin-top: 10px; font-style: italic;'>{alt_text}</p>"
+                    + "</div>"
+                    + rendered_text[img_match.end():]
+                )
+
+                plain_lines.append(f"[Image attached: {alt_text}]")
+
+            text_html = rendered_text.replace('\n', '<br/>')
+            text_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\\1</strong>', text_html)
+            text_html = re.sub(r'\*(.*?)\*', r'<em>\\1</em>', text_html)
+            text_html = re.sub(r'•\s*', '&bull; ', text_html)
+            html_parts.append(f"<p>{text_html}</p>")
+
+        elif svg_match:
+            # Split text and SVG
+            svg = svg_match.group(0)
+            text = content[:svg_match.start()] + content[svg_match.end():]
+
+            # Add text
+            if text.strip():
+                text_html = text.replace('\n', '<br/>')
+                text_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\\1</strong>', text_html)
+                text_html = re.sub(r'\*(.*?)\*', r'<em>\\1</em>', text_html)
+                text_html = re.sub(r'•\s*', '&bull; ', text_html)
+                html_parts.append(f"<p>{text_html}</p>")
+                plain_lines.append(text.strip())
+
+            # Add SVG (embedded directly)
+            html_parts.append(f"<div style='margin: 15px 0; text-align: center;'>{svg}</div>")
+            plain_lines.append('[SVG diagram included]')
+
+        else:
+            # Just text, no image or SVG
+            text_html = content.replace('\n', '<br/>')
+            text_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\\1</strong>', text_html)
+            text_html = re.sub(r'\*(.*?)\*', r'<em>\\1</em>', text_html)
+            text_html = re.sub(r'•\s*', '&bull; ', text_html)
+            html_parts.append(f"<p>{text_html}</p>")
+            plain_lines.append(content.strip())
+
+        html_parts.append("</div>")
+        html_parts.append("<hr style='border: none; border-top: 1px solid #ddd;' />")
+        plain_lines.append("-" * 60)
+        plain_lines.append("")
+
+    html_parts.append("</body></html>")
+    return "\n".join(plain_lines).strip(), "\n".join(html_parts), attachments
+
+def send_email(user_email: str, phone: str, full_name: str, plain_history: str, html_history: str, attachments: List[dict]) -> Tuple[bool, str]:
+    """Send email with user's info, conversation history, and embedded images."""
     if not SMTP_SENDER or not SMTP_PASSWORD:
         return False, "Email configuration not set. Please contact administrator."
 
     try:
-        # Debug: Check for non-ASCII characters
-        import sys
-
-        # Clean ALL inputs to remove non-ASCII characters
+        # Clean inputs to remove non-ASCII characters
         full_name = ''.join(c if ord(c) < 128 else ' ' for c in full_name)
         user_email = ''.join(c if ord(c) < 128 else ' ' for c in user_email)
         phone = ''.join(c if ord(c) < 128 else ' ' for c in phone)
-        conversation_history = ''.join(c if ord(c) < 128 else ' ' for c in conversation_history)
 
-        # Clean constants too
         smtp_sender_clean = ''.join(c if ord(c) < 128 else ' ' for c in SMTP_SENDER)
         smtp_password_clean = ''.join(c if ord(c) < 128 else ' ' for c in SMTP_PASSWORD)
 
-        # Build email body
-        email_body = "New inquiry from Garage Builder Assistant!\n\n"
-        email_body += "CONTACT INFORMATION:\n"
-        email_body += f"- Name: {full_name}\n"
-        email_body += f"- Email: {user_email}\n"
-        email_body += f"- Phone: {phone}\n\n"
-        email_body += "CONVERSATION HISTORY:\n"
-        email_body += f"{conversation_history}\n\n"
-        email_body += "---\n"
-        email_body += f"Reply to this email to contact {full_name}."
+        # Create plain text version (without SVGs)
+        plain_body = "New inquiry from Garage Builder Assistant!\n\n"
+        plain_body += "CONTACT INFORMATION:\n"
+        plain_body += f"- Name: {full_name}\n"
+        plain_body += f"- Email: {user_email}\n"
+        plain_body += f"- Phone: {phone}\n\n"
+        plain_body += "CONVERSATION HISTORY:\n"
+        plain_body += f"{plain_history}\n\n"
+        plain_body += "---\n"
+        plain_body += f"Reply to this email to contact {full_name}."
 
-        msg = MIMEMultipart()
+        # Create HTML version (with SVGs)
+        html_body = f"""
+        <html>
+        <body style='font-family: Arial, sans-serif;'>
+            <h1>New Inquiry from Garage Builder Assistant</h1>
+
+            <div style='background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+                <h2>Contact Information</h2>
+                <p><strong>Name:</strong> {full_name}</p>
+                <p><strong>Email:</strong> {user_email}</p>
+                <p><strong>Phone:</strong> {phone}</p>
+            </div>
+
+            <hr style='border: 2px solid #1976d2; margin: 30px 0;'/>
+
+            {html_history}
+
+            <hr style='border: 2px solid #1976d2; margin: 30px 0;'/>
+
+            <p style='color: #666; font-style: italic;'>
+                Reply to this email to contact {full_name} at {user_email}
+            </p>
+        </body>
+        </html>
+        """
+
+        # Create multipart message
+        msg = MIMEMultipart('alternative')
         msg['From'] = user_email
-        msg['To'] = "vardan.57555@gmail.com"
+        msg['To'] = EMAIL_RECIPIENT
         msg['Reply-To'] = user_email
         msg['Subject'] = f"New Garage Builder Inquiry from {full_name}"
 
-        msg.attach(MIMEText(email_body, 'plain'))
+        # Attach both plain text and HTML versions
+        msg.attach(MIMEText(plain_body, 'plain'))
+        msg.attach(MIMEText(html_body, 'html'))
 
+        for attachment in attachments:
+            if not attachment.get("data"):
+                continue
+            img = MIMEImage(attachment["data"], _subtype=attachment["mime"])
+            img.add_header('Content-ID', f"<{attachment['cid']}>")
+            img.add_header('Content-Disposition', 'inline', filename=f"{attachment['cid']}.{attachment['mime']}")
+            msg.attach(img)
+
+        # Send email
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(smtp_sender_clean, smtp_password_clean)
-        server.sendmail(smtp_sender_clean, "vardan.57555@gmail.com", msg.as_string())
+        server.sendmail(smtp_sender_clean, EMAIL_RECIPIENT, msg.as_string())
         server.quit()
 
         return True, "Your information has been sent successfully! We'll contact you soon."
     except Exception as e:
-        # Debug output
-        error_msg = str(e)
-        debug_info = f"\nDEBUG INFO:\n"
-        debug_info += f"SMTP_SENDER has non-ASCII: {any(ord(c) >= 128 for c in SMTP_SENDER)}\n"
-        debug_info += f"SMTP_PASSWORD has non-ASCII: {any(ord(c) >= 128 for c in SMTP_PASSWORD)}\n"
-        debug_info += f"user_email has non-ASCII: {any(ord(c) >= 128 for c in user_email)}\n"
-        debug_info += f"full_name has non-ASCII: {any(ord(c) >= 128 for c in full_name)}\n"
-        return False, f"Failed to send email: {error_msg}{debug_info}"
+        return False, f"Failed to send email: {str(e)}"
 
-def get_conversation_history() -> str:
-    """Format conversation history for email/export."""
-    history_lines = []
-    history_lines.append(f"Session ID: {st.session_state[SESSION_STATE_KEY] or 'Not started'}")
-    history_lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    history_lines.append("")
-
-    for i, msg in enumerate(st.session_state[MESSAGES_STATE_KEY], 1):
-        role = msg["role"].upper()
-        content = msg["content"]
-        # Remove SVG tags for email
-        content = re.sub(r'<svg[^>]*>.*?</svg>', '[Image/Diagram]', content, flags=re.DOTALL)
-
-        history_lines.append(f"[{role}]")
-        history_lines.append(content)
-        history_lines.append("")
-        history_lines.append("-" * 60)
-        history_lines.append("")
-
-    return "\n".join(history_lines)
-
-# Initialize session state - NOW PER TAB
+# Initialize session state
 if SESSION_STATE_KEY not in st.session_state:
     st.session_state[SESSION_STATE_KEY] = None
 
@@ -297,17 +386,29 @@ if "popup_triggered" not in st.session_state:
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
 
-# Title with email button in top right
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title("🏗️ Garage Builder Chat")
-with col2:
-    st.write("")  # Spacer for alignment
-    if st.button("📧 Contact Us", key="share_conversation_top", use_container_width=True, type="primary"):
-        st.session_state.show_share_popup = True
-        st.session_state.popup_triggered = True  # Add flag to track button click
+# Title
+st.title("🏗️ Garage Builder Chat")
 
-# Email Share Popup (Dialog) - Only show if explicitly triggered
+# Display conversation with REAL contact buttons
+for msg_idx, msg in enumerate(st.session_state[MESSAGES_STATE_KEY]):
+    with st.chat_message(msg["role"]):
+        content = msg["content"]
+        svg, text_part, has_contact = split_svg_and_text(content)
+
+        if text_part:
+            st.markdown(normalize_markdown_lists(text_part))
+
+        if svg:
+            st.write(svg, unsafe_allow_html=True)
+
+        # Add REAL Streamlit button if contact marker was found
+        if has_contact:
+            if st.button("📧 Contact Us", key=f"contact_inline_{msg_idx}", type="primary"):
+                st.session_state.show_share_popup = True
+                st.session_state.popup_triggered = True
+                st.rerun()
+
+# Email popup dialog
 if st.session_state.show_share_popup and st.session_state.get("popup_triggered", False):
     @st.dialog("📧 Send Your Inquiry")
     def share_popup():
@@ -331,22 +432,25 @@ if st.session_state.show_share_popup and st.session_state.get("popup_triggered",
                 st.rerun()
 
             if submit:
-                # Validation
                 if not full_name or not email or not phone:
                     st.error("⚠️ Please fill in all required fields.")
                     return
 
-                # Basic email validation
                 if "@" not in email or "." not in email:
                     st.error("⚠️ Please enter a valid email address.")
                     return
 
-                # Get conversation history
-                conversation_history = get_conversation_history()
+                plain_history, html_history, attachments = get_conversation_history_content()
 
-                # Send email
                 with st.spinner("Sending your inquiry..."):
-                    success, message = send_email(email, phone, full_name, conversation_history)
+                    success, message = send_email(
+                        email,
+                        phone,
+                        full_name,
+                        plain_history,
+                        html_history,
+                        attachments
+                    )
 
                 if success:
                     st.success(f"✅ {message}")
@@ -359,29 +463,15 @@ if st.session_state.show_share_popup and st.session_state.get("popup_triggered",
                     st.error(f"❌ {message}")
 
     share_popup()
-    # Reset the trigger flag after showing popup
     st.session_state.popup_triggered = False
 
-# Display conversation
-for msg in st.session_state[MESSAGES_STATE_KEY]:
-    with st.chat_message(msg["role"]):
-        content = msg["content"]
-        svg, text_part = split_svg_and_text(content)
-
-        if text_part:
-            st.markdown(normalize_markdown_lists(text_part))
-
-        if svg:
-            st.write(svg, unsafe_allow_html=True)
-
-# Show processing indicator if AI is thinking
+# Processing indicator
 if st.session_state.is_processing:
     with st.chat_message("assistant"):
         st.markdown("🤖 *Please wait, processing your request...*")
 
-# Get user input
+# Chat input
 if prompt := st.chat_input("Type your question…", disabled=st.session_state.is_processing):
-    # Set processing flag to true
     st.session_state.is_processing = True
 
     st.session_state[MESSAGES_STATE_KEY].append({"role": "user", "content": prompt})
@@ -396,8 +486,6 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
             try:
                 timeout = httpx.Timeout(REQUEST_TIMEOUT, connect=10.0)
                 with httpx.Client(timeout=timeout) as client:
-                    # ✅ ALWAYS include sessionId - even if None on first message
-                    # Backend will create new session and return sessionId
                     request_body = {
                         "question": prompt,
                         "sessionId": st.session_state[SESSION_STATE_KEY] or ""
@@ -409,11 +497,7 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                         else:
                             st.markdown("🤖 The AI is generating a response…")
 
-                        start_time = time.time()
-
                     response = client.post(BACKEND_URL, json=request_body)
-                    elapsed = time.time() - start_time
-
                     response.raise_for_status()
 
                     try:
@@ -428,28 +512,19 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                 st.session_state.last_error = None
                 break
 
-            except httpx.TimeoutException as exc:
-                error_msg = f"Request timed out after {REQUEST_TIMEOUT}s"
+            except httpx.TimeoutException:
                 if attempt < MAX_RETRIES:
                     continue
-                else:
-                    reply = f"⚠️ {error_msg}\n\n**Troubleshooting:**\n- Check if backend is running\n- Try a simpler question\n- Increase timeout in environment variables"
-                    st.session_state.last_error = f"{error_msg}\nAttempt: {attempt + 1}/{MAX_RETRIES + 1}\nBackend: {BACKEND_URL}"
-
+                reply = f"⚠️ Request timed out after {REQUEST_TIMEOUT}s"
             except httpx.ConnectError as exc:
-                error_msg = "Cannot connect to backend"
-                reply = f"⚠️ {error_msg}\n\n**Please verify:**\n- Backend service is running on {BACKEND_URL}\n- Port 3000 is accessible\n- No firewall blocking the connection"
-                st.session_state.last_error = f"{error_msg}\nBackend: {BACKEND_URL}\nError: {str(exc)}"
+                reply = f"⚠️ Cannot connect to backend at {BACKEND_URL}"
                 break
-
             except Exception as exc:
-                error_msg = f"Request failed: {type(exc).__name__}"
-                reply = f"⚠️ {error_msg}: {str(exc)}"
-                st.session_state.last_error = f"{error_msg}\n{str(exc)}\nBackend: {BACKEND_URL}"
+                reply = f"⚠️ Request failed: {str(exc)}"
                 break
 
         if reply:
-            svg, text_part = split_svg_and_text(reply)
+            svg, text_part, has_contact = split_svg_and_text(reply)
 
             with placeholder.container():
                 if text_part:
@@ -458,8 +533,14 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                 if svg:
                     st.write(svg, unsafe_allow_html=True)
 
+                # ✅ Show contact button in new message if marked
+                if has_contact:
+                    if st.button("📧 Contact Us", key="contact_new_msg", type="primary"):
+                        st.session_state.show_share_popup = True
+                        st.session_state.popup_triggered = True
+                        st.rerun()
+
             st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
 
-        # Reset processing flag after response is complete
         st.session_state.is_processing = False
         st.rerun()

@@ -10,26 +10,27 @@ export class QuoteResponseFormatter
     /**
      * Format final quote with image
      */
-    public static formatFinalQuote(params: UserFriendlyParams, breakdown: QuoteBreakdown, selectedAddons: any[] = [], imageBase64: string | null = null): string {
-
-        let response = `
-        TOTAL ESTIMATED PRICE $${breakdown.finalTotal.toFixed(2)} for : Width: ${params.width}' | Length: ${params.length}' | Height: ${params.height}
-🎨 BUILDING VISUALIZATION:
+    public static formatFinalQuote(params: UserFriendlyParams, breakdown: QuoteBreakdown, imageBase64: string | null = null): string
+    {
+        let response: string = `
+The total estimated price is $${breakdown.finalTotal.toFixed(2)} for a building visualization with dimensions: ${params.width} width x ${params.length} length x ${params.height} height
 `;
 
-        if (imageBase64) {
-            response += `![Garage Rendering](${imageBase64})
-`;
-        } else {
-            response += `📐 **Visualization unavailable** - Contact support for rendering
-
-`;
+        if (imageBase64)
+        {
+            response += `\n![Garage Rendering](${imageBase64})\n`;
+        }
+        else
+        {
+            response += `\n📐 **Visualization unavailable** - Contact support for rendering\n`;
         }
 
-
         response += `
-Like the design? (Contact us!)
-Want to tweak the garage design? I can update the image and update the pricing
+---
+
+Like the design? [📧 Contact Us](#contact-button) to discuss your project!
+
+Want to tweak the garage design? I can update the image and pricing for you.
 `;
 
         return response;

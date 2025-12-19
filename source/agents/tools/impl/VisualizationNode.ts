@@ -1,9 +1,6 @@
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import { UserFriendlyParams } from "@agents/tools/io/IChat";
-import {WorkflowBuilder} from "@agents/tools/impl/WorkflowBuilderNode";
-import {ComfyUIClient} from "@agents/tools/impl/ComfyUIClientNode";
-import {PromptBuilder} from "@agents/tools/impl/PromptBuilderNode";
 import {GarageImageGenerator} from "@agents/tools/impl/GarageImageGeneratorNode";
 import {QuoteResponseFormatter} from "@agents/tools/impl/QuoteResponseFormatterNode";
 import {PriceCalculatorService} from "@agents/tools/impl/PriceCalculationNode";
@@ -105,7 +102,6 @@ class VisualizationOrchestrator
             const response: string = QuoteResponseFormatter.formatFinalQuote(
                 mergedParams,
                 breakdown,
-                selectedAddons,
                 base64Image
             );
 
@@ -133,7 +129,7 @@ class VisualizationOrchestrator
  * NODE: Generate garage visualization and final quote
  */
 export const generateGarageVisualizationNode = async (state: any): Promise<VisualizationResponse> => {
-    const comfyuiUrl = process.env.COMFYUI_URL || "http://127.0.0.1:8188";
+    const comfyuiUrl: string = process.env.COMFYUI_URL || "http://127.0.0.1:8188";
     const orchestrator = new VisualizationOrchestrator(comfyuiUrl);
     return orchestrator.generateVisualization(state);
 };
@@ -143,13 +139,4 @@ export const generateGarageVisualizationNode = async (state: any): Promise<Visua
  */
 export {
     VisualizationOrchestrator,
-    GarageImageGenerator,
-    ComfyUIClient,
-    WorkflowBuilder,
-    PromptBuilder,
-    QuoteResponseFormatter,
-    GenerationResult,
-    HealthCheckResult,
-    QuoteBreakdown,
-    VisualizationResponse,
 };

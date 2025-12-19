@@ -156,21 +156,17 @@ export class PromptBuilder implements IPromptBuilder
 
 BUILDING TYPE & STYLE:
 • Type: Commercial warehouse garage, NOT a residential home
-• Construction: Steel frame with corrugated metal panel infill, industrial grade
-• Frame: Visible steel structural braces, columns, and frame members painted dark color (black, dark gray, or dark brown)
-• Infill Material: Gauge ${gauge} corrugated metal panels filling between steel frame braces
-• Style: Industrial utilitarian design with exposed frame structure, functional aesthetic, commercial/agricultural/industrial use
+• Construction: Heavy-duty corrugated galvanized steel metal panels, industrial grade
+• Material: Gauge ${gauge} corrugated metal with deep vertical ribbing, metal seams clearly visible
+• Style: Industrial utilitarian design, stark functional aesthetic, commercial/agricultural/industrial use
 • Purpose: Heavy equipment storage, vehicle maintenance garage, commercial workshop
 
-CORRUGATED METAL & FRAME SPECIFICATIONS:
-• Steel frame: Dark colored structural steel braces, columns, and frame members (black, dark gray, or dark brown paint)
-• Frame visibility: Visible structural frame creating grid pattern on building exterior
-• Metal panels: ${colorDesc} corrugated metal infill panels filling between frame braces
-• Panel material: Gauge ${gauge} corrugated steel with vertical ribbing, professional industrial finish
-• Metal ribs: Clearly visible corrugated texture, 1-1.5 inch depth showing 3D dimension
-• Frame-to-panel: Strong contrast between dark steel frame and ${colorDesc} metal infill
-• Structural appearance: Frame braces visible at corners, across walls, and at roof line
-• Professional installation: Clean panel seams, frame bolts visible, industrial construction quality
+CORRUGATED METAL SPECIFICATIONS:
+• Roof: ${colorDesc} corrugated metal with visible panel lines and overlap seams
+• Walls: ${colorDesc} corrugated steel panels with vertical ribbing, industrial ribs running vertically
+• Panel finish: Metallic corrugated texture, industrial weathered appearance, professional installation
+• Metal ribs: Deeply corrugated, 1-1.5 inch depth, clear shadows showing 3D texture
+• Seams: Visible metal seams where panels overlap, roof-to-wall junctions clear
 
 ROOF STYLE:
 • Roof type: ${roofDescription}
@@ -183,9 +179,7 @@ FRONT FACADE:
 • Door placement: ${doorPositioning}
 • Door type: Heavy-duty industrial sectional roll-up garage doors, fully closed
 • Door material: Steel construction with horizontal sections, industrial white/cream sections with dark metal frames
-• Door frame: Heavy steel frame with visible hardware, professional installation, dark frame contrasts with door panels
-• Frame braces: Visible dark steel structural braces framing the door opening
-• Wall composition: Dark steel frame with ${colorDesc} corrugated metal infill panels on either side of door
+• Door frame: Steel frame with visible hardware, professional installation
 • No windows on front facade (industrial/utilitarian)
 • Foundation: Dark concrete stem wall 2-3 feet visible, concrete pad extends forward
 
@@ -228,17 +222,14 @@ VISUAL SPECIFICATIONS:
 ${addonFeatures ? `ADDITIONAL FEATURES: ${addonFeatures}` : ''}
 
 CRITICAL REQUIREMENTS:
-✓ MUST have visible dark steel frame/braces with corrugated metal infill panels
-✓ MUST show structural steel frame creating grid pattern on exterior
-✓ MUST have clear contrast between dark frame and ${colorDesc} panel color
-✓ MUST show corrugated metal texture with visible ribbing in infill panels
+✓ MUST be industrial corrugated metal building, NOT residential home
+✓ MUST show corrugated metal texture with visible ribbing on ALL surfaces
 ✓ MUST show both front (with garage doors) AND side wall in 3D perspective
 ✓ MUST show concrete foundation/stem wall
-✓ MUST show industrial warehouse/commercial aesthetic with frame structure
+✓ MUST show industrial warehouse/commercial aesthetic
 ✓ MUST have heavy-duty garage doors, fully sealed/closed
 ✓ MUST display 45-degree oblique angle with building depth clearly visible
 ✓ MUST NOT look like house, residential garage, or dwelling
-✓ Frame style: Visible structural braces, NOT solid wall
 ✓ Dimensions: ${width}×${length}×${height} feet (${(width/length).toFixed(2)}:1 aspect ratio)`;
 
         /**

@@ -16,27 +16,27 @@ const logger: pino.Logger = createLogger(module);
  */
 export class ChoiceServiceImpl implements IChoiceService {
     private static instance: IChoiceService;
-    private static readonly INDIFFERENCE_KEYWORDS = new Set([
+    private static readonly INDIFFERENCE_KEYWORDS: Set<string> = new Set([
         "any", "whatever", "i don't care", "dunno", "idk",
         "doesn't matter", "don't care", "idc", "no preference", "doesn't care"
     ]);
-    private static readonly ROOF_TYPE_PATTERN = /^(vertical|regular|box|a-frame)$/i;
-    private static readonly JSON_EXTRACT_PATTERN = /\{[\s\S]*\}/;
-    private static readonly NUMBER_PATTERN = /^\d+$/;
+    private static readonly ROOF_TYPE_PATTERN: RegExp = /^(vertical|regular|box|a-frame)$/i;
+    private static readonly JSON_EXTRACT_PATTERN: RegExp = /\{[\s\S]*\}/;
+    protected static readonly NUMBER_PATTERN: RegExp = /^\d+$/;
 
     private readonly configs: Map<string, FieldConfig>;
 
-    constructor(enforce: () => void, configs: FieldConfig[]) {
-        if (enforce !== Enforce) {
-            throw new InstantiationError(
-                InstantiationError.NOT_INSTANTIABLE,
-                "Error: Instantiation failed: Use ChoiceServiceImpl.getInstance() instead of new."
-            );
+    constructor(enforce: () => void, configs: FieldConfig[])
+    {
+        if (enforce !== Enforce)
+        {
+            throw new InstantiationError(InstantiationError.NOT_INSTANTIABLE, "Error: Instantiation failed: Use ChoiceServiceImpl.getInstance() instead of new.");
         }
         this.configs = new Map(configs.map(c => [c.name, c]));
     }
 
-    public static getInstance(): IChoiceService {
+    public static getInstance(): IChoiceService
+    {
         return ChoiceServiceImpl.instance ??= new ChoiceServiceImpl(Enforce, Constants.DEFAULT_FIELDS);
     }
 
@@ -47,37 +47,39 @@ export class ChoiceServiceImpl implements IChoiceService {
      * If user sees: 1. Red, 2. Blue, 3. Green
      * Then options[0] must be Red, options[1] must be Blue, options[2] must be Green
      */
-    public async parse(userInput: string, options: ChoiceOption[], context = ""): Promise<ChoiceResult> {
+    public async parse(userInput: string, options: ChoiceOption[], context = ""): Promise<ChoiceResult>
+    {
         logger.info(`[ChoiceParser] Parsing: "${userInput}" from ${options.length} options`);
 
-        // ✅ CRITICAL: Always log the options array order for debugging
         logger.info(`[ChoiceParser] Options array order (MUST match display order):`);
         options.forEach((opt, idx) => {
             logger.info(`  [${idx}] → Display #${idx + 1}: "${opt.label}" (value: ${opt.value})`);
         });
 
-        // Try each strategy in priority order
         const strategies = [
             () => this.tryNumberMatch(userInput, options),
             () => this.tryTextMatch(userInput, options),
             () => this.tryIndifference(userInput, options)
         ];
 
-        for (const strategy of strategies) {
-            const result = strategy();
+        for (const strategy of strategies)
+        {
+            const result: ChoiceResult = strategy();
             if (result) {
                 logger.info(`[ChoiceParser] ✅ Match: ${result.selected}`);
                 return result;
             }
         }
 
-        // AI fallback
         logger.info(`[ChoiceParser] No direct match, trying AI`);
-        try {
-            const aiResult = await this.decideWithAI(userInput, options, context);
+        try
+        {
+            const aiResult: ChoiceResult = await this.decideWithAI(userInput, options, context);
             logger.info(`[ChoiceParser] ✅ AI result: ${aiResult.selected}`);
             return aiResult;
-        } catch (aiError) {
+        }
+        catch (aiError)
+        {
             logger.error(`[ChoiceParser] AI failed:`, aiError);
         }
 
@@ -91,19 +93,24 @@ export class ChoiceServiceImpl implements IChoiceService {
      * ⚠️ ASSUMES: options[i] corresponds to display position i+1
      * If display shows "4. Evergreen" then options[3].value must be "Evergreen"
      */
-    private tryNumberMatch(userInput: string, options: ChoiceOption[]): ChoiceResult | null {
-        const trimmed = userInput.trim();
-        if (!ChoiceServiceImpl.NUMBER_PATTERN.test(trimmed)) return null;
+    private tryNumberMatch(userInput: string, options: ChoiceOption[]): ChoiceResult | null
+    {
+        const trimmed: string = userInput.trim();
+        if (!ChoiceServiceImpl.NUMBER_PATTERN.test(trimmed))
+        {
+            return null;
+        }
 
-        const displayNumber = parseInt(trimmed, 10);
-        const index = displayNumber - 1;
+        const displayNumber: number = parseInt(trimmed, 10);
+        const index: number = displayNumber - 1;
 
-        if (index < 0 || index >= options.length) {
+        if (index < 0 || index >= options.length)
+        {
             logger.warn(`[ChoiceParser] Number ${displayNumber} out of range (1-${options.length})`);
             return null;
         }
 
-        const selected = options[index];
+        const selected: ChoiceOption = options[index];
         logger.info(`[ChoiceParser] ✅ NUMBER MATCH: user entered "${displayNumber}" → array index ${index} → "${selected.label}" (${selected.value})`);
 
         return {
@@ -116,15 +123,17 @@ export class ChoiceServiceImpl implements IChoiceService {
     /**
      * STRICT: Attempts text match - EXACT or CONTAINS only
      */
-    private tryTextMatch(userInput: string, options: ChoiceOption[]): ChoiceResult | null {
-        const lowerInput = userInput.toLowerCase().trim();
+    private tryTextMatch(userInput: string, options: ChoiceOption[]): ChoiceResult | null
+    {
+        const lowerInput: string = userInput.toLowerCase().trim();
 
-        for (const option of options) {
-            const optionLabel = option.label.toLowerCase();
-            const optionValue = option.value.toLowerCase();
+        for (const option of options)
+        {
+            const optionLabel: string = option.label.toLowerCase();
+            const optionValue: string = option.value.toLowerCase();
 
-            // Exact match
-            if (optionLabel === lowerInput || optionValue === lowerInput) {
+            if (optionLabel === lowerInput || optionValue === lowerInput)
+            {
                 logger.info(`[ChoiceParser] Exact text match: "${option.label}" (${option.value})`);
                 return {
                     selected: option.value,
@@ -133,8 +142,8 @@ export class ChoiceServiceImpl implements IChoiceService {
                 };
             }
 
-            // Contains match
-            if (optionLabel.includes(lowerInput) || lowerInput.includes(optionLabel)) {
+            if (optionLabel.includes(lowerInput) || lowerInput.includes(optionLabel))
+            {
                 logger.info(`[ChoiceParser] Contains match: "${option.label}" (${option.value})`);
                 return {
                     selected: option.value,
@@ -150,8 +159,9 @@ export class ChoiceServiceImpl implements IChoiceService {
     /**
      * STRICT: Check if user expressed indifference
      */
-    private tryIndifference(userInput: string, options: ChoiceOption[]): ChoiceResult | null {
-        const trimmed = userInput.trim().toLowerCase();
+    private tryIndifference(userInput: string, options: ChoiceOption[]): ChoiceResult | null
+    {
+        const trimmed: string = userInput.trim().toLowerCase();
         if (!ChoiceServiceImpl.INDIFFERENCE_KEYWORDS.has(trimmed)) return null;
 
         logger.info(`[ChoiceParser] ✅ Indifference detected for: "${userInput}"`);
@@ -163,14 +173,16 @@ export class ChoiceServiceImpl implements IChoiceService {
     /**
      * Select balanced option (middle of list) for indifferent users
      */
-    private selectBalancedOption(options: ChoiceOption[]): ChoiceResult {
-        if (options.length === 0) {
+    private selectBalancedOption(options: ChoiceOption[]): ChoiceResult
+    {
+        if (options.length === 0)
+        {
             logger.error(`[ChoiceParser] No options available for balanced selection!`);
             throw new Error("No options available");
         }
 
-        const middleIndex = Math.floor(options.length / 2);
-        const selected = options[middleIndex];
+        const middleIndex: number = Math.floor(options.length / 2);
+        const selected: ChoiceOption = options[middleIndex];
 
         logger.info(`[ChoiceParser] Balanced selection: index ${middleIndex}/${options.length} = ${selected.value}`);
 
@@ -184,13 +196,15 @@ export class ChoiceServiceImpl implements IChoiceService {
     /**
      * Default fallback: Use first option
      */
-    private defaultFallback(options: ChoiceOption[]): ChoiceResult {
-        if (options.length === 0) {
+    private defaultFallback(options: ChoiceOption[]): ChoiceResult
+    {
+        if (options.length === 0)
+        {
             logger.error(`[ChoiceParser] CRITICAL: No options available for default fallback!`);
             throw new Error("No options available for default fallback");
         }
 
-        const selected = options[0];
+        const selected: ChoiceOption = options[0];
         logger.warn(`[ChoiceParser] Using default fallback: ${selected.value}`);
 
         return {
@@ -203,21 +217,21 @@ export class ChoiceServiceImpl implements IChoiceService {
     /**
      * Uses LLM only as last resort
      */
-    private async decideWithAI(userInput: string, options: ChoiceOption[], context: string): Promise<ChoiceResult> {
-        const prompt = this.buildLLMPrompt(userInput, options, context);
+    private async decideWithAI(userInput: string, options: ChoiceOption[], context: string): Promise<ChoiceResult>
+    {
+        const prompt: string = this.buildLLMPrompt(userInput, options, context);
         logger.info("[ChoiceParser] Invoking LLM for decision");
 
-        const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+        const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
         logger.debug(`[ChoiceParser] LLM response: ${response.substring(0, 150)}`);
 
         return this.parseLLMResponse(response, options);
     }
 
-    private buildLLMPrompt(userInput: string, options: ChoiceOption[], context: string): string {
-        const optionsText = options
-            .map((opt, idx) =>
-                `${idx + 1}. ${opt.label} (${opt.value})${opt.description ? ` - ${opt.description}` : ""}`
-            )
+    private buildLLMPrompt(userInput: string, options: ChoiceOption[], context: string): string
+    {
+        const optionsText: string = options
+            .map((opt, idx) => `${idx + 1}. ${opt.label} (${opt.value})${opt.description ? ` - ${opt.description}` : ""}`)
             .join("\n");
 
         return `You are choosing from predefined options. Return ONLY valid JSON.
@@ -241,20 +255,23 @@ export class ChoiceServiceImpl implements IChoiceService {
                 }`;
     }
 
-    private parseLLMResponse(response: string, options: ChoiceOption[]): ChoiceResult {
-        const cleaned = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-        const jsonMatch = cleaned.match(ChoiceServiceImpl.JSON_EXTRACT_PATTERN);
+    private parseLLMResponse(response: string, options: ChoiceOption[]): ChoiceResult
+    {
+        const cleaned: string = response.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+        const jsonMatch: RegExpMatchArray = cleaned.match(ChoiceServiceImpl.JSON_EXTRACT_PATTERN);
 
-        if (!jsonMatch) {
+        if (!jsonMatch)
+        {
             logger.warn("[ChoiceParser] No JSON in LLM response");
             throw new Error("No JSON in response");
         }
 
         const result = JSON.parse(jsonMatch[0]) as ChoiceResult;
-        const isValid = options.some(opt => opt.value === result.selected);
+        const isValid: boolean = options.some(opt => opt.value === result.selected);
 
-        if (!isValid) {
-            const validValues = options.map(o => o.value).join(", ");
+        if (!isValid)
+        {
+            const validValues: string = options.map(o => o.value).join(", ");
             logger.warn(`[ChoiceParser] LLM selected invalid option: ${result.selected}`);
             logger.warn(`[ChoiceParser] Valid options: ${validValues}`);
             throw new Error(`Invalid option: ${result.selected}`);
@@ -264,7 +281,8 @@ export class ChoiceServiceImpl implements IChoiceService {
         return result;
     }
 
-    public formatOptions(options: ChoiceOption[], showNumbers = true): string {
+    public formatOptions(options: ChoiceOption[], showNumbers = true): string
+    {
         return options
             .map((opt, idx) => {
                 const prefix = showNumbers ? `${idx + 1}. ` : "• ";
@@ -274,7 +292,8 @@ export class ChoiceServiceImpl implements IChoiceService {
             .join("\n");
     }
 
-    public formatFieldLabel(field: string): string {
+    public formatFieldLabel(field: string): string
+    {
         return field
             .replace(/_/g, " ")
             .split(" ")
@@ -282,14 +301,16 @@ export class ChoiceServiceImpl implements IChoiceService {
             .join(" ");
     }
 
-    public generatePrompt(field: string, options: ChoiceOption[]): string {
-        const label = this.formatFieldLabel(field);
-        const formatted = this.formatOptions(options);
+    public generatePrompt(field: string, options: ChoiceOption[]): string
+    {
+        const label: string = this.formatFieldLabel(field);
+        const formatted: string = this.formatOptions(options);
         return `Which ${label} would you prefer?\n${formatted}`;
     }
 
-    public getPrompt(field: string, customOptions?: ChoiceOption[]): string {
-        const options = customOptions || this.getOptions(field);
+    public getPrompt(field: string, customOptions?: ChoiceOption[]): string
+    {
+        const options: ChoiceOption[] = customOptions || this.getOptions(field);
         return this.generatePrompt(field, options);
     }
 
@@ -297,33 +318,35 @@ export class ChoiceServiceImpl implements IChoiceService {
      * ⚠️ CRITICAL: Returns options in their CONFIGURED order
      * If your UI displays them differently, you MUST reorder them before calling parse()!
      */
-    public getOptions(field: string): ChoiceOption[] {
-        const config = this.configs.get(field);
-        if (!config) {
+    public getOptions(field: string): ChoiceOption[]
+    {
+        const config: FieldConfig = this.configs.get(field);
+        if (!config)
+        {
             throw new Error(`No options configured for field: ${field}`);
         }
 
         logger.info(`[ChoiceService] getOptions("${field}") returning ${config.options.length} options:`);
-        config.options.forEach((opt, idx) => {
-            logger.info(`  [${idx}] value="${opt.value}" label="${opt.label}"`);
-        });
+        config.options.forEach((opt, idx) => {logger.info(`  [${idx}] value="${opt.value}" label="${opt.label}"`);});
 
         return config.options;
     }
 
-    public async parseUserChoiceWithAI(userInput: string, options: ChoiceOption[], context = ""): Promise<ChoiceResult> {
+    public async parseUserChoiceWithAI(userInput: string, options: ChoiceOption[], context = ""): Promise<ChoiceResult>
+    {
         return this.parse(userInput, options, context);
     }
 
     /**
      * ⚠️ CRITICAL: The options passed here MUST be in display order!
      */
-    public async handleChoice(field: string, userInput: string, customOptions?: ChoiceOption[]): Promise<ChoiceResult> {
+    public async handleChoice(field: string, userInput: string, customOptions?: ChoiceOption[]): Promise<ChoiceResult>
+    {
         logger.info(`[ChoiceService] Handling choice for ${field}: "${userInput}"`);
-        const options = customOptions || this.getOptions(field);
+        const options: ChoiceOption[] = customOptions || this.getOptions(field);
 
-        // ⚠️ WARNING: If you're passing customOptions, they MUST be in the order shown to the user!
-        if (customOptions) {
+        if (customOptions)
+        {
             logger.info(`[ChoiceService] Using custom options (ensure they match display order!)`);
         }
 

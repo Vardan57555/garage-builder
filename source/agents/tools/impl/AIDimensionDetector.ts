@@ -10,13 +10,16 @@ const logger: pino.Logger = createLogger(module);
  * ✅ CONTEXT-AWARE DIMENSION DETECTOR
  * Uses AI to distinguish between choice field inputs and actual dimensions
  */
-export class AIDimensionDetector {
+export class AIDimensionDetector
+{
     private static instance: AIDimensionDetector;
 
     private constructor() {}
 
-    public static getInstance(): AIDimensionDetector {
-        if (!AIDimensionDetector.instance) {
+    public static getInstance(): AIDimensionDetector
+    {
+        if (!AIDimensionDetector.instance)
+        {
             AIDimensionDetector.instance = new AIDimensionDetector();
         }
         return AIDimensionDetector.instance;
@@ -26,17 +29,20 @@ export class AIDimensionDetector {
      * ✅ Context-aware detection using AI reasoning
      * Understands what field is expected and avoids false positives
      */
+
+
     public async detectDimensionAwareOfContext(userInput: string, expectedField: keyof UserFriendlyParams | null): Promise<{ isDimension: boolean; field?: keyof UserFriendlyParams; value?: number; confidence: 'high' | 'medium' | 'low'; reasoning: string; }>
     {
         logger.info(`[AIDimensionDetector] Context-aware check - Expected field: ${expectedField}`);
         logger.info(`[AIDimensionDetector] User input: "${userInput}"`);
 
         try {
-            const prompt = this.buildContextAwarePrompt(userInput, expectedField);
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const prompt: string = this.buildContextAwarePrompt(userInput, expectedField);
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const result = this.parseResponse(response);
 
-            if (result) {
+            if (result)
+            {
                 logger.info(`[AIDimensionDetector] Detection result:`, result);
                 return result;
             }
@@ -46,7 +52,9 @@ export class AIDimensionDetector {
                 confidence: 'low',
                 reasoning: 'Failed to parse'
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[AIDimensionDetector] Error:`, error);
             return {
                 isDimension: false,
@@ -59,6 +67,7 @@ export class AIDimensionDetector {
     /**
      * ✅ Build a context-aware prompt that understands field expectations
      */
+
     private buildContextAwarePrompt(userInput: string, expectedField: keyof UserFriendlyParams | null): string {
         const fieldContext = this.getFieldContext(expectedField);
 
@@ -261,6 +270,7 @@ ONLY JSON:`;
     /**
      * Get context information about a field
      */
+
     private getFieldContext(fieldName: keyof UserFriendlyParams | null): { type: string; description: string; expectedValues: string[]; }
     {
         const contexts: Record<string, any> = {
@@ -322,9 +332,11 @@ ONLY JSON:`;
      * ✅ CRITICAL FIX: Batch detection for "XxYxZ" format
      * Properly extracts width, length, height from formats like "20x20x10" or "garage 20x20x10"
      */
+
     public async detectMultipleDimensions(userInput: string): Promise<Array<{ field: 'width' | 'length' | 'height'; value: number; confidence: 'high' | 'medium' | 'low'; }> | null>
     {
-        if (!userInput?.trim()) {
+        if (!userInput?.trim())
+        {
             return null;
         }
 
@@ -379,7 +391,6 @@ ONLY JSON ARRAY, nothing else:`;
                 logger.info(`  [${index}] ${dim.field}: ${dim.value}ft (confidence: ${dim.confidence})`);
             });
 
-            // ✅ VALIDATION: Ensure we have proper structure
             const isValid = parsed.every(dim =>
                 ['width', 'length', 'height'].includes(dim.field) &&
                 typeof dim.value === 'number' &&
@@ -392,7 +403,6 @@ ONLY JSON ARRAY, nothing else:`;
                 return null;
             }
 
-            // ✅ Check for duplicates
             const fieldCounts: Record<string, number> = {};
             parsed.forEach(dim => {
                 fieldCounts[dim.field] = (fieldCounts[dim.field] || 0) + 1;
@@ -456,7 +466,6 @@ ONLY JSON ARRAY, nothing else:`;
                 .replace(/```\s*/g, '')
                 .trim();
 
-            // ✅ Find JSON array
             const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
             if (!jsonMatch) {
                 logger.warn(`[AIDimensionDetector] No JSON array found in response`);

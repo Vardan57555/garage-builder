@@ -9,13 +9,16 @@ const logger: pino.Logger = createLogger(module);
  * ✅ IMPROVED: AI-Powered Color Change Handler with Better Approximate Matching
  * Intelligently extracts color intent and matches to available colors with suggestions
  */
-export class ColorChangeHandler {
+export class ColorChangeHandler
+{
     private static instance: ColorChangeHandler;
 
     private constructor() {}
 
-    public static getInstance(): ColorChangeHandler {
-        if (!ColorChangeHandler.instance) {
+    public static getInstance(): ColorChangeHandler
+    {
+        if (!ColorChangeHandler.instance)
+        {
             ColorChangeHandler.instance = new ColorChangeHandler();
         }
         return ColorChangeHandler.instance;
@@ -25,12 +28,10 @@ export class ColorChangeHandler {
      * ✅ CORE: Extract color intent from user input using AI
      * Handles: "make it blue", "change to red", "blue please", "i want navy", etc.
      */
-    public async extractColorIntent(userInput: string): Promise<{
-        colorName: string | null;
-        confidence: "high" | "medium" | "low";
-        isColorChangeRequest: boolean;
-    }> {
-        try {
+    public async extractColorIntent(userInput: string): Promise<{ colorName: string | null; confidence: "high" | "medium" | "low"; isColorChangeRequest: boolean; }>
+    {
+        try
+        {
             logger.info(`[ColorChangeHandler] Extracting color intent from: "${userInput}"`);
 
             const prompt = `Analyze this user input and extract if they're requesting a color change for their garage.
@@ -56,12 +57,13 @@ Examples:
 
 ONLY valid JSON:`;
 
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
             logger.debug(`[ColorChangeHandler] AI response: "${response}"`);
 
             const parsed = this.parseAIResponse(response);
 
-            if (!parsed) {
+            if (!parsed)
+            {
                 logger.warn(`[ColorChangeHandler] Failed to parse AI response`);
                 return {
                     colorName: null,
@@ -70,16 +72,16 @@ ONLY valid JSON:`;
                 };
             }
 
-            logger.info(
-                `[ColorChangeHandler] Extracted: colorName=${parsed.colorName}, confidence=${parsed.confidence}, isChangeRequest=${parsed.isColorChangeRequest}`
-            );
+            logger.info(`[ColorChangeHandler] Extracted: colorName=${parsed.colorName}, confidence=${parsed.confidence}, isChangeRequest=${parsed.isColorChangeRequest}`);
 
             return {
                 colorName: parsed.colorName,
                 confidence: parsed.confidence || "low",
                 isColorChangeRequest: parsed.isColorChangeRequest || false,
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[ColorChangeHandler] Error extracting color intent:`, error);
             return {
                 colorName: null,
@@ -93,17 +95,16 @@ ONLY valid JSON:`;
      * ✅ IMPROVED: Match extracted color to database colors using AI
      * NOW: Handles unavailable colors by finding best approximation AND suggesting alternatives
      */
-    public async matchColorToDatabase(
-        extractedColor: string,
-        availableColors: Array<{ name: string; cost: number }>
-    ): Promise<{
+    public async matchColorToDatabase(extractedColor: string, availableColors: Array<{ name: string; cost: number }>): Promise<{
         match: { name: string; cost: number } | null;
         isAvailable: boolean;
         isApproximate: boolean;
         alternatives: Array<{ name: string; cost: number }>;
         message: string;
-    }> {
-        if (!extractedColor || availableColors.length === 0) {
+    }>
+    {
+        if (!extractedColor || availableColors.length === 0)
+        {
             logger.warn(`[ColorChangeHandler] Missing extracted color or available colors`);
             return {
                 match: null,
@@ -117,14 +118,15 @@ ONLY valid JSON:`;
         try {
             logger.info(`[ColorChangeHandler] Matching "${extractedColor}" to database colors`);
 
-            const extractedLower = extractedColor.toLowerCase().trim();
+            const extractedLower: string = extractedColor.toLowerCase().trim();
             const exactMatch = availableColors.find(c =>
                 c.name.toLowerCase() === extractedLower ||
                 c.name.toLowerCase().includes(extractedLower) ||
                 extractedLower.includes(c.name.toLowerCase())
             );
 
-            if (exactMatch) {
+            if (exactMatch)
+            {
                 logger.info(`[ColorChangeHandler] ✅ EXACT MATCH via string matching: "${extractedColor}" → "${exactMatch.name}"`);
                 return {
                     match: exactMatch,
@@ -135,7 +137,7 @@ ONLY valid JSON:`;
                 };
             }
 
-            const colorList = availableColors.map((c) => `"${c.name}"`).join(", ");
+            const colorList: string = availableColors.map((c) => `"${c.name}"`).join(", ");
 
             const prompt = `Match the user's color preference to the closest available colors, even if not exact.
 

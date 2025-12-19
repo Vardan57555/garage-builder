@@ -3,6 +3,8 @@ import { sharedLLM } from "@llm/SharedLLM";
 import pino from "pino";
 import { createLogger } from "@utils/logger/Log";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
+import {IChoiceService} from "@agents/tools/impl/io/IChoiceHandler";
+import {ChoiceOption} from "@agents/tools/io/IChoiceHandler";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -14,24 +16,22 @@ export class AIDrivenChoiceHandler {
     /**
      * 🎯 MAIN: Process user choice and validate against field options
      */
-    static async processUserChoice(
-        userInput: string,
-        fieldName: string,
-        availableOptions: string[]
-    ): Promise<{
+    static async processUserChoice(userInput: string, fieldName: string, availableOptions: string[]): Promise<{
         field: string;
         value: string;
         confidence: "high" | "medium" | "low";
         reasoning: string;
         requiresConfirmation: boolean;
         clarificationPrompt?: string;
-    } | null> {
+    } | null>
+    {
 
         logger.info(`[AIDrivenChoiceHandler] Processing choice for ${fieldName}`);
         logger.info(`[AIDrivenChoiceHandler] User input: "${userInput}"`);
         logger.info(`[AIDrivenChoiceHandler] Available options: ${availableOptions.join(", ")}`);
 
-        if (!userInput?.trim()) {
+        if (!userInput?.trim())
+        {
             logger.warn(`[AIDrivenChoiceHandler] Empty input`);
             return null;
         }
@@ -42,13 +42,15 @@ export class AIDrivenChoiceHandler {
             availableOptions
         );
 
-        if (!matchResult) {
+        if (!matchResult)
+        {
             logger.warn(`[AIDrivenChoiceHandler] No valid match found`);
             return null;
         }
 
         let clarificationPrompt: string | undefined;
-        if (matchResult.confidence === "medium" || matchResult.confidence === "low") {
+        if (matchResult.confidence === "medium" || matchResult.confidence === "low")
+        {
             clarificationPrompt = await this.generateClarificationPrompt(
                 userInput,
                 matchResult.value,
@@ -71,24 +73,15 @@ export class AIDrivenChoiceHandler {
      * ✅ STEP 1: Match user input to available options using AI
      * 🔧 FIX: Add exact match detection BEFORE AI call
      */
-    private static async matchUserInputToOption(
-        userInput: string,
-        fieldName: string,
-        availableOptions: string[]
-    ): Promise<{
-        value: string;
-        confidence: "high" | "medium" | "low";
-        reasoning: string;
-    } | null> {
-
+    private static async matchUserInputToOption(userInput: string, fieldName: string, availableOptions: string[]): Promise<{ value: string; confidence: "high" | "medium" | "low"; reasoning: string; } | null>
+    {
         try {
-            const normalizedInput = userInput.trim().toLowerCase();
+            const normalizedInput: string = userInput.trim().toLowerCase();
 
-            const exactMatch = availableOptions.find(
-                opt => opt.toLowerCase() === normalizedInput
-            );
+            const exactMatch: string = availableOptions.find(opt => opt.toLowerCase() === normalizedInput);
 
-            if (exactMatch) {
+            if (exactMatch)
+            {
                 logger.info(`[matchUserInputToOption] ✅ EXACT MATCH: "${userInput}" → "${exactMatch}"`);
                 return {
                     value: exactMatch,
@@ -97,9 +90,10 @@ export class AIDrivenChoiceHandler {
                 };
             }
 
-            const inputAsNumber = parseInt(normalizedInput, 10);
-            if (!isNaN(inputAsNumber) && inputAsNumber >= 1 && inputAsNumber <= availableOptions.length) {
-                const selectedOption = availableOptions[inputAsNumber - 1];
+            const inputAsNumber: number = parseInt(normalizedInput, 10);
+            if (!isNaN(inputAsNumber) && inputAsNumber >= 1 && inputAsNumber <= availableOptions.length)
+            {
+                const selectedOption: string = availableOptions[inputAsNumber - 1];
                 logger.info(`[matchUserInputToOption] ✅ OPTION NUMBER MATCH: "${userInput}" → "${selectedOption}" (option ${inputAsNumber})`);
                 return {
                     value: selectedOption,
@@ -110,7 +104,7 @@ export class AIDrivenChoiceHandler {
 
             logger.info(`[matchUserInputToOption] No exact match, using AI for fuzzy matching...`);
 
-            const examplesForField = availableOptions
+            const examplesForField: string = availableOptions
                 .map((opt, idx) => `- "${idx + 1}" → value: "${opt}" (option ${idx + 1})`)
                 .join("\n");
 
@@ -148,22 +142,22 @@ User input: "${userInput}"
 
 ONLY valid JSON:`;
 
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
             logger.debug(`[matchUserInputToOption] AI response: "${response}"`);
 
             const parsed = this.parseAIResponse(response);
 
-            if (!parsed) {
+            if (!parsed)
+            {
                 logger.warn(`[matchUserInputToOption] Failed to parse AI response`);
                 return null;
             }
 
-            const isValidOption = availableOptions.some(
-                opt => opt.toLowerCase() === (parsed.value?.toLowerCase() || "")
-            );
+            const isValidOption: boolean = availableOptions.some(opt => opt.toLowerCase() === (parsed.value?.toLowerCase() || ""));
 
-            if (!isValidOption) {
+            if (!isValidOption)
+            {
                 logger.warn(`[matchUserInputToOption] AI suggested invalid option: ${parsed.value}`);
                 logger.warn(`[matchUserInputToOption] Available: ${availableOptions.join(", ")}`);
                 return null;
@@ -173,7 +167,9 @@ ONLY valid JSON:`;
 
             return parsed;
 
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[matchUserInputToOption] Error:`, error);
             return null;
         }
@@ -182,14 +178,11 @@ ONLY valid JSON:`;
     /**
      * ✅ STEP 2: Generate AI clarification prompt for low/medium confidence
      */
-    private static async generateClarificationPrompt(
-        userInput: string,
-        matchedValue: string,
-        availableOptions: string[],
-        fieldName: string
-    ): Promise<string> {
+    private static async generateClarificationPrompt(userInput: string, matchedValue: string, availableOptions: string[], fieldName: string): Promise<string>
+    {
 
-        try {
+        try
+        {
             const prompt = `Generate a clarification prompt to confirm the user's choice.
 
 CONTEXT:
@@ -220,14 +213,16 @@ Available options: ${availableOptions.join(", ")}
 
 Return ONLY the clarification prompt text (NO JSON, NO markdown formatting):`;
 
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
-            const clarification = response.trim();
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const clarification: string = response.trim();
 
             logger.debug(`[generateClarificationPrompt] Generated: "${clarification}"`);
 
             return clarification;
 
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[generateClarificationPrompt] Error:`, error);
             return `Did you mean "${matchedValue}"? Please confirm or try again.`;
         }
@@ -236,14 +231,12 @@ Return ONLY the clarification prompt text (NO JSON, NO markdown formatting):`;
     /**
      * ✅ Generate dynamic choice prompt from options
      */
-    static async generateChoicePrompt(
-        fieldName: string,
-        availableOptions: string[],
-        fieldDescription?: string
-    ): Promise<string> {
+    static async generateChoicePrompt(fieldName: string, availableOptions: string[], fieldDescription?: string): Promise<string>
+    {
 
-        try {
-            const optionsFormatted = availableOptions
+        try
+        {
+            const optionsFormatted: string = availableOptions
                 .map((opt, i) => `${i + 1}. ${opt}`)
                 .join("\n");
 
@@ -274,14 +267,16 @@ Generate the prompt:
 
 ONLY the prompt text (NO JSON, NO explanation):`;
 
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
-            const choicePrompt = response.trim();
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const choicePrompt: string = response.trim();
 
             logger.info(`[generateChoicePrompt] Generated choice prompt for ${fieldName}`);
 
             return choicePrompt;
 
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[generateChoicePrompt] Error:`, error);
             return `Select a ${fieldName}:\n${availableOptions.map((opt, i) => `${i + 1}. ${opt}`).join("\n")}`;
         }
@@ -290,15 +285,11 @@ ONLY the prompt text (NO JSON, NO explanation):`;
     /**
      * ✅ Handle confirmation response
      */
-    static async confirmChoice(
-        confirmationInput: string,
-        matchedValue: string
-    ): Promise<{
-        confirmed: boolean;
-        reasoning: string;
-    }> {
+    static async confirmChoice(confirmationInput: string, matchedValue: string): Promise<{ confirmed: boolean; reasoning: string; }>
+    {
 
-        try {
+        try
+        {
             const prompt = `User is confirming if they want to select: "${matchedValue}"
 
 Their response: "${confirmationInput}"
@@ -318,10 +309,11 @@ User response: "${confirmationInput}"
 
 ONLY JSON:`;
 
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const parsed = this.parseAIResponse(response);
 
-            if (!parsed) {
+            if (!parsed)
+            {
                 logger.warn(`[confirmChoice] Could not parse confirmation response`);
                 return {
                     confirmed: false,
@@ -336,7 +328,9 @@ ONLY JSON:`;
                 reasoning: parsed.reasoning
             };
 
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[confirmChoice] Error:`, error);
             return {
                 confirmed: false,
@@ -348,21 +342,26 @@ ONLY JSON:`;
     /**
      * ✅ UTILITY: Parse AI responses
      */
-    private static parseAIResponse(response: string): any {
-        try {
-            let cleaned = response
+    private static parseAIResponse(response: string): any
+    {
+        try
+        {
+            let cleaned: string = response
                 .replace(/```json\s*/g, '')
                 .replace(/```\s*/g, '')
                 .trim();
 
-            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
+            const jsonMatch: RegExpMatchArray = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch)
+            {
                 logger.warn(`[parseAIResponse] No JSON found in: "${response}"`);
                 return null;
             }
 
             return JSON.parse(jsonMatch[0]);
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[parseAIResponse] Failed to parse:`, error);
             return null;
         }
@@ -371,17 +370,20 @@ ONLY JSON:`;
     /**
      * ✅ Get available options for a field dynamically
      */
-    static getAvailableOptions(fieldName: string): string[] {
-        const choiceService = ChoiceServiceImpl.getInstance();
+    static getAvailableOptions(fieldName: string): string[]
+    {
+        const choiceService: IChoiceService = ChoiceServiceImpl.getInstance();
 
         try {
-            const options = choiceService.getOptions(fieldName);
-            const values = options.map(opt => opt.value);
+            const options: ChoiceOption[] = choiceService.getOptions(fieldName);
+            const values: string[] = options.map(opt => opt.value);
 
             logger.info(`[getAvailableOptions] Field: ${fieldName}, Options:`, values);
 
             return values;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.warn(`[getAvailableOptions] No options for ${fieldName}, using fallback`);
 
             const optionsMap: { [key: string]: string[] } = {
@@ -399,21 +401,19 @@ ONLY JSON:`;
 /**
  * ✅ MAIN EXPORT: Use in your ChoiceServiceImpl
  */
-export async function handleChoiceWithAI(
-    fieldName: string,
-    userInput: string,
-    availableOptions?: string[]
-): Promise<{
+export async function handleChoiceWithAI(fieldName: string, userInput: string, availableOptions?: string[]): Promise<{
     field: string;
     selected: string;
     confidence: "high" | "medium" | "low";
     requiresConfirmation: boolean;
     clarificationPrompt?: string;
-} | null> {
+} | null>
+{
 
-    const options = availableOptions || AIDrivenChoiceHandler.getAvailableOptions(fieldName);
+    const options: string[] = availableOptions || AIDrivenChoiceHandler.getAvailableOptions(fieldName);
 
-    if (!options.length) {
+    if (!options.length)
+    {
         logger.warn(`[handleChoiceWithAI] No options available for ${fieldName}`);
         return null;
     }
@@ -424,7 +424,10 @@ export async function handleChoiceWithAI(
         options
     );
 
-    if (!result) return null;
+    if (!result)
+    {
+        return null;
+    }
 
     return {
         field: result.field,
