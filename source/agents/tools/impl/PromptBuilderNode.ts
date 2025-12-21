@@ -62,41 +62,39 @@ export class PromptBuilder implements IPromptBuilder
         const width: number = params.width || 20;
         const length: number = params.length || 20;
         const height: number = params.height || 10;
-        const roofType: string = params.roof_type || "regular";
+        const roofType: string = params.roof_type || "gable";
         const color: string = params.color || "white";
-        const gauge: number = params.gauge || 16;
 
         const colorDesc: string = this.getColorDescription(color);
 
         // Calculate door configuration
         const doorConfig = this.calculateDoorConfiguration(width, selectedAddons);
 
-        logger.info(`[PromptBuilder] Building INDUSTRIAL GARAGE configuration:`, {
+        logger.info(`[PromptBuilder] Building PREMIUM GARAGE configuration:`, {
             dimensions: `${width}×${length}×${height}ft`,
             aspectRatio: (width / length).toFixed(2),
             color: colorDesc,
             doors: doorConfig.totalDoors,
             roofType,
-            gauge
         });
 
-        // Determine roof description - industrial focus
+        // Determine roof description - premium finishes
         let roofDescription = "";
         let roofVisualDetail = "";
         const roofTypeLower = roofType.toLowerCase();
 
         if (roofTypeLower === 'box') {
-            roofDescription = "flat box eave industrial roof with steel frame";
-            roofVisualDetail = "flat roofline with horizontal trim, steel structural supports visible at eaves";
+            roofDescription = "modern flat-roof design with clean edges";
+            roofVisualDetail = "sleek flat roofline with subtle soffit detailing, integrated gutters";
         } else if (roofTypeLower === 'vertical') {
-            roofDescription = "vertical corrugated roof panels with ridge cap";
-            roofVisualDetail = "steep vertical corrugated panels with prominent industrial ridge running front to back, metal seams visible";
+            roofDescription = "contemporary pitched roof with architectural appeal";
+            roofVisualDetail = "clean pitched roof with premium metal roofing panels or architectural shingles, refined ridge detail";
         } else if (roofTypeLower === 'gambrel') {
-            roofDescription = "gambrel industrial roof with dual slopes";
-            roofVisualDetail = "industrial gambrel roof with two distinct slopes on each side, metal cladding throughout";
+            roofDescription = "distinctive gambrel roof with traditional charm";
+            roofVisualDetail = "elegant gambrel design with two roof slopes, premium finish, architectural interest";
         } else {
-            roofDescription = "peaked gable industrial roof with corrugated panels";
-            roofVisualDetail = "traditional peaked gable roof with corrugated metal panels, triangular end wall gable";
+            roofDescription = "classic peaked gable roof";
+            roofVisualDetail = "traditional peaked gable with refined proportions, premium roofing material";
         }
 
         // Build addon specification
@@ -106,144 +104,134 @@ export class PromptBuilder implements IPromptBuilder
                 .filter(a => a && a.label)
                 .map(a => {
                     const label = a.label.toLowerCase();
-                    if (label.includes('window')) return 'industrial metal-frame windows on side wall';
-                    if (label.includes('walk-in')) return 'industrial steel personnel entry door on side';
-                    if (label.includes('cupola')) return 'metal cupola vent on roof ridge';
+                    if (label.includes('window')) return 'premium glass windows with trim';
+                    if (label.includes('walk-in')) return 'attractive personnel entry door with hardware';
+                    if (label.includes('cupola')) return 'decorative roof cupola with weathervane';
+                    if (label.includes('loft')) return 'elevated loft with windows';
                     return label;
                 })
                 .join(", ");
-            addonFeatures = `Industrial features: ${features}.`;
+            addonFeatures = `Premium features: ${features}.`;
         }
 
-        // Door description - industrial garage doors
+        // Door description - beautiful garage doors
         let doorDescription = "";
         let doorPositioning = "";
         if (doorConfig.totalDoors === 1) {
-            doorDescription = "single large industrial roll-up garage door, sectional metal construction";
-            doorPositioning = "one centered heavy-duty garage door";
+            doorDescription = "single premium panel garage door with modern design, aluminum frame and panels with subtle detail";
+            doorPositioning = "centered premium garage door with elegant hardware";
         } else if (doorConfig.totalDoors === 2) {
-            doorDescription = "two side-by-side heavy-duty industrial roll-up garage doors, sectional construction";
-            doorPositioning = "two evenly-spaced industrial garage doors on front";
+            doorDescription = "two side-by-side premium panel garage doors with contemporary styling, aluminum construction";
+            doorPositioning = "two elegantly-spaced modern garage doors";
         } else {
-            doorDescription = `${doorConfig.totalDoors} side-by-side heavy-duty industrial roll-up garage doors`;
-            doorPositioning = `${doorConfig.totalDoors} evenly-spaced industrial doors across front`;
+            doorDescription = `${doorConfig.totalDoors} premium panel garage doors with coordinated design`;
+            doorPositioning = `${doorConfig.totalDoors} evenly-spaced modern garage doors`;
         }
 
         const aspectRatio = width / length;
         let sideVisibility = "";
         if (aspectRatio > 1.3) {
-            sideVisibility = "wide commercial building with prominent corrugated front facade, deep side wall receding";
+            sideVisibility = "attractive wide structure with refined siding, prominent side elevation visible";
         } else if (aspectRatio < 0.7) {
-            sideVisibility = "deep commercial building with substantial corrugated side wall, full length visible";
+            sideVisibility = "elegant deep structure with balanced proportions, full length visible";
         } else {
-            sideVisibility = "balanced industrial proportions showing both corrugated front and side walls";
+            sideVisibility = "well-proportioned structure showing front facade and attractive side elevation";
         }
 
-        /**
-         * ✅ CRITICAL: Industrial corrugated metal garage - NOT residential
-         *
-         * Key specifications:
-         * 1. Corrugated metal construction emphasized throughout
-         * 2. Industrial/commercial style - NOT residential house
-         * 3. Heavy-duty garage doors
-         * 4. Metal panels with visible ribbing
-         * 5. 45-degree oblique viewing angle
-         * 6. Concrete pad/foundation
-         * 7. No windows (unless addon)
-         * 8. Stark industrial aesthetic
-         */
-        const prompt = `Professional architectural photograph of an industrial corrugated metal storage building and commercial garage structure, ${colorDesc} color, shot from a 45-degree oblique angle.
+        // Professional exterior materials - AI will choose best appearance
+        const materialDescription = "premium siding with professional finish";
+        const wallFinish = "attractive modern exterior cladding with quality craftsmanship";
+        const wallTexture = "clean finished exterior, professional architectural styling";
 
-BUILDING TYPE & STYLE:
-• Type: Commercial warehouse garage, NOT a residential home
-• Construction: Heavy-duty corrugated galvanized steel metal panels, industrial grade
-• Material: Gauge ${gauge} corrugated metal with deep vertical ribbing, metal seams clearly visible
-• Style: Industrial utilitarian design, stark functional aesthetic, commercial/agricultural/industrial use
-• Purpose: Heavy equipment storage, vehicle maintenance garage, commercial workshop
+        const prompt = `Professional architectural photograph of a premium custom garage building, ${colorDesc}, photographed in bright daylight from a 45-degree angle showing dimensional depth.
 
-CORRUGATED METAL SPECIFICATIONS:
-• Roof: ${colorDesc} corrugated metal with visible panel lines and overlap seams
-• Walls: ${colorDesc} corrugated steel panels with vertical ribbing, industrial ribs running vertically
-• Panel finish: Metallic corrugated texture, industrial weathered appearance, professional installation
-• Metal ribs: Deeply corrugated, 1-1.5 inch depth, clear shadows showing 3D texture
-• Seams: Visible metal seams where panels overlap, roof-to-wall junctions clear
+BUILDING CHARACTERISTICS:
+• Type: Standard custom garage, clean modern construction
+• Style: Contemporary design with professional finish
+• Quality: Well-built construction, market-ready appearance
+• Purpose: Vehicle storage, equipment garage, or workshop space
+• Aesthetic: Clean, functional, professional-grade facility
 
-ROOF STYLE:
-• Roof type: ${roofDescription}
-• Roof detail: ${roofVisualDetail}
-• Overhang: 12-18 inch industrial eaves overhang with metal fascia trim
-• Ridge: Metal ridge cap running full length, properly sealed
+EXTERIOR MATERIALS & FINISH:
+• Primary material: ${materialDescription}
+• Wall finish: ${wallFinish}
+• Surface texture: ${wallTexture}
+• Details: Quality craftsmanship, professional installation
+• Trim: Clean trim work, finished edges
 
-FRONT FACADE:
+ROOF DESIGN:
+• Type: ${roofDescription}
+• Details: ${roofVisualDetail}
+• Finish: Premium roofing material, professional installation
+• Overhang: Proper eave overhang with finished soffit
+• Gutters: Integrated gutter system
+
+GARAGE DOORS & ENTRY:
 • Doors: ${doorDescription}
-• Door placement: ${doorPositioning}
-• Door type: Heavy-duty industrial sectional roll-up garage doors, fully closed
-• Door material: Steel construction with horizontal sections, industrial white/cream sections with dark metal frames
-• Door frame: Steel frame with visible hardware, professional installation
-• No windows on front facade (industrial/utilitarian)
-• Foundation: Dark concrete stem wall 2-3 feet visible, concrete pad extends forward
+• Positioning: ${doorPositioning}
+• Hardware: Standard quality hardware, professional appearance
+• Finish: Matching color scheme, coordinated with building
+• Condition: Clean, well-maintained, closed and secure
+${selectedAddons?.some(a => a.label.toLowerCase().includes('walk')) ? '• Entry door: Personnel door with quality hardware' : ''}
 
-SIDE WALL:
-• Material: Corrugated metal matching front, ${colorDesc} color
-• Visibility: Full side wall visible, extending back showing building depth
-• Windows: ${selectedAddons?.some(a => a.label.toLowerCase().includes('window')) ? 'Industrial metal-frame windows visible on side' : 'No windows (industrial warehouse style)'}
-• Composition: ${sideVisibility}
+WINDOWS & OPENINGS:
+${selectedAddons?.some(a => a.label.toLowerCase().includes('window')) ? '• Windows: Standard windows with frames, functional design\n• Style: Modern windows with standard framing' : '• No windows: Clean functional aesthetic\n• Focus: Door and facade'}
 
-GROUND & FOUNDATION:
-• Base: Concrete pad foundation, light gray concrete color
-• Ground surface: Industrial gravel or dirt lot in foreground
-• Foreground: Gravel/dirt pad area, clear view of building base
-• Ground texture: Industrial warehouse setting, no landscaping
+BUILDING PROPORTIONS:
+• Width: ${width} feet
+• Depth: ${length} feet  
+• Height: ${height} feet
+• Proportions: Balanced appearance
+• Form: ${sideVisibility}
 
-ENVIRONMENTAL SETTING:
-• Setting: Industrial/agricultural rural area, isolated commercial building
-• Sky: Clear blue sky, natural outdoor lighting
-• Surroundings: Open landscape, minimal vegetation, industrial perimeter
-• Lighting: Bright natural daylight, side lighting showing corrugated texture detail
-• Shadows: Soft shadows emphasizing corrugated metal 3D texture
+FOUNDATION & BASE:
+• Foundation: Concrete pad, finished appearance
+• Base: Clean concrete foundation visible
+• Foreground: Professional gravel or paved area
+• Site appearance: Well-maintained location
 
-CAMERA & COMPOSITION:
-• Viewing angle: 45-degree oblique oblique perspective from front corner
-• Position: Eye-level exterior shot, standing at natural distance
-• Framing: Front facade with doors on left-center, side wall extending to right, depth clearly visible
-• Orientation: Front corner prominent, building oriented diagonally showing three-dimensional form
-• Perspective: Professional architectural documentation style
-• Depth: Clear building length and proportions visible, not flat view
+LIGHTING & ATMOSPHERE:
+• Time: Bright daylight, natural lighting
+• Sky: Clear or softly overcast sky
+• Lighting: Natural professional lighting
+• Quality: High detail, sharp focus, professional finish
+• Mood: Clean, functional, professional
 
-VISUAL SPECIFICATIONS:
-• Style: Photorealistic architectural rendering of industrial building
-• Quality: Sharp focus, high detail, 8K resolution
-• Texture: Clear corrugated metal ribs, panel lines, seams, weathering, industrial finish
-• Color accuracy: Accurate ${colorDesc} color rendering
-• Proportions: Physical dimensions ${width}ft wide × ${length}ft deep × ${height}ft tall (${(width/length).toFixed(2)}:1 ratio)
-• Lighting: HDRI industrial lighting, harsh shadows showing texture
-• Style: Documentary architectural photography, NO artistic filters
+VIEWING ANGLE & COMPOSITION:
+• Angle: 45-degree perspective showing front and side
+• Distance: Professional exterior shot
+• Framing: Building prominently featured
+• Depth: Clear dimensional form
+• Orientation: Building corner prominent, showing 3D form
+• Professional quality: Standard architectural style
 
-${addonFeatures ? `ADDITIONAL FEATURES: ${addonFeatures}` : ''}
+RENDERING QUALITY:
+• Style: Photorealistic architectural rendering
+• Resolution: High detail, clear quality
+• Focus: Sharp and clear throughout
+• Finish: Professional standards
+• Appeal: Clean and attractive appearance
 
-CRITICAL REQUIREMENTS:
-✓ MUST be industrial corrugated metal building, NOT residential home
-✓ MUST show corrugated metal texture with visible ribbing on ALL surfaces
-✓ MUST show both front (with garage doors) AND side wall in 3D perspective
-✓ MUST show concrete foundation/stem wall
-✓ MUST show industrial warehouse/commercial aesthetic
-✓ MUST have heavy-duty garage doors, fully sealed/closed
-✓ MUST display 45-degree oblique angle with building depth clearly visible
-✓ MUST NOT look like house, residential garage, or dwelling
-✓ Dimensions: ${width}×${length}×${height} feet (${(width/length).toFixed(2)}:1 aspect ratio)`;
+${addonFeatures ? `SPECIAL FEATURES: ${addonFeatures}` : ''}
+
+DESIGN PRIORITIES:
+✓ MUST show exactly ${doorConfig.totalDoors} garage door(s) - NO EXTRA DOORS
+✓ MUST be clean and professional appearance
+✓ MUST show quality construction
+✓ MUST show 45-degree angle with dimensional depth
+✓ MUST be functional and practical
+✓ Dimensions: ${width}×${length}×${height} feet`;
 
         /**
-         * ✅ CRITICAL NEGATIVE PROMPT: Prevent residential/home-like appearance
+         * REFINED NEGATIVE PROMPT: Focus on quality, not industrial
          */
-        const negativePrompt = `residential home, house, dwelling, family home, residential garage, suburban house, residential structure, architectural home design, living space, bedroom, kitchen, windows with curtains, roof peak with eaves overhang, dormer windows, shutters, porch, deck, deck steps, residential entry door, residential siding, wood siding, brick wall, brick facade, vinyl siding, stone facade, landscaping, flower beds, shrubs, hedges, manicured lawn, driveway asphalt, residential appearance, modern house, colonial house, ranch house, beautiful home, cozy home, elegant home, luxury home, mansion, cottage, modern residential, flat front-only view, head-on frontal shot, no side wall, single-plane 2D view, architectural elevation, no depth, floating in space, no ground, open garage door, lifted door, interior visible, inside view, people inside, vehicles inside, occupants, glass door, transparent door, bright interior, interior lighting, open entrance, gaping opening, wrong dimensions, distorted proportions, stretched, compressed, asymmetrical, crooked, warped, blurry, low quality, poorly rendered, toy-like, miniature, cartoon, stylized, artistic, filtered, Instagram filter, painted, drawing, sketch, watercolor, illustration, digital art, CGI obvious, rendering artifacts, modern residential design, people in scene, humans visible, vehicles in shot, cars, trucks, equipment, signage, text, logos, branding`;
+        const negativePrompt = `cheap, poor quality, rundown, dilapidated, rusty, deteriorated, weathered, abandoned, poorly built, ugly, industrial warehouse, utilitarian, bare metal, corrugated metal texture, visible ribs, heavy gauge metal, commercial utility building, farming building, dull colors, boring, plain, basic construction, low quality materials, unfinished, rough texture, harsh shadows, too dark, too bright, overexposed, underexposed, distorted, warped, asymmetrical, low resolution, blurry, pixelated, cartoon, illustration, sketch, artificial appearance, obvious CGI, rendering artifacts, people, vehicles, signage, text, logos, luxury garage, high-end garage, premium materials, fancy doors, extra doors, additional doors, three doors, multiple side doors, personnel doors on front`;
 
-        logger.info(`[PromptBuilder] Generated INDUSTRIAL GARAGE prompt with:`);
-        logger.info(`  - Material: ${gauge} gauge corrugated metal (EMPHASIZED)`);
-        logger.info(`  - Style: Industrial warehouse, NOT residential`);
-        logger.info(`  - Doors: ${doorConfig.totalDoors} heavy-duty garage doors`);
-        logger.info(`  - Dimensions: ${width}×${length}×${height} (${(width/length).toFixed(2)}:1)`);
-        logger.info(`  - Angle: 45-degree oblique showing depth`);
-        logger.info(`  - Negative: ${negativePrompt.split(',').length} exclusion terms`);
+        logger.info(`[PromptBuilder] Generated PREMIUM GARAGE prompt`);
+        logger.info(`  - Material: Premium finish, AI-optimized`);
+        logger.info(`  - Style: Premium custom garage, sale-ready`);
+        logger.info(`  - Doors: ${doorConfig.totalDoors} quality garage doors`);
+        logger.info(`  - Dimensions: ${width}×${length}×${height}`);
 
         (this as any)._lastNegativePrompt = negativePrompt;
 
