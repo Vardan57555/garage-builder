@@ -12,9 +12,6 @@ services:
     networks:
       - garage-network
     restart: unless-stopped
-    runtime: nvidia
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8188/system_stats" ]
       interval: 30s
@@ -23,11 +20,6 @@ services:
       start_period: 60s
     deploy:
       resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
         limits:
           cpus: '4'
           memory: 8g
@@ -78,19 +70,19 @@ services:
     restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama
-  #    runtime: nvidia
-  #    environment:
-  #      - NVIDIA_VISIBLE_DEVICES=all
-  #    deploy:
-  #      resources:
-  #        reservations:
-  #          devices:
-  #            - driver: nvidia
-  #              count: 1
-  #              capabilities: [gpu]
-  #        limits:
-  #          cpus: 4.0
-  #          memory: 16g
+#    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: 1
+#              capabilities: [gpu]
+#        limits:
+#          cpus: 4.0
+#          memory: 16g
 
   streamlit-client:
     build:

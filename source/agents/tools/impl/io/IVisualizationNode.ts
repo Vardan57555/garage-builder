@@ -4,7 +4,6 @@ import {
     GenerationResult,
     HealthCheckResult,
 } from "@agents/tools/io/IVisualization";
-import {DimensionResult, ExtractionContext} from "@agents/tools/io/IParameterExtraction";
 
 export interface IWorkflowBuilder
 {
@@ -16,7 +15,7 @@ export interface IPromptBuilder
 {
     buildGaragePrompt(params: UserFriendlyParams, selectedAddons?: any[]): string;
 
-    buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string
+    buildUnifiedPrompt(): string
 }
 
 

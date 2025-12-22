@@ -14,6 +14,7 @@ import {ColorServiceImpl} from "@agents/tools/impl/ColorServiceImpl";
 import {ColorDetails, PriceBreakdown, PriceCalculationResult, StateMapping} from "@agents/tools/io/IPriceCalculator";
 import {IPriceCalculatorService} from "@agents/tools/impl/io/PriceCalculatorService";
 import {QuoteBreakdown} from "@agents/tools/io/IVisualization";
+import { PriceServiceImpl } from "@modules/price-service/services/impl/PriceServiceImpl";
 const logger: pino.Logger = createLogger(module);
 
 /**
@@ -237,7 +238,6 @@ export class PriceCalculatorService implements IPriceCalculatorService
 
     private async fetchRawPricingData(technicalParams: IPricingParams): Promise<any>
     {
-        const { PriceServiceImpl } = await import("@modules/price-service/services/impl/PriceServiceImpl");
         const priceService: PriceService = PriceServiceImpl.getInstance();
 
         return await priceService.fetchBuildingPricingWithUtility(technicalParams);

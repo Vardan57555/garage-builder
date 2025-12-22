@@ -15,8 +15,10 @@ export class FuzzyChoiceMatcher {
 
     private constructor() {}
 
-    public static getInstance(): FuzzyChoiceMatcher {
-        if (!FuzzyChoiceMatcher.instance) {
+    public static getInstance(): FuzzyChoiceMatcher
+    {
+        if (!FuzzyChoiceMatcher.instance)
+        {
             FuzzyChoiceMatcher.instance = new FuzzyChoiceMatcher();
         }
         return FuzzyChoiceMatcher.instance;
@@ -26,17 +28,14 @@ export class FuzzyChoiceMatcher {
      * ✅ Match user input to a choice with EXTREME typo tolerance
      * "gren" → "Evergreen", "vert" → "Vertical", "burgun" → "Burgundy"
      */
-    public async matchChoice(
-        userInput: string,
-        choices: string[] | Array<{ name: string; label?: string; id?: string }>,
-        displayOrder?: string[] // NEW: Explicit display order
-    ): Promise<{
+    public async matchChoice(userInput: string, choices: string[] | Array<{ name: string; label?: string; id?: string }>, displayOrder?: string[]): Promise<{
         matched: boolean;
         choice: string | null;
         confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
-        if (!userInput?.trim() || !choices || choices.length === 0) {
+        reasoning: string; }>
+    {
+        if (!userInput?.trim() || !choices || choices.length === 0)
+        {
             logger.warn(`[FuzzyChoiceMatcher] Invalid input or no choices`);
             return {
                 matched: false,
@@ -51,25 +50,22 @@ export class FuzzyChoiceMatcher {
                 typeof c === 'string' ? c : c.name || c.label || ''
             ).filter(c => c.length > 0);
 
-            // ✅ NEW: Use displayOrder if provided, otherwise use choiceList
             const orderedList = displayOrder || choiceList;
 
             logger.info(`[FuzzyChoiceMatcher] Matching "${userInput}" against ${orderedList.length} choices`);
 
-            // ✅ CRITICAL: Log the EXACT order being used for matching
             logger.info(`[FuzzyChoiceMatcher] Display order for number matching:`);
-            orderedList.forEach((c, i) => {
-                logger.info(`  [${i}] → Display #${i + 1}: "${c}"`);
-            });
+            orderedList.forEach((c, i) => {logger.info(`  [${i}] → Display #${i + 1}: "${c}"`);});
 
-            // ✅ NEW: Check if input is a number FIRST
             const trimmed = userInput.trim();
             const isNumber = /^\d+$/.test(trimmed);
 
-            if (isNumber) {
-                const index = parseInt(trimmed, 10) - 1;
+            if (isNumber)
+            {
+                const index: number = parseInt(trimmed, 10) - 1;
 
-                if (index >= 0 && index < orderedList.length) {
+                if (index >= 0 && index < orderedList.length)
+                {
                     const selectedChoice = orderedList[index];
                     logger.info(`[FuzzyChoiceMatcher] ✅ NUMBER MATCH: "${trimmed}" → index ${index} → "${selectedChoice}"`);
 
@@ -84,7 +80,6 @@ export class FuzzyChoiceMatcher {
                 }
             }
 
-            // ✅ Continue with AI matching if not a valid number
             const prompt = `Match user input to one of these choices with EXTREME typo tolerance.
 
 AVAILABLE CHOICES (IN ORDER):
@@ -173,7 +168,8 @@ ONLY JSON:`;
             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const result = this.parseResponse(response, orderedList);
 
-            if (result) {
+            if (result)
+            {
                 logger.info(`[FuzzyChoiceMatcher] Match result:`, result);
                 return result;
             }
@@ -184,7 +180,9 @@ ONLY JSON:`;
                 confidence: 'low',
                 reasoning: 'Failed to parse response'
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[FuzzyChoiceMatcher] Error:`, error);
             return {
                 matched: false,
@@ -201,17 +199,14 @@ ONLY JSON:`;
      *
      * ✅ CRITICAL: displayOrder MUST match the order shown to the user
      */
-    public async matchColor(
-        userInput: string,
-        colors: Array<{ name: string; cost?: number; hex_value?: string }>,
-        displayOrder?: string[] // NEW: Order as shown in UI
-    ): Promise<{
+    public async matchColor(userInput: string, colors: Array<{ name: string; cost?: number; hex_value?: string }>, displayOrder?: string[]): Promise<{
         matched: boolean;
         color: { name: string; cost?: number } | null;
         confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
-        if (!userInput?.trim() || !colors || colors.length === 0) {
+        reasoning: string; }>
+    {
+        if (!userInput?.trim() || !colors || colors.length === 0)
+        {
             return {
                 matched: false,
                 color: null,
@@ -221,12 +216,12 @@ ONLY JSON:`;
         }
 
         try {
-            const colorNames = colors.map(c => c.name);
+            const colorNames: string[] = colors.map(c => c.name);
 
-            // ✅ NEW: Use displayOrder if provided
             const result = await this.matchChoice(userInput, colorNames, displayOrder);
 
-            if (result.matched && result.choice) {
+            if (result.matched && result.choice)
+            {
                 const matchedColor = colors.find(c => c.name === result.choice);
                 return {
                     matched: true,
@@ -242,7 +237,9 @@ ONLY JSON:`;
                 confidence: result.confidence,
                 reasoning: result.reasoning
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[FuzzyChoiceMatcher] Color match error:`, error);
             return {
                 matched: false,
@@ -260,9 +257,9 @@ ONLY JSON:`;
         matched: boolean;
         roofType: string | null;
         confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
-        const roofTypes = ['Vertical', 'Regular', 'Box'];
+        reasoning: string; }>
+    {
+        const roofTypes: string[] = ['Vertical', 'Regular', 'Box'];
         const result = await this.matchChoice(userInput, roofTypes);
 
         return {
@@ -276,13 +273,9 @@ ONLY JSON:`;
     /**
      * ✅ Match gauge: "14" → "14 Gauge", "16" → "16 Gauge", etc.
      */
-    public async matchGauge(userInput: string): Promise<{
-        matched: boolean;
-        gauge: string | null;
-        confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
-        const gauges = ['14 Gauge', '16 Gauge', '18 Gauge'];
+    public async matchGauge(userInput: string): Promise<{ matched: boolean; gauge: string | null; confidence: 'high' | 'medium' | 'low'; reasoning: string; }>
+    {
+        const gauges: string[] = ['14 Gauge', '16 Gauge', '18 Gauge'];
         const result = await this.matchChoice(userInput, gauges);
 
         return {
@@ -296,13 +289,10 @@ ONLY JSON:`;
     /**
      * ✅ Match building type: "garage" → "Garage", "shed" → "Shed", etc.
      */
-    public async matchBuildingType(userInput: string): Promise<{
-        matched: boolean;
-        buildingType: string | null;
-        confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
-        const buildingTypes = ['Garage', 'Shed', 'Barn'];
+
+    public async matchBuildingType(userInput: string): Promise<{ matched: boolean; buildingType: string | null; confidence: 'high' | 'medium' | 'low'; reasoning: string; }>
+    {
+        const buildingTypes: string[] = ['Garage', 'Shed', 'Barn'];
         const result = await this.matchChoice(userInput, buildingTypes);
 
         return {
@@ -313,33 +303,38 @@ ONLY JSON:`;
         };
     }
 
-    private parseResponse(response: string, choiceList: string[]): any {
-        try {
-            let cleaned = response
+    private parseResponse(response: string, choiceList: string[]): any
+    {
+        try
+        {
+            let cleaned: string = response
                 .replace(/```json\s*/g, '')
                 .replace(/```\s*/g, '')
                 .trim();
 
-            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
+            const jsonMatch: RegExpMatchArray = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch)
+            {
                 logger.warn(`[FuzzyChoiceMatcher] No JSON found`);
                 return null;
             }
 
             const parsed = JSON.parse(jsonMatch[0]);
 
-            if (typeof parsed.matched !== 'boolean') {
+            if (typeof parsed.matched !== 'boolean')
+            {
                 logger.warn(`[FuzzyChoiceMatcher] Invalid matched:`, parsed);
                 return null;
             }
 
-            if (parsed.choice && !choiceList.includes(parsed.choice)) {
+            if (parsed.choice && !choiceList.includes(parsed.choice))
+            {
                 logger.warn(`[FuzzyChoiceMatcher] Choice not in list:`, parsed.choice);
                 parsed.choice = null;
                 parsed.matched = false;
             }
 
-            const validConfidences = ['high', 'medium', 'low'];
+            const validConfidences: string[] = ['high', 'medium', 'low'];
             if (!validConfidences.includes(parsed.confidence)) {
                 parsed.confidence = 'low';
             }
@@ -350,7 +345,9 @@ ONLY JSON:`;
                 confidence: parsed.confidence,
                 reasoning: parsed.reasoning || 'No explanation'
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[FuzzyChoiceMatcher] Parse error:`, error);
             return null;
         }

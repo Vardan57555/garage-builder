@@ -25,14 +25,13 @@ export class WorkflowBuilder implements IWorkflowBuilder
 
         this.config = {
             model: "sd_xl_base_1.0.safetensors",
-            steps: 45,  // ✅ Increased for better detail
-            cfg: 13.0,   // ✅ Higher guidance for better prompt adherence
-            sampler: "dpmpp_2m",  // ✅ Better sampler for architectural detail
-            scheduler: "karras",   // ✅ Better scheduler for quality
+            steps: 40,
+            cfg: 9.5,
+            sampler: "dpmpp_2m",
+            scheduler: "karras",
             width: 1280,
             height: 960,
-            // ✅ ENHANCED: Much stronger negative prompt for flat views
-            negativePrompt: "flat front-only view, straight-on frontal shot, no side wall visible, single-plane composition, flat elevation view, no depth, no three-dimensional form, open doors, ajar doors, partially open doors, door ajar, open garage door, lifted garage door, interior visible, interior view, dark interior, inside view, looking through doorway, people inside, vehicles inside, transparent doors, glass doors, windows in doors, bright interior lighting, interior space visible, gaping entrance, open access point, looking into building, wrong aspect ratio, distorted proportions, stretched dimensions, undersized, oversized, blurry, low quality, poorly rendered, asymmetrical doors, crooked structure, modern residential design, people in scene, vehicles visible, cars visible, trucks visible",
+            negativePrompt: "residential house, home, dwelling, luxury home, mansion, residential building, flat front-only view, straight-on frontal shot, no side wall visible, single-plane composition, flat elevation view, no depth, no three-dimensional form, open doors, ajar doors, partially open doors, door ajar, open garage door, lifted garage door, interior visible, interior view, dark interior, inside view, looking through doorway, people inside, vehicles inside, transparent doors, glass doors, windows in doors, bright interior lighting, interior space visible, gaping entrance, open access point, looking into building, wrong aspect ratio, distorted proportions, stretched dimensions, undersized, oversized, blurry, low quality, poorly rendered, asymmetrical doors, crooked structure, people in scene, vehicles visible, cars visible, trucks visible, wrong color, incorrect color",
             ...config,
         };
     }
@@ -68,28 +67,20 @@ export class WorkflowBuilder implements IWorkflowBuilder
         let pixelWidth: number;
         let pixelHeight: number;
 
-        // ✅ FIX: Use LANDSCAPE orientation for garages (front view wider than deep)
-        // Building width = front facade = image width
-        // Building length = depth = image height
         if (aspectRatio > 1.1) {
-            // Wide building (e.g., 30x20) -> landscape image
             pixelWidth = basePixelSize;
             pixelHeight = Math.round(basePixelSize / aspectRatio);
         } else if (aspectRatio < 0.9) {
-            // Tall building (e.g., 20x30) -> portrait image
             pixelHeight = basePixelSize;
             pixelWidth = Math.round(basePixelSize * aspectRatio);
         } else {
-            // Square building -> square image
             pixelWidth = basePixelSize;
             pixelHeight = basePixelSize;
         }
 
-        // Round to nearest 64 (SDXL requirement)
         pixelWidth = Math.round(pixelWidth / 64) * 64;
         pixelHeight = Math.round(pixelHeight / 64) * 64;
 
-        // Clamp to safe ranges
         pixelWidth = Math.max(512, Math.min(1536, pixelWidth));
         pixelHeight = Math.max(512, Math.min(1536, pixelHeight));
 
@@ -116,14 +107,12 @@ export class WorkflowBuilder implements IWorkflowBuilder
         widthOrBuildingWidth: number = this.config.width,
         heightOrBuildingLength: number = this.config.height,
         seedOrWidth?: number,
-        seedOrSeed?: number
     ): ComfyUIWorkflow {
 
         let pixelWidth: number;
         let pixelHeight: number;
         let seed: number = -1;
 
-        // Determine if we're using building dimensions or pixel dimensions
         if (widthOrBuildingWidth < 512 && heightOrBuildingLength < 512) {
             logger.info(`[WorkflowBuilder] Using NEW signature with building dimensions`);
 

@@ -43,10 +43,11 @@ export class GarageImageGenerator implements IGarageImageGenerator
     }
 
     private validateParams(params: UserFriendlyParams): { valid: boolean; error?: string } {
-        const required = ['width', 'length', 'height', 'color'];
-        const missing = required.filter(field => !params[field as keyof UserFriendlyParams]);
+        const required: string[] = ['width', 'length', 'height', 'color'];
+        const missing: string[] = required.filter(field => !params[field as keyof UserFriendlyParams]);
 
-        if (missing.length > 0) {
+        if (missing.length > 0)
+        {
             return {
                 valid: false,
                 error: `Missing parameters: ${missing.join(', ')}`
@@ -56,13 +57,11 @@ export class GarageImageGenerator implements IGarageImageGenerator
         return { valid: true };
     }
 
-    public async generate(
-        params: UserFriendlyParams,
-        selectedAddons: any[] = [],
-        retries: number = this.maxRetries
-    ): Promise<GenerationResult> {
+    public async generate(params: UserFriendlyParams, selectedAddons: any[] = [], retries: number = this.maxRetries): Promise<GenerationResult>
+    {
         const validation = this.validateParams(params);
-        if (!validation.valid) {
+        if (!validation.valid)
+        {
             logger.error(`[GarageImageGenerator] Validation failed: ${validation.error}`);
             return {
                 success: false,
@@ -81,7 +80,8 @@ export class GarageImageGenerator implements IGarageImageGenerator
             addons: selectedAddons.map(a => a.label)
         });
 
-        for (let attempt = 1; attempt <= retries; attempt++) {
+        for (let attempt = 1; attempt <= retries; attempt++)
+        {
             try {
                 logger.info(`[GarageImageGenerator] Attempt ${attempt}/${retries}...`);
 
@@ -117,11 +117,13 @@ export class GarageImageGenerator implements IGarageImageGenerator
                     imageUrl: `/generated/${filename}`,
                 };
             }
-            catch (error) {
+            catch (error)
+            {
                 const errorMsg: string = error instanceof Error ? error.message : String(error);
                 logger.warn(`[GarageImageGenerator] Attempt ${attempt} failed: ${errorMsg}`);
 
-                if (attempt < retries) {
+                if (attempt < retries)
+                {
                     const delay: number = 1000 * Math.pow(2, attempt - 1);
                     logger.info(`[GarageImageGenerator] Waiting ${delay}ms before retry...`);
                     await new Promise((resolve) => setTimeout(resolve, delay));

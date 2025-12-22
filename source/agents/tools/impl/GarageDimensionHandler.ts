@@ -4,6 +4,8 @@ import { UserFriendlyParams } from "@agents/tools/io/IChat";
 import { sharedLLM } from "@llm/SharedLLM";
 import { HumanMessage } from "@langchain/core/messages";
 import { DimensionManager } from "@agents/tools/impl/DimensionManager";
+import {IDimensionManager} from "@agents/tools/impl/io/IParameterExtractionNode";
+import {DimensionResult} from "@agents/tools/io/IParameterExtraction";
 
 const logger: pino.Logger = createLogger(module);
 
@@ -11,13 +13,16 @@ const logger: pino.Logger = createLogger(module);
  * ✅ FIXED: Smart garage vs dimension detection
  * Prevents "garage for two cars" from being treated as dimension extraction
  */
-export class GarageDimensionHandler {
+export class GarageDimensionHandler
+{
     private static instance: GarageDimensionHandler;
 
     private constructor() {}
 
-    public static getInstance(): GarageDimensionHandler {
-        if (!GarageDimensionHandler.instance) {
+    public static getInstance(): GarageDimensionHandler
+    {
+        if (!GarageDimensionHandler.instance)
+        {
             GarageDimensionHandler.instance = new GarageDimensionHandler();
         }
         return GarageDimensionHandler.instance;
@@ -28,14 +33,17 @@ export class GarageDimensionHandler {
      * "i want garage for two cars" → garage_type: "2-car"
      * Should NOT extract dimensions from this
      */
+
     public async detectGarageIntent(userInput: string): Promise<{
         isGarageIntent: boolean;
         garageType?: string;
         carCount?: number;
         confidence: 'high' | 'medium' | 'low';
         reasoning: string;
-    }> {
-        if (!userInput?.trim()) {
+    }>
+    {
+        if (!userInput?.trim())
+        {
             return {
                 isGarageIntent: false,
                 confidence: 'low',
@@ -85,10 +93,9 @@ ONLY JSON:`;
             const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
             const result = this.parseResponse(response);
 
-            if (result) {
-                logger.info(
-                    `[GarageDimensionHandler] ${result.isGarageIntent ? '✅' : '❌'} Garage intent: ${result.garageType || 'none'} (${result.reasoning})`
-                );
+            if (result)
+            {
+                logger.info(`[GarageDimensionHandler] ${result.isGarageIntent ? '✅' : '❌'} Garage intent: ${result.garageType || 'none'} (${result.reasoning})`);
                 return result;
             }
 
@@ -97,7 +104,9 @@ ONLY JSON:`;
                 confidence: 'low',
                 reasoning: 'Failed to parse'
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[GarageDimensionHandler] Error:`, error);
             return {
                 isGarageIntent: false,
@@ -112,35 +121,35 @@ ONLY JSON:`;
      * "2-car" → width, length, height
      * Uses DimensionManager for smart calculation
      */
-    public async calculateDimensionsFromGarageType(
-        garageType: string,
-        userInput: string
-    ): Promise<{
+
+    public async calculateDimensionsFromGarageType(garageType: string, userInput: string): Promise<{
         width: number;
         length: number;
         height: number;
         reasoning: string;
-    } | null> {
-        try {
+    } | null>
+    {
+        try
+        {
             logger.info(`[GarageDimensionHandler] Calculating dimensions for garage_type: ${garageType}`);
 
-            const carMatch = String(garageType).match(/(\d+)/);
-            const numCars = carMatch ? parseInt(carMatch[1], 10) : null;
+            const carMatch: RegExpMatchArray = String(garageType).match(/(\d+)/);
+            const numCars: number = carMatch ? parseInt(carMatch[1], 10) : null;
 
-            if (!numCars || numCars <= 0 || numCars > 20) {
+            if (!numCars || numCars <= 0 || numCars > 20)
+            {
                 logger.warn(`[GarageDimensionHandler] Invalid car count from: ${garageType}`);
                 return null;
             }
 
             logger.info(`[GarageDimensionHandler] Extracted car count: ${numCars}`);
 
-            const dimensionManager = DimensionManager.getInstance();
-            const calculation = dimensionManager.calculateDimensions(userInput);
+            const dimensionManager: IDimensionManager = DimensionManager.getInstance();
+            const calculation: DimensionResult = dimensionManager.calculateDimensions(userInput);
 
-            if (calculation && calculation.width && calculation.length && calculation.height) {
-                logger.info(
-                    `[GarageDimensionHandler] ✅ Calculated: ${calculation.width}×${calculation.length}×${calculation.height}`
-                );
+            if (calculation && calculation.width && calculation.length && calculation.height)
+            {
+                logger.info(`[GarageDimensionHandler] ✅ Calculated: ${calculation.width}×${calculation.length}×${calculation.height}`);
                 return {
                     width: calculation.width,
                     length: calculation.length,
@@ -149,7 +158,7 @@ ONLY JSON:`;
                 };
             }
 
-            const width = (numCars * 6) + 8;
+            const width: number = (numCars * 6) + 8;
             const length = 20;
             const height = 10;
 
@@ -172,22 +181,21 @@ ONLY JSON:`;
      * ✅ NEW: Safe integration point for LeadAgent
      * Handles garage intent WITHOUT corrupting dimensions
      */
-    public async processGarageIntentSafely(
-        userInput: string,
-        currentParams: Partial<UserFriendlyParams>
-    ): Promise<{
+    public async processGarageIntentSafely(userInput: string): Promise<{
         handled: boolean;
         garageType?: string;
         calculatedDimensions?: { width: number; length: number; height: number };
         response: string;
-        updatedParams: Partial<UserFriendlyParams>;
-    }> {
+        updatedParams: Partial<UserFriendlyParams>; }>
+    {
         logger.info(`[GarageDimensionHandler] Safe processing: "${userInput}"`);
 
-        try {
+        try
+        {
             const garageDetection = await this.detectGarageIntent(userInput);
 
-            if (!garageDetection.isGarageIntent || garageDetection.confidence === 'low') {
+            if (!garageDetection.isGarageIntent || garageDetection.confidence === 'low')
+            {
                 logger.info(`[GarageDimensionHandler] Not a garage intent`);
                 return {
                     handled: false,
@@ -203,7 +211,8 @@ ONLY JSON:`;
                 userInput
             );
 
-            if (!dimensions) {
+            if (!dimensions)
+            {
                 logger.error(`[GarageDimensionHandler] Failed to calculate dimensions`);
                 return {
                     handled: false,
@@ -235,7 +244,9 @@ ONLY JSON:`;
                 updatedParams
             };
 
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[GarageDimensionHandler] Exception:`, error);
             return {
                 handled: false,
@@ -246,27 +257,31 @@ ONLY JSON:`;
     }
 
     private parseResponse(response: string): any {
-        try {
-            let cleaned = response
+        try
+        {
+            let cleaned: string = response
                 .replace(/```json\s*/g, '')
                 .replace(/```\s*/g, '')
                 .trim();
 
-            const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) {
+            const jsonMatch: RegExpMatchArray = cleaned.match(/\{[\s\S]*\}/);
+            if (!jsonMatch)
+            {
                 logger.warn(`[GarageDimensionHandler] No JSON found`);
                 return null;
             }
 
             const parsed = JSON.parse(jsonMatch[0]);
 
-            if (typeof parsed.isGarageIntent !== 'boolean') {
+            if (typeof parsed.isGarageIntent !== 'boolean')
+            {
                 logger.warn(`[GarageDimensionHandler] Invalid structure:`, parsed);
                 return null;
             }
 
-            const validConfidences = ['high', 'medium', 'low'];
-            if (!validConfidences.includes(parsed.confidence)) {
+            const validConfidences: string[] = ['high', 'medium', 'low'];
+            if (!validConfidences.includes(parsed.confidence))
+            {
                 parsed.confidence = 'low';
             }
 
@@ -277,7 +292,9 @@ ONLY JSON:`;
                 confidence: parsed.confidence,
                 reasoning: parsed.reasoning || 'No explanation'
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[GarageDimensionHandler] Parse error:`, error);
             return null;
         }

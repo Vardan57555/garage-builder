@@ -10,13 +10,16 @@ const logger: pino.Logger = createLogger(module);
  * ✅ CONTEXT-AWARE PARAMETER UPDATE DETECTOR
  * Only detects parameter updates when NOT in choice field mode
  */
-export class ParameterUpdateDetector {
+export class ParameterUpdateDetector
+{
     private static instance: ParameterUpdateDetector;
 
     private constructor() {}
 
-    public static getInstance(): ParameterUpdateDetector {
-        if (!ParameterUpdateDetector.instance) {
+    public static getInstance(): ParameterUpdateDetector
+    {
+        if (!ParameterUpdateDetector.instance)
+        {
             ParameterUpdateDetector.instance = new ParameterUpdateDetector();
         }
         return ParameterUpdateDetector.instance;
@@ -26,16 +29,13 @@ export class ParameterUpdateDetector {
      * ✅ CRITICAL: Context-aware detection that respects field mode
      * Returns null immediately if in choice field mode
      */
-    public async detectParameterUpdate(
-        userInput: string,
-        currentField?: keyof UserFriendlyParams
-    ): Promise<{
+    public async detectParameterUpdate(userInput: string, currentField?: keyof UserFriendlyParams): Promise<{
         isUpdate: boolean;
         field?: keyof UserFriendlyParams;
         value?: any;
         confidence: 'high' | 'medium' | 'low';
-        reasoning: string;
-    }> {
+        reasoning: string; }>
+    {
         logger.info(`[ParameterUpdateDetector] Analyzing: "${userInput}"`);
         logger.info(`[ParameterUpdateDetector] Current field: ${currentField}`);
 
@@ -238,10 +238,8 @@ Remember:
 ONLY JSON:`;
     }
 
-    private getFieldContext(fieldName?: keyof UserFriendlyParams): {
-        type: string;
-        description: string;
-    } {
+    private getFieldContext(fieldName?: keyof UserFriendlyParams): { type: string; description: string; }
+    {
         const contexts: Record<string, any> = {
             roof_type: {
                 type: 'CHOICE FIELD',
@@ -319,7 +317,9 @@ ONLY JSON:`;
                 confidence: parsed.confidence,
                 reasoning: parsed.reasoning || 'No explanation'
             };
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[ParameterUpdateDetector] Parse error:`, error);
             return null;
         }

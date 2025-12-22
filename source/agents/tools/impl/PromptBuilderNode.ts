@@ -1,7 +1,6 @@
 import {InstantiationError} from "@errors/InstantiationError";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
 import {IPromptBuilder} from "@agents/tools/impl/io/IVisualizationNode";
-import {DimensionResult, ExtractionContext} from "@agents/tools/io/IParameterExtraction";
 import pino from "pino";
 import {createLogger} from "@utils/logger/Log";
 const logger: pino.Logger = createLogger(module);
@@ -55,10 +54,8 @@ export class PromptBuilder implements IPromptBuilder
     /**
      * ✅ ENHANCED: Industrial corrugated metal garage specifics
      */
-    public buildGaragePrompt(
-        params: UserFriendlyParams,
-        selectedAddons?: any[]
-    ): string {
+    public buildGaragePrompt(params: UserFriendlyParams, selectedAddons?: any[]): string
+    {
         const width: number = params.width || 20;
         const length: number = params.length || 20;
         const height: number = params.height || 10;
@@ -67,7 +64,6 @@ export class PromptBuilder implements IPromptBuilder
 
         const colorDesc: string = this.getColorDescription(color);
 
-        // Calculate door configuration
         const doorConfig = this.calculateDoorConfiguration(width, selectedAddons);
 
         logger.info(`[PromptBuilder] Building PREMIUM GARAGE configuration:`, {
@@ -78,7 +74,6 @@ export class PromptBuilder implements IPromptBuilder
             roofType,
         });
 
-        // Determine roof description - premium finishes
         let roofDescription = "";
         let roofVisualDetail = "";
         const roofTypeLower = roofType.toLowerCase();
@@ -97,7 +92,6 @@ export class PromptBuilder implements IPromptBuilder
             roofVisualDetail = "traditional peaked gable with refined proportions, premium roofing material";
         }
 
-        // Build addon specification
         let addonFeatures = "";
         if (selectedAddons && selectedAddons.length > 0) {
             const features = selectedAddons
@@ -114,18 +108,17 @@ export class PromptBuilder implements IPromptBuilder
             addonFeatures = `Premium features: ${features}.`;
         }
 
-        // Door description - beautiful garage doors
         let doorDescription = "";
         let doorPositioning = "";
         if (doorConfig.totalDoors === 1) {
-            doorDescription = "single premium panel garage door with modern design, aluminum frame and panels with subtle detail";
-            doorPositioning = "centered premium garage door with elegant hardware";
+            doorDescription = "single attractive garage door with professional panel design";
+            doorPositioning = "centered garage door";
         } else if (doorConfig.totalDoors === 2) {
-            doorDescription = "two side-by-side premium panel garage doors with contemporary styling, aluminum construction";
-            doorPositioning = "two elegantly-spaced modern garage doors";
+            doorDescription = "two side-by-side attractive garage doors with professional panel design";
+            doorPositioning = "two evenly-spaced garage doors";
         } else {
-            doorDescription = `${doorConfig.totalDoors} premium panel garage doors with coordinated design`;
-            doorPositioning = `${doorConfig.totalDoors} evenly-spaced modern garage doors`;
+            doorDescription = `${doorConfig.totalDoors} attractive garage doors with professional panel design`;
+            doorPositioning = `${doorConfig.totalDoors} evenly-spaced garage doors`;
         }
 
         const aspectRatio = width / length;
@@ -138,26 +131,28 @@ export class PromptBuilder implements IPromptBuilder
             sideVisibility = "well-proportioned structure showing front facade and attractive side elevation";
         }
 
-        // Professional exterior materials - AI will choose best appearance
-        const materialDescription = "premium siding with professional finish";
-        const wallFinish = "attractive modern exterior cladding with quality craftsmanship";
-        const wallTexture = "clean finished exterior, professional architectural styling";
+        const materialDescription = `${colorDesc} exterior finish`;
+        const wallFinish = `${colorDesc} professional exterior with smooth finish`;
+        const wallTexture = "smooth professional exterior, quality construction";
 
-        const prompt = `Professional architectural photograph of a premium custom garage building, ${colorDesc}, photographed in bright daylight from a 45-degree angle showing dimensional depth.
+        const prompt = `Professional photograph of a beautiful garage building with ${colorDesc} exterior finish, photographed in daylight from a 45-degree angle showing front and side walls, high-quality construction.
 
-BUILDING CHARACTERISTICS:
-• Type: Standard custom garage, clean modern construction
-• Style: Contemporary design with professional finish
-• Quality: Well-built construction, market-ready appearance
-• Purpose: Vehicle storage, equipment garage, or workshop space
-• Aesthetic: Clean, functional, professional-grade facility
+CRITICAL REQUIREMENTS:
+• MUST BE: Garage building for vehicle storage (NOT a house, NOT residential home)
+• COLOR: ${colorDesc} exterior (this exact color is CRITICAL)
+• TYPE: Professional garage building, commercial quality
+• STYLE: Beautiful, well-built garage with proper proportions
+• CONSTRUCTION: Quality construction with professional exterior finish
+• QUALITY: New, attractive, well-maintained, ready for customers
 
-EXTERIOR MATERIALS & FINISH:
-• Primary material: ${materialDescription}
-• Wall finish: ${wallFinish}
-• Surface texture: ${wallTexture}
-• Details: Quality craftsmanship, professional installation
-• Trim: Clean trim work, finished edges
+EXTERIOR APPEARANCE:
+• Walls: ${colorDesc} professional exterior finish
+• Material: Quality construction materials, ${materialDescription}
+• Finish: ${wallFinish}
+• Texture: ${wallTexture}
+• Color: ${colorDesc} - exact color match required
+• Look: Clean, attractive, professional garage building
+• Condition: New construction, excellent condition, ready for delivery
 
 ROOF DESIGN:
 • Type: ${roofDescription}
@@ -169,63 +164,66 @@ ROOF DESIGN:
 GARAGE DOORS & ENTRY:
 • Doors: ${doorDescription}
 • Positioning: ${doorPositioning}
-• Hardware: Standard quality hardware, professional appearance
+• Hardware: Quality hinges and handles, professional appearance
 • Finish: Matching color scheme, coordinated with building
 • Condition: Clean, well-maintained, closed and secure
-${selectedAddons?.some(a => a.label.toLowerCase().includes('walk')) ? '• Entry door: Personnel door with quality hardware' : ''}
+${selectedAddons?.some(a => a.label.toLowerCase().includes('walk')) ? '• Entry door: Attractive personnel door with quality hardware' : ''}
 
 WINDOWS & OPENINGS:
-${selectedAddons?.some(a => a.label.toLowerCase().includes('window')) ? '• Windows: Standard windows with frames, functional design\n• Style: Modern windows with standard framing' : '• No windows: Clean functional aesthetic\n• Focus: Door and facade'}
+${selectedAddons?.some(a => a.label.toLowerCase().includes('window')) ? '• Windows: Premium windows with frames, positioned for aesthetics and function\n• Style: Modern windows with quality framing' : '• Minimal windows: Clean industrial aesthetic\n• Focus: Door and facade quality'}
 
 BUILDING PROPORTIONS:
 • Width: ${width} feet
 • Depth: ${length} feet  
 • Height: ${height} feet
-• Proportions: Balanced appearance
+• Proportions: Balanced and attractive
 • Form: ${sideVisibility}
 
 FOUNDATION & BASE:
-• Foundation: Concrete pad, finished appearance
-• Base: Clean concrete foundation visible
-• Foreground: Professional gravel or paved area
+• Foundation: Quality concrete pad, finished appearance
+• Base: Clean concrete foundation visible at ground level
+• Foreground: Professional landscaping or neat gravel area
 • Site appearance: Well-maintained location
 
 LIGHTING & ATMOSPHERE:
-• Time: Bright daylight, natural lighting
+• Time: Bright daylight, golden hour or overcast
 • Sky: Clear or softly overcast sky
-• Lighting: Natural professional lighting
+• Lighting: Natural professional lighting, shadows for depth
 • Quality: High detail, sharp focus, professional finish
-• Mood: Clean, functional, professional
+• Mood: Clean, attractive, professional, sale-ready
 
 VIEWING ANGLE & COMPOSITION:
 • Angle: 45-degree perspective showing front and side
 • Distance: Professional exterior shot
-• Framing: Building prominently featured
-• Depth: Clear dimensional form
+• Framing: Building prominently featured, centered composition
+• Depth: Clear dimensional form, not flat appearance
 • Orientation: Building corner prominent, showing 3D form
-• Professional quality: Standard architectural style
+• Professional quality: Architectural photography standard
 
 RENDERING QUALITY:
 • Style: Photorealistic architectural rendering
-• Resolution: High detail, clear quality
+• Resolution: High detail, 8K quality
 • Focus: Sharp and clear throughout
-• Finish: Professional standards
-• Appeal: Clean and attractive appearance
+• Finish: Professional architectural standards
+• Appeal: Attractive and marketable appearance
 
 ${addonFeatures ? `SPECIAL FEATURES: ${addonFeatures}` : ''}
 
 DESIGN PRIORITIES:
-✓ MUST show exactly ${doorConfig.totalDoors} garage door(s) - NO EXTRA DOORS
-✓ MUST be clean and professional appearance
-✓ MUST show quality construction
+✓ MUST BE: Garage building for vehicles (NOT a house, NOT residential home)
+✓ MUST be beautiful, attractive, and professional quality
+✓ MUST match specifications: ${width}×${length}×${height} feet, ${roofTypeLower} roof
+✓ MUST be ${colorDesc} color - exact match to specifications
 ✓ MUST show 45-degree angle with dimensional depth
-✓ MUST be functional and practical
-✓ Dimensions: ${width}×${length}×${height} feet`;
+✓ MUST look like a real garage building (NOT metal panels, NOT luxury home, NOT poor shed)
+✓ MUST be well-built commercial quality construction
+✓ MUST be ready for customer delivery
+✓ Style: Beautiful professional garage, appropriate for selling to customers`;
 
         /**
-         * REFINED NEGATIVE PROMPT: Focus on quality, not industrial
+         * ✅ FIXED NEGATIVE PROMPT: Exclude homes, metal panels, and poor quality
          */
-        const negativePrompt = `cheap, poor quality, rundown, dilapidated, rusty, deteriorated, weathered, abandoned, poorly built, ugly, industrial warehouse, utilitarian, bare metal, corrugated metal texture, visible ribs, heavy gauge metal, commercial utility building, farming building, dull colors, boring, plain, basic construction, low quality materials, unfinished, rough texture, harsh shadows, too dark, too bright, overexposed, underexposed, distorted, warped, asymmetrical, low resolution, blurry, pixelated, cartoon, illustration, sketch, artificial appearance, obvious CGI, rendering artifacts, people, vehicles, signage, text, logos, luxury garage, high-end garage, premium materials, fancy doors, extra doors, additional doors, three doors, multiple side doors, personnel doors on front`;
+        const negativePrompt = `residential house, home, dwelling, residential building, luxury home, mansion, villa, cottage, residential architecture, house with windows, residential siding, brick house, wood house, stucco house, residential design, living quarters, apartment, condo, townhouse, residential neighborhood, landscaped yard, decorative elements, ornate details, luxury finishes, upscale design, premium residential, modern home, contemporary house, traditional house, ranch house, colonial house, craftsman house, farmhouse style, metal panels, corrugated metal, metal siding, ribbed metal, industrial metal, sheet metal, bare metal, unpainted metal, rusty, corroded, weathered, deteriorated, old, rundown, dilapidated, poor condition, damaged, dented, scratched, peeling paint, faded, dirty, grimy, stained, abandoned, neglected, cheap looking, industrial warehouse, utility shed, farm building, shipping container, metal box, people, vehicles, cars, trucks, signage, text, logos, open doors, interior visible, wrong color, incorrect color, color mismatch, blurry, low quality, distorted, warped, asymmetrical, cartoon, illustration, sketch`;
 
         logger.info(`[PromptBuilder] Generated PREMIUM GARAGE prompt`);
         logger.info(`  - Material: Premium finish, AI-optimized`);
@@ -238,17 +236,12 @@ DESIGN PRIORITIES:
         return prompt;
     }
 
-    public getLastNegativePrompt(): string {
-        return (this as any)._lastNegativePrompt || "residential home, house, dwelling, no depth, open doors";
-    }
+    private calculateDoorConfiguration(width: number, selectedAddons?: any[]): { totalDoors: number; fromAddons: boolean }
+    {
 
-    private calculateDoorConfiguration(
-        width: number,
-        selectedAddons?: any[]
-    ): { totalDoors: number; fromAddons: boolean } {
-
-        let addonDoorCount = 0;
-        if (selectedAddons && Array.isArray(selectedAddons)) {
+        let addonDoorCount: number = 0;
+        if (selectedAddons && Array.isArray(selectedAddons))
+        {
             selectedAddons.forEach(addon => {
                 if (addon && addon.label && addon.label.toLowerCase().includes('door')) {
                     addonDoorCount++;
@@ -256,18 +249,27 @@ DESIGN PRIORITIES:
             });
         }
 
-        if (addonDoorCount > 0) {
+        if (addonDoorCount > 0)
+        {
             return { totalDoors: addonDoorCount, fromAddons: true };
         }
 
-        let garageDoorCount = 1;
-        if (width >= 30) garageDoorCount = 2;
-        if (width >= 45) garageDoorCount = 3;
+        let garageDoorCount: number = 1;
+        if (width >= 30)
+        {
+            garageDoorCount = 2;
+        }
+
+        if (width >= 45)
+        {
+            garageDoorCount = 3;
+        }
 
         return { totalDoors: garageDoorCount, fromAddons: false };
     }
 
-    public buildUnifiedPrompt(context: ExtractionContext, calculation: DimensionResult): string {
+    public buildUnifiedPrompt(): string
+    {
         const sections: string[] = [
             this.buildSystemPrompt(),
         ];
@@ -275,7 +277,8 @@ DESIGN PRIORITIES:
         return sections.filter(Boolean).join("\n");
     }
 
-    private buildSystemPrompt(): string {
+    private buildSystemPrompt(): string
+    {
         return `You are a building parameter extraction system.
 
 CRITICAL: Return ONLY valid JSON. NO explanations, NO code.`;

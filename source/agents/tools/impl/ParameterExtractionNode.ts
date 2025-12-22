@@ -6,11 +6,9 @@ import { PriceParamsExtractorTool } from "@agents/tools/impl/PriceParamsExtracto
 import { LeadAgentStateType } from "@agents/LeadAgentState";
 import { BaseMessage } from "@langchain/core/messages";
 import {UserFriendlyParams} from "@agents/tools/io/IChat";
-import { ParameterValidator } from "../validators/ParameterValidator";
 import {DimensionManager} from "@agents/tools/impl/DimensionManager";
 import {PromptBuilder} from "@agents/tools/impl/PromptBuilderNode";
 import {
-    DimensionResult,
     ExtractionContext,
     ExtractionResult,
     ValidationResult
@@ -24,14 +22,18 @@ import {LeadAgentHelpers} from "@agents/LeadAgentHelpers";
 import {ChoiceServiceImpl} from "@agents/tools/impl/ChoiceServiceImpl";
 import {ContextAnalyzer, ExtractionResultBuilder} from "@agents/tools/impl/ContextAnalyzer";
 const logger: pino.Logger = createLogger(module);
+import { AIDrivenChoiceHandler } from "@agents/tools/impl/AIDrivenChoiceHandler"
+import { ParameterValidator }  from "@agents/tools/validators/ParameterValidator";
 
-class ParameterExtractor implements IParameterExtractor {
+class ParameterExtractor implements IParameterExtractor
+{
     private promptBuilder: IPromptBuilder;
     private parameterExtractionStrategy: IParameterExtractionStrategy;
     private dimensionManager: IDimensionManager;
     private paramExtractor: PriceParamsExtractorTool;
 
-    constructor() {
+    constructor()
+    {
         this.parameterExtractionStrategy = ParameterExtractionStrategy.getInstance();
         this.promptBuilder = PromptBuilder.getInstance();
         this.dimensionManager = DimensionManager.getInstance();
@@ -41,7 +43,8 @@ class ParameterExtractor implements IParameterExtractor {
     /**
      * ✅ NEW: Extract single dimension using Ollama AI
      */
-    private async extractSingleDimensionWithAI(userInput: string, field: 'width' | 'length' | 'height'): Promise<number | null> {
+    private async extractSingleDimensionWithAI(userInput: string, field: 'width' | 'length' | 'height'): Promise<number | null>
+    {
         try {
             logger.info(`[ParameterExtractor] AI extracting ${field} from: "${userInput}"`);
 
@@ -63,45 +66,52 @@ User response: "${userInput}"
 
 Return ONLY JSON:`;
 
-            const response = await sharedLLM.invoke([new HumanMessage(prompt)]);
+            const response: string = await sharedLLM.invoke([new HumanMessage(prompt)]);
 
             logger.debug(`[ParameterExtractor] AI single dimension response: "${response}"`);
 
             const parsed = this.parseAIResponse(response);
 
-            if (parsed && parsed.found && typeof parsed.value === 'number' && parsed.value > 0 && parsed.value <= 500) {
+            if (parsed && parsed.found && typeof parsed.value === 'number' && parsed.value > 0 && parsed.value <= 500)
+            {
                 logger.info(`[ParameterExtractor] ✅ AI extracted ${field}: ${parsed.value}`);
                 return parsed.value;
             }
 
             return null;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[ParameterExtractor] AI extraction error:`, error);
             return null;
         }
     }
 
 
-    public async extract(state: LeadAgentStateType): Promise<ExtractionResult> {
+    public async extract(state: LeadAgentStateType): Promise<ExtractionResult>
+    {
         logger.info(`[ParameterExtractor] Session ${state.sessionId} - Extracting parameters`);
 
         const currentParams = { ...state.userFriendlyParams };
-        const userInput = this.extractContextFromState(state);
+        const userInput: string = this.extractContextFromState(state);
 
-        const dimensionMatches = userInput.match(/\b(width|length|height|w|l|h)\s*[:=]?\s*\d+/gi);
-        const hasDimensionLabels = dimensionMatches && dimensionMatches.length >= 2;
+        const dimensionMatches: RegExpMatchArray = userInput.match(/\b(width|length|height|w|l|h)\s*[:=]?\s*\d+/gi);
+        const hasDimensionLabels: boolean = dimensionMatches && dimensionMatches.length >= 2;
 
-        if (hasDimensionLabels) {
+        if (hasDimensionLabels)
+        {
             logger.info(`[ParameterExtractor] Multiple dimension keywords detected, attempting multi-extraction`);
 
-            const multiDimResult = this.tryExtractMultipleDimensions(userInput, currentParams);
-            if (multiDimResult) {
+            const multiDimResult: ExtractionResult = this.tryExtractMultipleDimensions(userInput, currentParams);
+            if (multiDimResult)
+            {
                 logger.info(`[ParameterExtractor] ✅ Multiple dimension extraction succeeded`);
                 return multiDimResult;
             }
 
-            const multiParamResult = await this.detectMultipleParameterUpdates(userInput, state, currentParams);
-            if (multiParamResult) {
+            const multiParamResult: ExtractionResult = await this.detectMultipleParameterUpdates(userInput, state, currentParams);
+            if (multiParamResult)
+            {
                 logger.info(`[ParameterExtractor] ✅ Multiple parameter update handled`);
                 return multiParamResult;
             }
@@ -109,18 +119,19 @@ Return ONLY JSON:`;
             logger.info(`[ParameterExtractor] Multi-dimension detection failed, proceeding to standard extraction`);
         }
 
-        if (!currentParams.building_type) {
-            const buildingType = await this.extractBuildingTypeIfMissing(userInput, currentParams);
-            if (buildingType) {
+        if (!currentParams.building_type)
+        {
+            const buildingType: string = await this.extractBuildingTypeIfMissing(userInput, currentParams);
+            if (buildingType)
+            {
                 currentParams.building_type = buildingType;
                 logger.info(`[ParameterExtractor] ✅ Building type set to: ${buildingType}`);
             }
         }
 
-        if (state._pendingConfirmation && state._pendingConfirmation.field) {
+        if (state._pendingConfirmation && state._pendingConfirmation.field)
+        {
             logger.info(`[ParameterExtractor] Handling pending confirmation for ${state._pendingConfirmation.field}`);
-
-            const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
 
             const confirmation = await AIDrivenChoiceHandler.confirmChoice(
                 userInput,
@@ -141,11 +152,13 @@ Return ONLY JSON:`;
                     response: `✅ Updated ${state._pendingConfirmation.field} to ${state._pendingConfirmation.matchedValue}`,
                     _pendingConfirmation: null,
                 };
-            } else {
+            }
+            else
+            {
                 logger.info(`[ParameterExtractor] ❌ Rejected confirmation, re-asking`);
 
-                const availableOptions = AIDrivenChoiceHandler.getAvailableOptions(state._pendingConfirmation.field);
-                const prompt = await AIDrivenChoiceHandler.generateChoicePrompt(
+                const availableOptions: string[] = AIDrivenChoiceHandler.getAvailableOptions(state._pendingConfirmation.field);
+                const prompt: string = await AIDrivenChoiceHandler.generateChoicePrompt(
                     state._pendingConfirmation.field,
                     availableOptions
                 );
@@ -164,18 +177,19 @@ Return ONLY JSON:`;
             logger.info(`[ParameterExtractor] In field mode: ${state.currentField}`);
 
             const fieldKey = state.currentField as keyof UserFriendlyParams;
-            const isChoiceField = ["roof_type", "building_type", "gauge"].includes(state.currentField);
-            const isDimensionField = ['width', 'length', 'height', 'utility_length'].includes(state.currentField);
+            const isChoiceField: boolean = ["roof_type", "building_type", "gauge"].includes(state.currentField);
+            const isDimensionField: boolean = ['width', 'length', 'height', 'utility_length'].includes(state.currentField);
 
-            if (isDimensionField) {
+            if (isDimensionField)
+            {
                 return await this.handleDimensionField(state, userInput, currentParams);
             }
 
-            if (isChoiceField) {
+            if (isChoiceField)
+            {
                 logger.info(`[ParameterExtractor] Choice field: ${state.currentField}`);
 
-                const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
-                const availableOptions = AIDrivenChoiceHandler.getAvailableOptions(state.currentField);
+                const availableOptions: string[] = AIDrivenChoiceHandler.getAvailableOptions(state.currentField);
 
                 if (!availableOptions.length) {
                     return {
@@ -193,11 +207,9 @@ Return ONLY JSON:`;
                     availableOptions
                 );
 
-                if (!result) {
-                    const prompt = await AIDrivenChoiceHandler.generateChoicePrompt(
-                        state.currentField,
-                        availableOptions
-                    );
+                if (!result)
+                {
+                    const prompt: string = await AIDrivenChoiceHandler.generateChoicePrompt(state.currentField, availableOptions);
                     return {
                         validationError: `Could not match "${userInput}"`,
                         response: `❌ I didn't understand that.\n\n${prompt}`,
@@ -210,7 +222,7 @@ Return ONLY JSON:`;
                 if (result.confidence === "high" && !result.requiresConfirmation) {
                     // @ts-ignore
                     currentParams[fieldKey] = result.value;
-                    const missing = LeadAgentHelpers.getMissingFields(currentParams);
+                    const missing: string[] = LeadAgentHelpers.getMissingFields(currentParams);
                     return {
                         userFriendlyParams: currentParams,
                         currentField: null,
@@ -232,7 +244,8 @@ Return ONLY JSON:`;
                 };
             }
 
-            if (state.currentField === 'state_name') {
+            if (state.currentField === 'state_name')
+            {
                 const formatValidation = this.validateFieldInput(userInput, state.currentField);
                 if (!formatValidation.isValid) {
                     return {
@@ -244,10 +257,10 @@ Return ONLY JSON:`;
                     };
                 }
 
-                const { ParameterValidator } = await import("@agents/tools/validators/ParameterValidator");
-                const dbValidation = await ParameterValidator.validateState(userInput, state.stateMapCache);
+                const dbValidation: ValidationResult = await ParameterValidator.validateState(userInput, state.stateMapCache);
 
-                if (!dbValidation.isValid) {
+                if (!dbValidation.isValid)
+                {
                     return {
                         validationError: dbValidation.error,
                         response: `❌ ${dbValidation.error}`,
@@ -267,7 +280,8 @@ Return ONLY JSON:`;
             }
 
             const validation = this.validateFieldInput(userInput, state.currentField);
-            if (!validation.isValid) {
+            if (!validation.isValid)
+            {
                 return {
                     validationError: validation.error,
                     response: `❌ ${validation.error}`,
@@ -286,19 +300,21 @@ Return ONLY JSON:`;
             };
         }
 
-        const buildingType = await this.extractBuildingTypeIfMissing(userInput, currentParams);
-        if (buildingType) {
+        const buildingType: string = await this.extractBuildingTypeIfMissing(userInput, currentParams);
+        if (buildingType)
+        {
             currentParams.building_type = buildingType;
             logger.info(`[ParameterExtractor] ✅ Building type set to: ${buildingType}`);
         }
 
-        const hasExplicitCarCount = /(\d+)\s*(?:car|cars?)\s*(?:garage)?/i.test(userInput);
-        const hasExplicitDimensions = this.detectExplicitDimensions(userInput);
+        const hasExplicitCarCount: boolean = /(\d+)\s*(?:car|cars?)\s*(?:garage)?/i.test(userInput);
+        const hasExplicitDimensions: boolean = this.detectExplicitDimensions(userInput);
 
         logger.info(`[ParameterExtractor] Has explicit car count: ${hasExplicitCarCount}`);
         logger.info(`[ParameterExtractor] Has explicit dimensions: ${hasExplicitDimensions}`);
 
-        if (hasExplicitCarCount && !hasExplicitDimensions) {
+        if (hasExplicitCarCount && !hasExplicitDimensions)
+        {
             logger.info(`[ParameterExtractor] ✅ Car count provided, calculating dimensions...`);
 
             const dimensionCalc = this.dimensionManager.calculateDimensions(userInput);
@@ -323,7 +339,8 @@ Return ONLY JSON:`;
             }
         }
 
-        if (!hasExplicitCarCount && !hasExplicitDimensions) {
+        if (!hasExplicitCarCount && !hasExplicitDimensions)
+        {
             logger.info(`[ParameterExtractor] ⚠️ No car count or dimensions provided`);
             logger.info(`[ParameterExtractor] Will ask for parameters individually`);
 
@@ -337,13 +354,14 @@ Return ONLY JSON:`;
             };
         }
 
-        const hasDimensions = !!(
+        const hasDimensions: boolean = !!(
             currentParams.width &&
             currentParams.length &&
             currentParams.height
         );
 
-        if (hasDimensions) {
+        if (hasDimensions)
+        {
             logger.info(
                 `[ParameterExtractor] ✅ Dimensions already complete, PROTECTING from overwrite`,
                 {
@@ -361,13 +379,14 @@ Return ONLY JSON:`;
             }
         }
 
-        if (!hasExplicitDimensions && !hasDimensions) {
+        if (!hasExplicitDimensions && !hasDimensions)
+        {
             logger.info(`[ParameterExtractor] No explicit dimensions in: "${userInput}"`);
             logger.info(`[ParameterExtractor] Will proceed to ask for dimensions individually`);
         }
 
         logger.info(`[ParameterExtractor] PRIORITY 0: Checking for batch dimension extraction...`);
-        const batchResult = await this.tryBatchDimensionExtractionWithAI(userInput);
+        const batchResult: Partial<UserFriendlyParams> = await this.tryBatchDimensionExtractionWithAI(userInput);
         if (batchResult && batchResult.width && batchResult.length && batchResult.height) {
             logger.info(`[ParameterExtractor] ✅ BATCH extraction successful: ${batchResult.width}x${batchResult.length}x${batchResult.height}`);
             return {
@@ -478,8 +497,6 @@ Return ONLY JSON:`;
                                 userFriendlyParams: currentParams,
                             };
                         }
-
-                        const { AIDrivenChoiceHandler } = await import("@agents/tools/impl/AIDrivenChoiceHandler");
 
                         logger.info(`[ParameterExtractor] Processing choice with AI for ${state.currentField}: "${userInput}"`);
 
@@ -1285,9 +1302,7 @@ ONLY valid JSON:`;
         logger.info(`[extractWithUnifiedPrompt] Processing context (${context.userInput.length} chars)`);
         logger.info(`[extractWithUnifiedPrompt] Current field: ${context.currentField}`);
 
-        const calculation: DimensionResult = this.dimensionManager.calculateDimensions(context.userInput);
-
-        const prompt: string = this.promptBuilder.buildUnifiedPrompt(context, calculation);
+        const prompt: string = this.promptBuilder.buildUnifiedPrompt();
 
         return await this.parameterExtractionStrategy.extractLLMResponse(
             context.userInput,
