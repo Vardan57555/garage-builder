@@ -87,13 +87,13 @@ export class ParameterUpdateDetector
         return `You are a PARAMETER UPDATE DETECTOR. Determine if user input contains a parameter update (changing an existing or missing dimension/choice parameter).
 
 IMPORTANT RULES:
-1. Only detect ACTUAL parameter updates, not choice field answers
-2. Be conservative - if ambiguous, return isUpdate: false
-3. Parameter updates are things like: "make it 20 feet wide", "change height to 12", "I want regular roof"
-4. NOT parameter updates: answering a choice question, providing state name, etc.
+1. Detect parameter updates for ANY field, even if we're currently asking for a different field
+2. Look for explicit field keywords: "state", "width", "height", "length", "color", "roof", "gauge"
+3. Parameter updates are things like: "state Texas", "change width to 20", "I want regular roof"
+4. Be LESS conservative - if input clearly mentions a field name, detect it
 
 CURRENT CONTEXT:
-- Currently asking for: ${currentField || 'unknown'}
+- Currently asking for: ${currentField || 'not asking for anything'}
 - Field type: ${fieldContext.type}
 
 USER INPUT: "${userInput}"
@@ -102,36 +102,39 @@ USER INPUT: "${userInput}"
 ANALYSIS RULES:
 ============================================================================
 
-1️⃣ IF CURRENTLY ASKING FOR A CHOICE FIELD (roof_type, gauge, building_type, color, state_name):
-   ⚠️ DO NOT detect as parameter update
+1️⃣ STATE UPDATES - ALWAYS DETECT:
+   ✅ If input contains "state" keyword + location name → ALWAYS detect as state_name update
    
    Examples:
-   - Asking for roof_type → user says "vert" → This is choice answer, NOT parameter update
-   - Asking for gauge → user says "14" → This is choice answer, NOT parameter update  
-   - Asking for state → user says "texas" → This is state answer, NOT parameter update
-   - Asking for color → user says "gren" → This is color answer, NOT parameter update
+   - "state California" → isUpdate: true, field: "state_name", value: "California"
+   - "change state to Texas" → isUpdate: true, field: "state_name", value: "Texas"
+   - "my state is New York" → isUpdate: true, field: "state_name", value: "New York"
+   - "Texas" (while asking for roof_type) → isUpdate: true, field: "state_name", value: "Texas"
+   - "California" (while asking for gauge) → isUpdate: true, field: "state_name", value: "California"
 
-   ✅ Always return: isUpdate: false
-
-2️⃣ IF CURRENTLY ASKING FOR A DIMENSION FIELD (width, length, height):
-   ✅ Could be a parameter update if input contains other dimension keywords
+2️⃣ DIMENSION UPDATES - DETECT WITH KEYWORDS:
+   ✅ If input contains dimension keywords (width, length, height) + number
    
    Examples:
-   - Asking for width, user says "I also need height 15" → Could be update: height = 15
-   - Asking for height, user says "make it 12 feet tall" → Could be update: height = 12
-   
-   But:
-   - Asking for height, user says "12" → Not an update, just answering the question
-   - Asking for height, user says "give me 12 feet" → Not an update, just answering
+   - "width 20" → isUpdate: true, field: "width", value: 20
+   - "change height to 12" → isUpdate: true, field: "height", value: 12
+   - "make it 30 feet wide" → isUpdate: true, field: "width", value: 30
 
-3️⃣ IF NOT ASKING FOR ANYTHING (null/undefined):
-   ✅ Could be parameter update if input has EXPLICIT dimension/choice keywords
+3️⃣ OTHER CHOICE FIELDS - DETECT WITH KEYWORDS:
+   ✅ If input contains explicit field keywords
    
    Examples:
-   - "width 20 length 30" → Updates: width=20, length=30
-   - "regular roof and 14 gauge" → Updates: roof_type=regular, gauge=14
-   - "just 20" → Not an update (ambiguous)
-   - "vert" → Not an update (ambiguous abbreviation)
+   - "vertical roof" → isUpdate: true, field: "roof_type", value: "Vertical"
+   - "14 gauge" → isUpdate: true, field: "gauge", value: "14 Gauge"
+   - "blue color" → isUpdate: true, field: "color", value: "blue"
+
+4️⃣ AMBIGUOUS SINGLE WORDS - DO NOT DETECT:
+   ⚠️ Single words without context are NOT updates (could be answering current question)
+   
+   Examples:
+   - "vert" → isUpdate: false (ambiguous)
+   - "14" → isUpdate: false (could be answering gauge question)
+   - "20" → isUpdate: false (could be answering dimension question)
 
 ============================================================================
 PARAMETER KEYWORDS:
@@ -144,16 +147,18 @@ DIMENSION UPDATE KEYWORDS:
 - "make it X", "change to X", "set it to X"
 - "I want", "give me", "need"
 
-CHOICE UPDATE KEYWORDS (only if explicitly clear):
-- roof_type: "vertical", "regular", "box"
-- gauge: "14 gauge", "16 gauge"
+CHOICE UPDATE KEYWORDS:
+- state_name: "state", "Texas", "California", "New York", etc. (ANY US state name)
+- roof_type: "vertical", "regular", "box", "roof"
+- gauge: "14 gauge", "16 gauge", "gauge"
 - building_type: "garage", "shed", "barn"
-- color: "white", "red", "blue", etc.
+- color: "white", "red", "blue", "color", etc.
 
-⚠️ CRITICAL: Only detect as UPDATE if:
-- User explicitly says "change", "update", "make", "set"
-- Or dimension keyword + number in clear pattern
-- NOT just an abbreviation or single word
+⚠️ CRITICAL DETECTION RULES:
+- STATE: If input contains "state" keyword OR a US state name → ALWAYS detect as state_name update
+- DIMENSIONS: If input contains dimension keyword (width/length/height) + number → detect as update
+- OTHER FIELDS: If input contains explicit field keyword + value → detect as update
+- AMBIGUOUS: Single words without context (e.g., "vert", "14", "20") → DO NOT detect
 
 ============================================================================
 RESPONSE FORMAT:
@@ -163,7 +168,7 @@ Return ONLY JSON:
 
 {
   "isUpdate": <true or false>,
-  "field": "width" | "length" | "height" | "roof_type" | "gauge" | "building_type" | "color" | null,
+  "field": "width" | "length" | "height" | "roof_type" | "gauge" | "building_type" | "color" | "state_name" | null,
   "value": <any value or null>,
   "confidence": "high" | "medium" | "low",
   "reasoning": "detailed explanation"

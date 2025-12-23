@@ -576,10 +576,19 @@ export class LeadAgent
 
                 try {
                     const paramDetector = ParameterUpdateDetector.getInstance();
-                    const paramUpdate = await paramDetector.detectParameterUpdate(input);
+
+                    const paramUpdate = await paramDetector.detectParameterUpdate(input, null);
 
                     if (paramUpdate.isUpdate && paramUpdate.field && paramUpdate.confidence !== "low") {
                         logger.info(`[LeadAgent] ✅ PARAMETER UPDATE DETECTED DURING CHOICE MODE: ${paramUpdate.field} = ${paramUpdate.value} (confidence: ${paramUpdate.confidence})`);
+
+                        if (paramUpdate.field === 'state_name') {
+                            const capitalizedState = paramUpdate.value.split(' ')
+                                .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                                .join(' ');
+                            paramUpdate.value = capitalizedState;
+                        }
+
                         return await this.handleParameterUpdate(session, sessionId, paramUpdate, input);
                     } else {
                         logger.info(`[LeadAgent] No parameter update detected (confidence: ${paramUpdate.confidence})`);

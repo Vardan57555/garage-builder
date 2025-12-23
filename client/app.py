@@ -1,4 +1,4 @@
-"""Streamlit chat UI - Fixed contact button implementation with SVG email support."""
+"""Streamlit chat UI - Database persistence with SVG email support."""
 import os
 import json
 import uuid
@@ -13,6 +13,8 @@ from email.mime.image import MIMEImage
 import base64
 import httpx
 import streamlit as st
+import sqlite3
+from pathlib import Path
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:5003/api/v1/chat")
 REQUEST_TIMEOUT = float(os.getenv("REQUEST_TIMEOUT", "1000.0"))
@@ -50,46 +52,82 @@ hide_sidebar = """
 """
 st.markdown(hide_sidebar, unsafe_allow_html=True)
 
-def get_tab_specific_id():
-    """Generate a unique ID for THIS browser tab."""
-    tab_id_script = """
-    <script>
-    if (!window.__STREAMLIT_TAB_ID__) {
-        window.__STREAMLIT_TAB_ID__ = 'tab_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
-        sessionStorage.setItem('streamlit_tab_id', window.__STREAMLIT_TAB_ID__);
-    }
-    </script>
-    """
-    st.html(tab_id_script)
+# Database setup
+DB_PATH = Path(".streamlit/chat_history.db")
+DB_PATH.parent.mkdir(exist_ok=True)
 
-    if "tab_id" not in st.session_state:
-        st.session_state.tab_id = str(uuid.uuid4())
+def init_db():
+    """Initialize SQLite database."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            session_id TEXT PRIMARY KEY,
+            messages TEXT NOT NULL,
+            backend_session_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-    return st.session_state.tab_id
+def load_conversation(session_id: str) -> Tuple[List[dict], Optional[str]]:
+    """Load conversation from database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT messages, backend_session_id FROM conversations WHERE session_id = ?",
+            (session_id,)
+        )
+        result = cursor.fetchone()
+        conn.close()
 
-TAB_ID = get_tab_specific_id()
-SESSION_STATE_KEY = f"sessionId_{TAB_ID}"
-MESSAGES_STATE_KEY = f"messages_{TAB_ID}"
+        if result:
+            messages = json.loads(result[0])
+            backend_session_id = result[1]
+            return messages, backend_session_id
+    except Exception as e:
+        st.warning(f"Error loading conversation: {str(e)}")
 
-def get_random_greeting() -> str:
-    return random.choice(INITIAL_GREETINGS)
+    return [], None
+
+def save_conversation(session_id: str, messages: List[dict], backend_session_id: Optional[str]):
+    """Save conversation to database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO conversations
+            (session_id, messages, backend_session_id, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (session_id, json.dumps(messages), backend_session_id)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.warning(f"Error saving conversation: {str(e)}")
+
+# Initialize database
+init_db()
 
 def split_svg_and_text(content: str) -> Tuple[Optional[str], str, bool]:
     """Split content into SVG, text, and whether it has contact button marker."""
     svg_pattern = r'<svg[^>]*>.*?</svg>'
     match = re.search(svg_pattern, content, re.DOTALL)
 
-    # Check for contact button marker
     has_contact_button = "[📧 Contact Us](#contact-button)" in content
 
     if match:
         svg = match.group(0)
         text = content[:match.start()] + content[match.end():]
-        # Remove contact button placeholder
         text = text.replace("[📧 Contact Us](#contact-button)", "").strip()
         return svg, text, has_contact_button
 
-    # Remove contact button placeholder
     text = content.replace("[📧 Contact Us](#contact-button)", "").strip()
     return None, text, has_contact_button
 
@@ -177,36 +215,30 @@ def get_conversation_history_content() -> Tuple[str, str, List[dict]]:
     html_parts = []
     plain_lines: List[str] = []
 
-    # Header
     html_parts.append("<html><body style='font-family: Arial, sans-serif;'>")
     html_parts.append(f"<h2>Garage Builder Assistant - Conversation History</h2>")
-    html_parts.append(f"<p><strong>Session ID:</strong> {st.session_state[SESSION_STATE_KEY] or 'Not started'}</p>")
+    html_parts.append(f"<p><strong>Session ID:</strong> {st.session_state.get('backend_session_id') or 'Not started'}</p>")
     html_parts.append(f"<p><strong>Generated:</strong> {time.strftime('%Y-%m-%d %H:%M:%S')}</p>")
     html_parts.append("<hr/>")
 
-    plain_lines.append(f"Session ID: {st.session_state[SESSION_STATE_KEY] or 'Not started'}")
+    plain_lines.append(f"Session ID: {st.session_state.get('backend_session_id') or 'Not started'}")
     plain_lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     plain_lines.append("")
 
-    # Messages
-    for i, msg in enumerate(st.session_state[MESSAGES_STATE_KEY], 1):
+    for i, msg in enumerate(st.session_state.get("messages", []), 1):
         role = msg["role"].upper()
         content = msg["content"]
 
-        # Remove contact button placeholder
         content = re.sub(r'\[📧 Contact Us\]\(#contact-button\)', '', content)
 
-        # Role header
         bg_color = "#e3f2fd" if role == "USER" else "#f5f5f5"
         html_parts.append(f"<div style='margin: 20px 0; padding: 15px; background-color: {bg_color}; border-radius: 8px;'>")
         html_parts.append(f"<h3 style='margin-top: 0; color: #1976d2;'>{role}</h3>")
         plain_lines.append(f"[{role}]")
 
-        # Extract base64 images (markdown format: ![alt](data:image/png;base64,...))
         img_pattern = r'!\[([^\]]*)\]\(data:image/([^;]+);base64,([^)]+)\)'
         img_matches = list(re.finditer(img_pattern, content))
 
-        # Extract SVG if present
         svg_pattern = r'<svg[^>]*>.*?</svg>'
         svg_match = re.search(svg_pattern, content, re.DOTALL)
 
@@ -250,11 +282,9 @@ def get_conversation_history_content() -> Tuple[str, str, List[dict]]:
             html_parts.append(f"<p>{text_html}</p>")
 
         elif svg_match:
-            # Split text and SVG
             svg = svg_match.group(0)
             text = content[:svg_match.start()] + content[svg_match.end():]
 
-            # Add text
             if text.strip():
                 text_html = text.replace('\n', '<br/>')
                 text_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\\1</strong>', text_html)
@@ -263,12 +293,10 @@ def get_conversation_history_content() -> Tuple[str, str, List[dict]]:
                 html_parts.append(f"<p>{text_html}</p>")
                 plain_lines.append(text.strip())
 
-            # Add SVG (embedded directly)
             html_parts.append(f"<div style='margin: 15px 0; text-align: center;'>{svg}</div>")
             plain_lines.append('[SVG diagram included]')
 
         else:
-            # Just text, no image or SVG
             text_html = content.replace('\n', '<br/>')
             text_html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\\1</strong>', text_html)
             text_html = re.sub(r'\*(.*?)\*', r'<em>\\1</em>', text_html)
@@ -290,7 +318,6 @@ def send_email(user_email: str, phone: str, full_name: str, plain_history: str, 
         return False, "Email configuration not set. Please contact administrator."
 
     try:
-        # Clean inputs to remove non-ASCII characters
         full_name = ''.join(c if ord(c) < 128 else ' ' for c in full_name)
         user_email = ''.join(c if ord(c) < 128 else ' ' for c in user_email)
         phone = ''.join(c if ord(c) < 128 else ' ' for c in phone)
@@ -298,7 +325,6 @@ def send_email(user_email: str, phone: str, full_name: str, plain_history: str, 
         smtp_sender_clean = ''.join(c if ord(c) < 128 else ' ' for c in SMTP_SENDER)
         smtp_password_clean = ''.join(c if ord(c) < 128 else ' ' for c in SMTP_PASSWORD)
 
-        # Create plain text version (without SVGs)
         plain_body = "New inquiry from Garage Builder Assistant!\n\n"
         plain_body += "CONTACT INFORMATION:\n"
         plain_body += f"- Name: {full_name}\n"
@@ -309,7 +335,6 @@ def send_email(user_email: str, phone: str, full_name: str, plain_history: str, 
         plain_body += "---\n"
         plain_body += f"Reply to this email to contact {full_name}."
 
-        # Create HTML version (with SVGs)
         html_body = f"""
         <html>
         <body style='font-family: Arial, sans-serif;'>
@@ -335,14 +360,12 @@ def send_email(user_email: str, phone: str, full_name: str, plain_history: str, 
         </html>
         """
 
-        # Create multipart message
         msg = MIMEMultipart('alternative')
         msg['From'] = user_email
         msg['To'] = EMAIL_RECIPIENT
         msg['Reply-To'] = user_email
         msg['Subject'] = f"New Garage Builder Inquiry from {full_name}"
 
-        # Attach both plain text and HTML versions
         msg.attach(MIMEText(plain_body, 'plain'))
         msg.attach(MIMEText(html_body, 'html'))
 
@@ -354,7 +377,6 @@ def send_email(user_email: str, phone: str, full_name: str, plain_history: str, 
             img.add_header('Content-Disposition', 'inline', filename=f"{attachment['cid']}.{attachment['mime']}")
             msg.attach(img)
 
-        # Send email
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(smtp_sender_clean, smtp_password_clean)
@@ -365,17 +387,28 @@ def send_email(user_email: str, phone: str, full_name: str, plain_history: str, 
     except Exception as e:
         return False, f"Failed to send email: {str(e)}"
 
+# Get or create session ID from URL
+query_params = st.query_params
+if "sid" in query_params:
+    session_id = query_params["sid"]
+else:
+    session_id = str(uuid.uuid4())
+    st.query_params["sid"] = session_id
+
 # Initialize session state
-if SESSION_STATE_KEY not in st.session_state:
-    st.session_state[SESSION_STATE_KEY] = None
-
-if MESSAGES_STATE_KEY not in st.session_state:
-    st.session_state[MESSAGES_STATE_KEY] = [
-        {"role": "assistant", "content": get_random_greeting()}
+if "user_session_id" not in st.session_state:
+    st.session_state.user_session_id = session_id
+    # Load from database
+    messages, backend_session_id = load_conversation(session_id)
+    st.session_state.messages = messages if messages else [
+        {"role": "assistant", "content": random.choice(INITIAL_GREETINGS)}
     ]
-
-if "last_error" not in st.session_state:
-    st.session_state.last_error = None
+    st.session_state.backend_session_id = backend_session_id
+else:
+    if not st.session_state.messages:
+        st.session_state.messages = [
+            {"role": "assistant", "content": random.choice(INITIAL_GREETINGS)}
+        ]
 
 if "show_share_popup" not in st.session_state:
     st.session_state.show_share_popup = False
@@ -386,11 +419,10 @@ if "popup_triggered" not in st.session_state:
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
 
-# Title
 st.title("🏗️ Garage Builder Chat")
 
-# Display conversation with REAL contact buttons
-for msg_idx, msg in enumerate(st.session_state[MESSAGES_STATE_KEY]):
+# Display conversation
+for msg_idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         content = msg["content"]
         svg, text_part, has_contact = split_svg_and_text(content)
@@ -401,7 +433,6 @@ for msg_idx, msg in enumerate(st.session_state[MESSAGES_STATE_KEY]):
         if svg:
             st.write(svg, unsafe_allow_html=True)
 
-        # Add REAL Streamlit button if contact marker was found
         if has_contact:
             if st.button("📧 Contact Us", key=f"contact_inline_{msg_idx}", type="primary"):
                 st.session_state.show_share_popup = True
@@ -474,7 +505,9 @@ if st.session_state.is_processing:
 if prompt := st.chat_input("Type your question…", disabled=st.session_state.is_processing):
     st.session_state.is_processing = True
 
-    st.session_state[MESSAGES_STATE_KEY].append({"role": "user", "content": prompt})
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    save_conversation(st.session_state.user_session_id, st.session_state.messages, st.session_state.backend_session_id)
+
     with st.chat_message("user"):
         st.markdown(prompt)
 
@@ -488,7 +521,7 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                 with httpx.Client(timeout=timeout) as client:
                     request_body = {
                         "question": prompt,
-                        "sessionId": st.session_state[SESSION_STATE_KEY] or ""
+                        "sessionId": st.session_state.backend_session_id or ""
                     }
 
                     with placeholder.container():
@@ -505,11 +538,10 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                     except ValueError:
                         raw_payload = response.text
 
-                session_id, reply = parse_chat_response(raw_payload)
-                if session_id:
-                    st.session_state[SESSION_STATE_KEY] = session_id
+                session_id_new, reply = parse_chat_response(raw_payload)
+                if session_id_new:
+                    st.session_state.backend_session_id = session_id_new
 
-                st.session_state.last_error = None
                 break
 
             except httpx.TimeoutException:
@@ -533,14 +565,14 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                 if svg:
                     st.write(svg, unsafe_allow_html=True)
 
-                # ✅ Show contact button in new message if marked
                 if has_contact:
                     if st.button("📧 Contact Us", key="contact_new_msg", type="primary"):
                         st.session_state.show_share_popup = True
                         st.session_state.popup_triggered = True
                         st.rerun()
 
-            st.session_state[MESSAGES_STATE_KEY].append({"role": "assistant", "content": reply})
+            st.session_state.messages.append({"role": "assistant", "content": reply})
+            save_conversation(st.session_state.user_session_id, st.session_state.messages, st.session_state.backend_session_id)
 
         st.session_state.is_processing = False
         st.rerun()
