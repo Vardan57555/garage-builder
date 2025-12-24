@@ -35,6 +35,20 @@ export class AIDimensionDetector
     {
         logger.info(`[AIDimensionDetector] Context-aware check - Expected field: ${expectedField}`);
         logger.info(`[AIDimensionDetector] User input: "${userInput}"`);
+        
+        // ✅ CRITICAL: Reject ambiguous single numbers in initial flow (no expected field)
+        const trimmedInput = userInput.trim();
+        const isSingleNumber = /^\d+$/.test(trimmedInput);
+        
+        if (!expectedField && isSingleNumber) {
+            logger.info(`[AIDimensionDetector] ❌ Rejected ambiguous single number "${trimmedInput}" in initial flow`);
+            logger.info(`[AIDimensionDetector] Single numbers without dimension keywords are ambiguous - could be width, length, height, or garage type`);
+            return {
+                isDimension: false,
+                confidence: 'low',
+                reasoning: 'Ambiguous single number without dimension keyword - rejected to avoid hallucination'
+            };
+        }
 
         try {
             const prompt: string = this.buildContextAwarePrompt(userInput, expectedField);
@@ -341,9 +355,31 @@ ONLY JSON:`;
         }
 
         logger.info(`[AIDimensionDetector] Batch extraction from: "${userInput}"`);
+        
+        // ✅ Pre-validation: Check if input contains any dimension-related keywords or numbers
+        const hasEnglishDimensionKeywords = /\b(width|length|height|w|l|h|widt|lengt|heigt|wide|long|tall|deep|feet|ft)\b/i.test(userInput);
+        const hasXFormat = /\d+\s*[xX×]\s*\d+\s*[xX×]\s*\d+/.test(userInput);
+        const hasNumbers = /\d+/.test(userInput);
+        
+        if (!hasEnglishDimensionKeywords && !hasXFormat) {
+            logger.info(`[AIDimensionDetector] ❌ Input rejected - no dimension keywords or X format found`);
+            logger.info(`[AIDimensionDetector] Input appears to be gibberish or non-English: "${userInput}"`);
+            return null;
+        }
+        
+        if (!hasNumbers) {
+            logger.info(`[AIDimensionDetector] ❌ Input rejected - no numbers found`);
+            return null;
+        }
 
         try {
             const prompt = `Extract ALL building dimensions from user input. 
+
+⚠️ CRITICAL VALIDATION RULES:
+1. ONLY extract if input contains dimension keywords: width, length, height, w, l, h (or typos)
+2. ONLY extract if input contains NUMBERS
+3. REJECT gibberish, random text, or non-English input
+4. REJECT if no clear dimension keywords are present
 
 ⚠️ CRITICAL PARSING RULES:
 1. Look for keywords: width, length, height (and typos like: widt, lengt, heigt)
@@ -357,10 +393,13 @@ ONLY JSON:`;
 ✅ "garage width 10 length 10 height 10" → extract all 3 (ignore "garage")
 ✅ "20x20x10" → width:20, length:20, height:10 (X format)
 
-❌ DO NOT extract:
+❌ DO NOT extract from:
 - "10" alone (no dimension keyword)
 - "texas" (state name, not dimension)
+- "ադձնադ" (gibberish/non-English)
+- "asdas" (random text)
 - Choice keywords like: "vert", "gren", "14", "reg"
+- ANY input without dimension keywords
 
 ⚠️ CRITICAL RULE FOR XxYxZ FORMAT:
 If you see "20x20x10":

@@ -48,6 +48,7 @@ export class PromptBuilder implements IPromptBuilder
 
     private getColorDescription(color: string): string
     {
+        if (!color) return 'white';
         return this.colorDescriptions[color] || color.toLowerCase();
     }
 
@@ -79,25 +80,25 @@ export class PromptBuilder implements IPromptBuilder
         const roofTypeLower = roofType.toLowerCase();
 
         if (roofTypeLower === 'box') {
-            roofDescription = "modern flat-roof design with clean edges";
-            roofVisualDetail = "sleek flat roofline with subtle soffit detailing, integrated gutters";
+            roofDescription = "FLAT BOX ROOF (completely flat horizontal roof, no pitch, no slope, modern flat-top design)";
+            roofVisualDetail = "perfectly flat horizontal roofline with clean edges, no visible pitch or slope, modern flat-top garage roof";
         } else if (roofTypeLower === 'vertical') {
-            roofDescription = "contemporary pitched roof with architectural appeal";
-            roofVisualDetail = "clean pitched roof with premium metal roofing panels or architectural shingles, refined ridge detail";
+            roofDescription = "VERTICAL ROOF (steep pitched roof with vertical metal panels running from ridge to eave, high-pitch A-frame style)";
+            roofVisualDetail = "steep pitched roof with VERTICAL orientation metal panels, high slope angle, prominent ridge line, A-frame garage style";
         } else if (roofTypeLower === 'gambrel') {
-            roofDescription = "distinctive gambrel roof with traditional charm";
-            roofVisualDetail = "elegant gambrel design with two roof slopes, premium finish, architectural interest";
+            roofDescription = "GAMBREL BARN ROOF (distinctive two-slope barn-style roof, upper steep slope and lower gentle slope on each side)";
+            roofVisualDetail = "classic gambrel barn roof with two distinct slopes per side, traditional barn-style garage roof";
         } else {
-            roofDescription = "classic peaked gable roof";
-            roofVisualDetail = "traditional peaked gable with refined proportions, premium roofing material";
+            roofDescription = "REGULAR GABLE ROOF (standard peaked roof with moderate pitch, traditional A-frame triangle shape)";
+            roofVisualDetail = "traditional peaked gable roof with moderate pitch angle, classic triangular profile, standard garage roof";
         }
 
         let addonFeatures = "";
         if (selectedAddons && selectedAddons.length > 0) {
             const features = selectedAddons
-                .filter(a => a && a.label)
+                .filter(a => a && (a.label || a.name))
                 .map(a => {
-                    const label = a.label.toLowerCase();
+                    const label = (a.label || a.name || '').toLowerCase();
                     if (label.includes('window')) return 'premium glass windows with trim';
                     if (label.includes('walk-in')) return 'attractive personnel entry door with hardware';
                     if (label.includes('cupola')) return 'decorative roof cupola with weathervane';
@@ -135,15 +136,41 @@ export class PromptBuilder implements IPromptBuilder
         const wallFinish = `${colorDesc} professional exterior with smooth finish`;
         const wallTexture = "smooth professional exterior, quality construction";
 
-        const prompt = `Professional photograph of a beautiful garage building with ${colorDesc} exterior finish, photographed in daylight from a 45-degree angle showing front and side walls, high-quality construction.
+        const prompt = `(((GARAGE BUILDING))) (((VEHICLE STORAGE))) (((NOT A HOUSE))) (((METAL GARAGE))) (((${colorDesc} GARAGE)))
 
-CRITICAL REQUIREMENTS:
-• MUST BE: Garage building for vehicle storage (NOT a house, NOT residential home)
-• COLOR: ${colorDesc} exterior (this exact color is CRITICAL)
-• TYPE: Professional garage building, commercial quality
-• STYLE: Beautiful, well-built garage with proper proportions
-• CONSTRUCTION: Quality construction with professional exterior finish
-• QUALITY: New, attractive, well-maintained, ready for customers
+Professional photograph of a ${colorDesc} metal garage building for vehicle storage with ${roofDescription}, photographed in daylight from a 45-degree angle.
+
+CRITICAL - EXACT SPECIFICATIONS REQUIRED:
+1. BUILDING TYPE: (((GARAGE))) (((VEHICLE STORAGE BUILDING))) - MUST BE A GARAGE, NOT A HOUSE, NOT RESIDENTIAL
+2. COLOR: (((${colorDesc}))) - ENTIRE BUILDING MUST BE ${colorDesc} COLOR
+3. ROOF: (((${roofDescription})))
+4. SIZE: (((${width}ft wide × ${length}ft deep × ${height}ft tall)))
+5. DOORS: (((${doorConfig.totalDoors} large garage door(s) for vehicles)))
+
+BUILDING TYPE - MOST CRITICAL:
+- (((GARAGE BUILDING)))
+- (((METAL GARAGE)))
+- (((VEHICLE STORAGE BUILDING)))
+- (((COMMERCIAL GARAGE)))
+- (((STEEL BUILDING)))
+- NOT a house, NOT residential home, NOT a dwelling, NOT living quarters
+- NOT a barn, NOT a shed, NOT a warehouse
+- MUST have large garage doors for vehicles
+- MUST be a simple garage structure
+- Professional metal garage building for storing vehicles
+
+COLOR SPECIFICATION - CRITICAL:
+((${colorDesc} exterior walls)), ((${colorDesc} siding)), ((${colorDesc} finish))
+The entire building MUST be ${colorDesc} color
+${colorDesc} is the ONLY acceptable color
+NO other colors allowed on exterior walls
+
+DIMENSIONS - EXACT PROPORTIONS:
+Width: ${width} feet (${width}ft)
+Depth: ${length} feet (${length}ft)  
+Height: ${height} feet (${height}ft)
+Aspect ratio: ${(width / length).toFixed(2)}:1
+${width > length ? 'Wide rectangular building' : length > width ? 'Deep rectangular building' : 'Square building'}
 
 EXTERIOR APPEARANCE:
 • Walls: ${colorDesc} professional exterior finish
@@ -167,10 +194,17 @@ GARAGE DOORS & ENTRY:
 • Hardware: Quality hinges and handles, professional appearance
 • Finish: Matching color scheme, coordinated with building
 • Condition: Clean, well-maintained, closed and secure
-${selectedAddons?.some(a => a.label.toLowerCase().includes('walk')) ? '• Entry door: Attractive personnel door with quality hardware' : ''}
+${selectedAddons?.some(a => (a.label || a.name || '').toLowerCase().includes('walk')) ? '• Entry door: Attractive personnel door with quality hardware' : ''}
 
 WINDOWS & OPENINGS:
-${selectedAddons?.some(a => a.label.toLowerCase().includes('window')) ? '• Windows: Premium windows with frames, positioned for aesthetics and function\n• Style: Modern windows with quality framing' : '• Minimal windows: Clean industrial aesthetic\n• Focus: Door and facade quality'}
+${(() => {
+    const windowAddons = selectedAddons?.filter(a => (a.label || a.name || '').toLowerCase().includes('window')) || [];
+    if (windowAddons.length > 0) {
+        const totalWindows = windowAddons.reduce((sum, a) => sum + (a.quantity || 1), 0);
+        return `• EXACT WINDOW COUNT: ${totalWindows} window(s) - this exact number is MANDATORY\n• Windows: Premium windows with frames, positioned for aesthetics and function\n• Style: Modern windows with quality framing`;
+    }
+    return '• Minimal windows: Clean industrial aesthetic\n• Focus: Door and facade quality';
+})()}
 
 BUILDING PROPORTIONS:
 • Width: ${width} feet
@@ -221,9 +255,9 @@ DESIGN PRIORITIES:
 ✓ Style: Beautiful professional garage, appropriate for selling to customers`;
 
         /**
-         * ✅ FIXED NEGATIVE PROMPT: Exclude homes, metal panels, and poor quality
+         * ✅ ULTRA-AGGRESSIVE NEGATIVE PROMPT: Exclude houses and residential buildings with maximum emphasis
          */
-        const negativePrompt = `residential house, home, dwelling, residential building, luxury home, mansion, villa, cottage, residential architecture, house with windows, residential siding, brick house, wood house, stucco house, residential design, living quarters, apartment, condo, townhouse, residential neighborhood, landscaped yard, decorative elements, ornate details, luxury finishes, upscale design, premium residential, modern home, contemporary house, traditional house, ranch house, colonial house, craftsman house, farmhouse style, metal panels, corrugated metal, metal siding, ribbed metal, industrial metal, sheet metal, bare metal, unpainted metal, rusty, corroded, weathered, deteriorated, old, rundown, dilapidated, poor condition, damaged, dented, scratched, peeling paint, faded, dirty, grimy, stained, abandoned, neglected, cheap looking, industrial warehouse, utility shed, farm building, shipping container, metal box, people, vehicles, cars, trucks, signage, text, logos, open doors, interior visible, wrong color, incorrect color, color mismatch, blurry, low quality, distorted, warped, asymmetrical, cartoon, illustration, sketch`;
+        const negativePrompt = `(((house))), (((residential home))), (((dwelling))), (((living quarters))), (((residential building))), (((home))), (((residential))), (((luxury home))), (((mansion))), (((villa))), (((cottage))), (((residential architecture))), (((house with windows))), (((residential siding))), (((brick house))), (((wood house))), (((stucco house))), (((residential design))), (((apartment))), (((condo))), (((townhouse))), (((residential neighborhood))), (((modern home))), (((contemporary house))), (((traditional house))), (((ranch house))), (((colonial house))), (((craftsman house))), (((farmhouse))), (((single family home))), (((two story house))), (((suburban house))), (((residential property))), (((home exterior))), (((residential facade))), (((house front))), (((residential entrance))), (((front porch))), (((residential windows))), (((house door))), (((residential roofing))), landscaped yard, decorative elements, ornate details, luxury finishes, upscale design, premium residential, metal panels, corrugated metal, metal siding, ribbed metal, industrial metal, sheet metal, bare metal, unpainted metal, rusty, corroded, weathered, deteriorated, old, rundown, dilapidated, poor condition, damaged, dented, scratched, peeling paint, faded, dirty, grimy, stained, abandoned, neglected, cheap looking, industrial warehouse, utility shed, farm building, shipping container, metal box, people, vehicles, cars, trucks, signage, text, logos, open doors, interior visible, wrong color, incorrect color, color mismatch, blurry, low quality, distorted, warped, asymmetrical, cartoon, illustration, sketch`;
 
         logger.info(`[PromptBuilder] Generated PREMIUM GARAGE prompt`);
         logger.info(`  - Material: Premium finish, AI-optimized`);
@@ -243,7 +277,8 @@ DESIGN PRIORITIES:
         if (selectedAddons && Array.isArray(selectedAddons))
         {
             selectedAddons.forEach(addon => {
-                if (addon && addon.label && addon.label.toLowerCase().includes('door')) {
+                const label = (addon?.label || addon?.name || '').toLowerCase();
+                if (label.includes('door')) {
                     addonDoorCount++;
                 }
             });

@@ -106,14 +106,28 @@ export class LeadAgent
                     session.state.userFriendlyParams.height = batchDimensions.height;
                     session.state.hasGarageIntent = true;
 
-                    const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
-                    await session.memory.chatHistory.addAIChatMessage(response);
-
                     const detectedBuildingType = await this.detectBuildingTypeFromInput(input);
                     if (detectedBuildingType) {
                         logger.info(`[LeadAgent] ✅ Auto-detected building_type: ${detectedBuildingType}`);
                         session.state.userFriendlyParams.building_type = detectedBuildingType;
                     }
+
+                    // ✅ Extract ALL other parameters from the initial input
+                    await this.extractAllParametersFromInput(input, session);
+                    
+                    // ✅ Log all extracted parameters to verify they're preserved
+                    logger.info(`[LeadAgent] 📋 ALL EXTRACTED PARAMETERS:`);
+                    logger.info(`  - Width: ${session.state.userFriendlyParams.width}`);
+                    logger.info(`  - Length: ${session.state.userFriendlyParams.length}`);
+                    logger.info(`  - Height: ${session.state.userFriendlyParams.height}`);
+                    logger.info(`  - Roof Type: ${session.state.userFriendlyParams.roof_type || 'NOT SET'}`);
+                    logger.info(`  - State: ${session.state.userFriendlyParams.state_name || 'NOT SET'}`);
+                    logger.info(`  - Gauge: ${session.state.userFriendlyParams.gauge || 'NOT SET'}`);
+                    logger.info(`  - Color: ${session.state.userFriendlyParams.color || 'NOT SET'}`);
+                    logger.info(`  - Addons: ${session.state._extractedAddons?.length || 0} extracted`);
+
+                    const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft wide × ${batchDimensions.length}ft long × ${batchDimensions.height}ft tall`;
+                    await session.memory.chatHistory.addAIChatMessage(response);
 
                     return await this.handlePostGarageIntent(session, sessionId, input);
                 }
@@ -952,32 +966,64 @@ If you cannot confidently detect a building type, return null for detectedType.`
         logger.info(`[LeadAgent] 🎯 POST-GARAGE INTENT: Asking about parameter customization`);
 
         try {
-            const missingFields = LeadAgentHelpers.getMissingFields(session.state.userFriendlyParams);
+            const params = session.state.userFriendlyParams;
+            const missingFields = LeadAgentHelpers.getMissingFields(params);
 
             logger.info(`[LeadAgent] Current params:`, {
-                width: session.state.userFriendlyParams.width,
-                length: session.state.userFriendlyParams.length,
-                height: session.state.userFriendlyParams.height,
-                state_name: session.state.userFriendlyParams.state_name,
-                roof_type: session.state.userFriendlyParams.roof_type,
-                gauge: session.state.userFriendlyParams.gauge,
-                building_type: session.state.userFriendlyParams.building_type,
+                width: params.width,
+                length: params.length,
+                height: params.height,
+                state_name: params.state_name,
+                roof_type: params.roof_type,
+                gauge: params.gauge,
+                building_type: params.building_type,
+                color: params.color,
             });
 
             logger.info(`[LeadAgent] Missing fields:`, missingFields);
 
-            const customizationPrompt = `
-Your garage size is set: ${session.state.userFriendlyParams.width}ft × ${session.state.userFriendlyParams.length}ft × ${session.state.userFriendlyParams.height}ft tall
+            // Build list of what was already provided
+            const providedParams: string[] = [];
+            if (params.state_name) providedParams.push(`✓ State: **${params.state_name}**`);
+            if (params.roof_type) providedParams.push(`✓ Roof type: **${params.roof_type}**`);
+            if (params.gauge) providedParams.push(`✓ Gauge: **${params.gauge}**`);
+            if (params.building_type) providedParams.push(`✓ Building type: **${params.building_type}**`);
+            if (params.color) providedParams.push(`✓ Color: **${params.color}**`);
+            
+            // Check for extracted addons
+            const extractedAddons = session.state._extractedAddons || [];
+            if (extractedAddons.length > 0) {
+                const addonSummary = extractedAddons.map((a: any) => `${a.quantity} ${a.type}(s)`).join(', ');
+                providedParams.push(`✓ Addons: **${addonSummary}**`);
+            }
 
-Would you like to customize anything, or should I generate your quote with defaults?
+            // Build list of what's missing
+            const missingParams: string[] = [];
+            if (!params.state_name) missingParams.push('• State');
+            if (!params.roof_type) missingParams.push('• Roof type');
+            if (!params.gauge) missingParams.push('• Gauge');
+            if (!params.building_type) missingParams.push('• Building type');
+            if (!params.color) missingParams.push('• Color');
 
-You can customize:
-**Optional customizations:**
-• **State**
-• **Roof type**
-• **Gauge**
-• **Building type**
-        `;
+            let customizationPrompt = `✓ Got it! Building dimensions: ${params.width}ft × ${params.length}ft × ${params.height}ft tall\n`;
+
+            if (providedParams.length > 0) {
+                customizationPrompt += `\n**Already set:**\n${providedParams.join('\n')}\n`;
+            }
+
+            if (missingParams.length > 0) {
+                customizationPrompt += `\n**Still needed:**\n${missingParams.join('\n')}\n`;
+                customizationPrompt += `\nWould you like to provide these details, or should I use defaults?`;
+            } else {
+                // ✅ If addons were already provided, skip addon question and go directly to price calculation
+                if (extractedAddons.length > 0) {
+                    logger.info(`[LeadAgent] ✅ All parameters + addons provided, proceeding to price calculation with addons`);
+                    session.state._pendingCustomizationDecision = false;
+                    session.state._skipAddonQuestion = true;
+                    return await this.handleCustomizationDecision(session, sessionId, 'no');
+                }
+                customizationPrompt += `\nAll parameters provided! Ready to generate your quote.`;
+            }
 
             const response = customizationPrompt.trim();
             await session.memory.chatHistory.addAIChatMessage(response);
@@ -1060,24 +1106,43 @@ You can customize:
     }
 
     private async generateQuoteWithDefaults(session: any, sessionId: string): Promise<string> {
-        logger.info(`[LeadAgent] 🎨 Generating quote with DEFAULT parameters - NO ADDONS MENU`);
+        logger.info(`[LeadAgent] 🎨 Generating quote with DEFAULT parameters`);
 
         try {
-            const defaults = {
-                state_name: "Default",
-                roof_type: "Regular",
-                gauge: "16 Gauge",
-                building_type: session.state.userFriendlyParams.building_type || "Garage",
-                color: "White",
-            };
+            // Check if addons were extracted from initial input
+            const extractedAddons = session.state._extractedAddons || [];
+            const hasExtractedAddons = extractedAddons.length > 0;
+            
+            if (hasExtractedAddons) {
+                logger.info(`[LeadAgent] ✅ Found ${extractedAddons.length} extracted addon(s), will process them`);
+            }
 
-            session.state.userFriendlyParams = {
-                ...session.state.userFriendlyParams,
-                ...defaults,
-            };
+            // ✅ Apply defaults only for missing fields (don't override extracted values)
+            const params = session.state.userFriendlyParams;
+            
+            logger.info(`[LeadAgent] 📋 BEFORE applying defaults:`);
+            logger.info(`  - Width: ${params.width}`);
+            logger.info(`  - Length: ${params.length}`);
+            logger.info(`  - Height: ${params.height}`);
+            logger.info(`  - Roof Type: ${params.roof_type || 'NOT SET'}`);
+            logger.info(`  - State: ${params.state_name || 'NOT SET'}`);
+            logger.info(`  - Gauge: ${params.gauge || 'NOT SET'}`);
+            logger.info(`  - Color: ${params.color || 'NOT SET'}`);
+            
+            if (!params.state_name) params.state_name = "Default";
+            if (!params.roof_type) params.roof_type = "Regular";
+            if (!params.gauge) params.gauge = "16 Gauge";
+            if (!params.building_type) params.building_type = "Garage";
+            if (!params.color) params.color = "White";
 
-            logger.info(`[LeadAgent] Applied defaults:`, defaults);
-            logger.info(`[LeadAgent] Final params:`, session.state.userFriendlyParams);
+            logger.info(`[LeadAgent] 📋 AFTER applying defaults:`);
+            logger.info(`  - Width: ${params.width}`);
+            logger.info(`  - Length: ${params.length}`);
+            logger.info(`  - Height: ${params.height}`);
+            logger.info(`  - Roof Type: ${params.roof_type}`);
+            logger.info(`  - State: ${params.state_name}`);
+            logger.info(`  - Gauge: ${params.gauge}`);
+            logger.info(`  - Color: ${params.color}`);
 
             const priceResult = await calculatePriceNode({
                 sessionId,
@@ -1102,17 +1167,47 @@ You can customize:
                 _pendingConfirmation: null,
             });
 
-            this.updateSessionWithPrice(session, priceResult, "White");
+            // ✅ Use the extracted color, not hardcoded "White"
+            const extractedColor = session.state.userFriendlyParams.color || "White";
+            this.updateSessionWithPrice(session, priceResult, extractedColor);
+            
+            logger.info(`[LeadAgent] 🎨 Using color: ${extractedColor}`);
 
-            const finalTotal = this.calculateAndLogFinalPrice(session, []);
+            // ✅ If addons were extracted, convert them to proper addon format and include in visualization
+            let selectedAddons: any[] = [];
+            if (hasExtractedAddons) {
+                logger.info(`[LeadAgent] 🔧 Converting extracted addons to proper format...`);
+                
+                // Map extracted addon types to actual addon IDs and costs
+                const addonMapping: Record<string, { id: string; name: string; baseCost: number }> = {
+                    'window': { id: 'window', name: 'Window', baseCost: 150 },
+                    'door': { id: 'garage_door', name: 'Garage Door', baseCost: 800 },
+                    'walk-in': { id: 'walk_in_door', name: 'Walk-in Door', baseCost: 300 }
+                };
+                
+                selectedAddons = extractedAddons.map((addon: any) => {
+                    const mapping = addonMapping[addon.type];
+                    return {
+                        id: mapping.id,
+                        name: mapping.name,
+                        label: mapping.name,  // ✅ Add label for PromptBuilder
+                        cost: mapping.baseCost * addon.quantity,
+                        quantity: addon.quantity
+                    };
+                });
+                
+                logger.info(`[LeadAgent] ✅ Converted addons:`, selectedAddons);
+            }
+
+            const finalTotal = this.calculateAndLogFinalPrice(session, selectedAddons);
             const visualizationState = await this.createVisualizationState(
                 session,
                 sessionId,
-                [],
+                selectedAddons,
                 finalTotal
             );
 
-            logger.info(`[LeadAgent] 🎨 GENERATING IMAGE with defaults: Final=${finalTotal}`);
+            logger.info(`[LeadAgent] 🎨 GENERATING IMAGE with ${selectedAddons.length} addon(s): Final=${finalTotal}`);
 
             const visualizationResult = await generateGarageVisualizationNode(visualizationState);
 
@@ -1120,8 +1215,11 @@ You can customize:
 
             session.state.priceCalculated = true;
             session.state.finalPrice = finalTotal;
-            session.state.selectedAddons = [];
+            session.state.selectedAddons = selectedAddons;
             session.state.generatedImageUrl = visualizationResult.generatedImageUrl || "";
+            
+            // Clear extracted addons after processing
+            session.state._extractedAddons = [];
 
             return visualizationResult.response;
 
@@ -2135,6 +2233,99 @@ You can customize:
             logger.error(`[LeadAgent] detectBatchDimensionsRegexOnly error:`, error);
             return null;
         }
+    }
+
+    /**
+     * ✅ NEW: Extract ALL parameters from initial comprehensive input
+     * Handles: "create garage width 10 length 10 height 10 roof vertical state texas gauge 14 color red"
+     */
+    private async extractAllParametersFromInput(input: string, session: any): Promise<void> {
+        logger.info(`[LeadAgent] 🔍 Extracting all parameters from: "${input}"`);
+        
+        const inputLower = input.toLowerCase();
+        
+        // Extract roof_type
+        const roofPatterns = [
+            { pattern: /\b(vertical|vert)\b/i, value: 'Vertical' },
+            { pattern: /\b(regular|reg)\b/i, value: 'Regular' },
+            { pattern: /\bbox\b/i, value: 'Box' },
+            { pattern: /\ba-frame\b/i, value: 'A-Frame' }
+        ];
+        
+        for (const { pattern, value } of roofPatterns) {
+            if (pattern.test(inputLower)) {
+                session.state.userFriendlyParams.roof_type = value;
+                logger.info(`[LeadAgent] ✅ Extracted roof_type: ${value}`);
+                break;
+            }
+        }
+        
+        // Extract gauge
+        const gaugePattern = /\b(12|14|16)\s*gauge\b/i;
+        const gaugeMatch = inputLower.match(gaugePattern);
+        if (gaugeMatch) {
+            session.state.userFriendlyParams.gauge = `${gaugeMatch[1]} Gauge`;
+            logger.info(`[LeadAgent] ✅ Extracted gauge: ${gaugeMatch[1]} Gauge`);
+        } else if (/\b14\b/.test(inputLower) && !session.state.userFriendlyParams.gauge) {
+            session.state.userFriendlyParams.gauge = '14 Gauge';
+            logger.info(`[LeadAgent] ✅ Extracted gauge: 14 Gauge (default)`);
+        }
+        
+        // Extract state_name
+        const statePattern = /\bstate\s+([a-z\s]+?)(?:\s+gauge|\s+color|\s+roof|\s+window|\s+door|$)/i;
+        const stateMatch = input.match(statePattern);
+        if (stateMatch) {
+            const stateName = stateMatch[1].trim();
+            const capitalizedState = stateName.split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                .join(' ');
+            session.state.userFriendlyParams.state_name = capitalizedState;
+            logger.info(`[LeadAgent] ✅ Extracted state_name: ${capitalizedState}`);
+        }
+        
+        // Extract color
+        const colorKeywords = ['red', 'blue', 'green', 'white', 'black', 'gray', 'brown', 'tan', 'beige', 'yellow'];
+        for (const color of colorKeywords) {
+            if (new RegExp(`\\b${color}\\b`, 'i').test(inputLower)) {
+                session.state.userFriendlyParams.color = color.charAt(0).toUpperCase() + color.slice(1);
+                logger.info(`[LeadAgent] ✅ Extracted color: ${color}`);
+                break;
+            }
+        }
+        
+        // Extract addons (windows, doors, walk-in doors)
+        const addonPatterns = [
+            { pattern: /(\d+)\s*(?:window|windows|win)/i, type: 'window' },
+            { pattern: /(\d+)\s*(?:door|doors|garage door|garage doors)/i, type: 'door' },
+            { pattern: /(\d+)\s*(?:walk-in|walk in|walkin|walk-in door|walk in door)/i, type: 'walk-in' }
+        ];
+        
+        const extractedAddons: Array<{ type: string; quantity: number }> = [];
+        
+        for (const { pattern, type } of addonPatterns) {
+            const match = input.match(pattern);
+            if (match) {
+                const quantity = parseInt(match[1], 10);
+                if (quantity > 0 && quantity <= 20) {
+                    extractedAddons.push({ type, quantity });
+                    logger.info(`[LeadAgent] ✅ Extracted addon: ${quantity} ${type}(s)`);
+                }
+            }
+        }
+        
+        // Store extracted addons in session for later use
+        if (extractedAddons.length > 0) {
+            session.state._extractedAddons = extractedAddons;
+            logger.info(`[LeadAgent] ✅ Stored ${extractedAddons.length} addon(s) for later processing`);
+        }
+        
+        logger.info(`[LeadAgent] ✅ Parameter extraction complete. Current params:`, {
+            roof_type: session.state.userFriendlyParams.roof_type,
+            gauge: session.state.userFriendlyParams.gauge,
+            state_name: session.state.userFriendlyParams.state_name,
+            color: session.state.userFriendlyParams.color,
+            extractedAddons: extractedAddons.length
+        });
     }
 
     /**
