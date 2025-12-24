@@ -398,17 +398,11 @@ else:
 # Initialize session state
 if "user_session_id" not in st.session_state:
     st.session_state.user_session_id = session_id
-    # Load from database
     messages, backend_session_id = load_conversation(session_id)
     st.session_state.messages = messages if messages else [
         {"role": "assistant", "content": random.choice(INITIAL_GREETINGS)}
     ]
     st.session_state.backend_session_id = backend_session_id
-else:
-    if not st.session_state.messages:
-        st.session_state.messages = [
-            {"role": "assistant", "content": random.choice(INITIAL_GREETINGS)}
-        ]
 
 if "show_share_popup" not in st.session_state:
     st.session_state.show_share_popup = False
@@ -418,6 +412,9 @@ if "popup_triggered" not in st.session_state:
 
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
+
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
 
 st.title("🏗️ Garage Builder Chat")
 
@@ -496,21 +493,26 @@ if st.session_state.show_share_popup and st.session_state.get("popup_triggered",
     share_popup()
     st.session_state.popup_triggered = False
 
-# Processing indicator
-if st.session_state.is_processing:
-    with st.chat_message("assistant"):
-        st.markdown("🤖 *Please wait, processing your request...*")
-
-# Chat input
+# Chat input - disabled when processing
 if prompt := st.chat_input("Type your question…", disabled=st.session_state.is_processing):
+    st.session_state.pending_prompt = prompt
     st.session_state.is_processing = True
+    st.rerun()
 
+# Process pending message
+if st.session_state.is_processing and st.session_state.pending_prompt:
+    prompt = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
+
+    # Add user message to history
     st.session_state.messages.append({"role": "user", "content": prompt})
     save_conversation(st.session_state.user_session_id, st.session_state.messages, st.session_state.backend_session_id)
 
+    # Display user message
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Get AI response
     with st.chat_message("assistant"):
         placeholder = st.empty()
         reply = None
@@ -548,7 +550,7 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
                 if attempt < MAX_RETRIES:
                     continue
                 reply = f"⚠️ Request timed out after {REQUEST_TIMEOUT}s"
-            except httpx.ConnectError as exc:
+            except httpx.ConnectError:
                 reply = f"⚠️ Cannot connect to backend at {BACKEND_URL}"
                 break
             except Exception as exc:
@@ -574,5 +576,5 @@ if prompt := st.chat_input("Type your question…", disabled=st.session_state.is
             st.session_state.messages.append({"role": "assistant", "content": reply})
             save_conversation(st.session_state.user_session_id, st.session_state.messages, st.session_state.backend_session_id)
 
-        st.session_state.is_processing = False
-        st.rerun()
+    st.session_state.is_processing = False
+    st.rerun()
