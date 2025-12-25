@@ -55,7 +55,7 @@ export class AskForFieldNode implements IAskForFieldNode
 Examples: "1", "vertical", "box"`,
             },
             gauge: {
-                template: `{params}\n\nWhat **gauge**?\n(e.g., 14GA, 16GA, 18GA, 20GA)`,
+                template: `{params}\n\nWhat **gauge**?\n(e.g., 14GA, 16GA, 18GA)`,
             },
             building_type: {
                 template: this.choiceService.getPrompt("building_type"),

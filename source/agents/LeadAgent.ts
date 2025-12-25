@@ -717,6 +717,20 @@ export class LeadAgent
                     return `Error: No colors available. Please try again.`;
                 }
 
+                // ✅ SPECIAL HANDLING: Check for "any" or "skip" keywords to default to White
+                const colorInputLower = input.toLowerCase().trim();
+                if (colorInputLower === 'any' || colorInputLower === 'skip' || colorInputLower === 'default' || colorInputLower === 'no preference') {
+                    logger.info(`[LeadAgent] ✅ User selected default color keyword: "${input}" → White`);
+                    const whiteColor = allColors.find(c => c.name.toLowerCase() === 'white');
+                    if (whiteColor) {
+                        return await this.applyColorAndCalculatePrice(session, sessionId, whiteColor);
+                    } else {
+                        logger.warn(`[LeadAgent] White color not found in database, using first neutral`);
+                        const firstNeutral = allColors.find(c => c.cost === 0) || allColors[0];
+                        return await this.applyColorAndCalculatePrice(session, sessionId, firstNeutral);
+                    }
+                }
+
                 const colorMatch = await fuzzyChoiceMatcher.matchColor(input, allColors);
                 if (colorMatch.matched && colorMatch.color) {
                     const fullColorOption = allColors.find(c => c.name.toLowerCase() === colorMatch.color!.name.toLowerCase());
@@ -1045,6 +1059,22 @@ If you cannot confidently detect a building type, return null for detectedType.`
         try {
             const userInputLower = input.toLowerCase().trim();
 
+            // ✅ FIRST: Check if user is providing dimension updates (e.g., "lets make 10x10x12")
+            const batchDimensions = await this.detectBatchDimensionsRegexOnly(input);
+            if (batchDimensions && batchDimensions.width && batchDimensions.length && batchDimensions.height) {
+                logger.info(`[LeadAgent] ✅ DIMENSION UPDATE during customization: ${batchDimensions.width}×${batchDimensions.length}×${batchDimensions.height}`);
+                
+                session.state.userFriendlyParams.width = batchDimensions.width;
+                session.state.userFriendlyParams.length = batchDimensions.length;
+                session.state.userFriendlyParams.height = batchDimensions.height;
+                
+                // ✅ Update dimensions and re-ask customization question (don't proceed to next field yet)
+                const response = `✓ Got it! Building dimensions: ${batchDimensions.width}ft × ${batchDimensions.length}ft × ${batchDimensions.height}ft tall\n\nAlready set: ✓ Building type: ${session.state.userFriendlyParams.building_type || 'Garage'}\n\nStill needed:\n• State\n• Roof type\n• Gauge\n• Color\n\nWould you like to provide these details, or should I use defaults?`;
+                await session.memory.chatHistory.addAIChatMessage(response);
+                
+                return response;
+            }
+
             const wantCustomizeKeywords = /^(yes|customize|custom|ok|sure|absolutely|definitely|let's|let me|please)$/i;
             const skipKeywords = /^(no|skip|nope|nah|don't|dont|pass|later)$/i;
 
@@ -1354,6 +1384,17 @@ If you cannot confidently detect a building type, return null for detectedType.`
             isDimensionField,
             numValue,
         });
+
+        // ✅ CRITICAL: If we're actively collecting a field, ALWAYS skip garage detection
+        if (currentField) {
+            logger.info(`[LeadAgent] Context: ACTIVE FIELD (${currentField}) - SKIPPING garage detection`);
+            return {
+                isSimpleNumber,
+                isChoiceField,
+                shouldSkipGarageDetection: true,
+                inputType: isChoiceField ? 'choice_selection' : 'dimension',
+            };
+        }
 
         if (isChoiceField && isSimpleNumber) {
             logger.info(`[LeadAgent] Context: CHOICE FIELD - treating "${trimmedInput}" as position selection`);
@@ -1928,6 +1969,20 @@ If you cannot confidently detect a building type, return null for detectedType.`
             }
 
             logger.info(`[LeadAgent] Attempting to match user input: "${input}"`);
+
+            // ✅ SPECIAL HANDLING: Check for "any" or "skip" keywords to default to White
+            const inputLower = input.toLowerCase().trim();
+            if (inputLower === 'any' || inputLower === 'skip' || inputLower === 'default' || inputLower === 'no preference') {
+                logger.info(`[LeadAgent] ✅ User selected default color keyword: "${input}" → White`);
+                const whiteColor = displayColors.find(c => c.name.toLowerCase() === 'white');
+                if (whiteColor) {
+                    return await this.applyColorAndCalculatePrice(session, sessionId, whiteColor);
+                } else {
+                    logger.warn(`[LeadAgent] White color not found in database, using first neutral`);
+                    const firstNeutral = displayColors.find(c => c.cost === 0) || displayColors[0];
+                    return await this.applyColorAndCalculatePrice(session, sessionId, firstNeutral);
+                }
+            }
 
             const displayOrder = displayColors.map(c => c.name);
 

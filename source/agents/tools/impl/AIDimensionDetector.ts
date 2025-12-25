@@ -35,11 +35,10 @@ export class AIDimensionDetector
     {
         logger.info(`[AIDimensionDetector] Context-aware check - Expected field: ${expectedField}`);
         logger.info(`[AIDimensionDetector] User input: "${userInput}"`);
-        
-        // ✅ CRITICAL: Reject ambiguous single numbers in initial flow (no expected field)
-        const trimmedInput = userInput.trim();
-        const isSingleNumber = /^\d+$/.test(trimmedInput);
-        
+
+        const trimmedInput: string = userInput.trim();
+        const isSingleNumber: boolean = /^\d+$/.test(trimmedInput);
+
         if (!expectedField && isSingleNumber) {
             logger.info(`[AIDimensionDetector] ❌ Rejected ambiguous single number "${trimmedInput}" in initial flow`);
             logger.info(`[AIDimensionDetector] Single numbers without dimension keywords are ambiguous - could be width, length, height, or garage type`);
@@ -355,18 +354,17 @@ ONLY JSON:`;
         }
 
         logger.info(`[AIDimensionDetector] Batch extraction from: "${userInput}"`);
-        
-        // ✅ Pre-validation: Check if input contains any dimension-related keywords or numbers
+
         const hasEnglishDimensionKeywords = /\b(width|length|height|w|l|h|widt|lengt|heigt|wide|long|tall|deep|feet|ft)\b/i.test(userInput);
         const hasXFormat = /\d+\s*[xX×]\s*\d+\s*[xX×]\s*\d+/.test(userInput);
         const hasNumbers = /\d+/.test(userInput);
-        
+
         if (!hasEnglishDimensionKeywords && !hasXFormat) {
             logger.info(`[AIDimensionDetector] ❌ Input rejected - no dimension keywords or X format found`);
             logger.info(`[AIDimensionDetector] Input appears to be gibberish or non-English: "${userInput}"`);
             return null;
         }
-        
+
         if (!hasNumbers) {
             logger.info(`[AIDimensionDetector] ❌ Input rejected - no numbers found`);
             return null;
@@ -454,7 +452,9 @@ ONLY JSON ARRAY, nothing else:`;
             }
 
             return parsed;
-        } catch (error) {
+        }
+        catch (error)
+        {
             logger.error(`[AIDimensionDetector] Batch detection error:`, error);
             return null;
         }
